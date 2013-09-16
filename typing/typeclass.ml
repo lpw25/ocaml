@@ -1357,7 +1357,7 @@ let class_infos define_class kind
         (fun name (mut, vr, ty) l -> if vr = Virtual then name :: l else l)
         sign.cty_vars [] in
     if mets <> []  || vals <> [] then
-      raise(Error(cl.pci_loc, env, Virtual_class(true, false, mets, vals)));
+      raise(Error(cl.pci_loc, env, Virtual_class(define_class, false, mets, vals)));
   end;
 
   (* Misc. *)
