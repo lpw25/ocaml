@@ -1678,23 +1678,29 @@ let report_error env ppf = function
            fprintf ppf "The expression \"new %s\" has type" c)
         (function ppf ->
            fprintf ppf "but is used with type")
-  | Virtual_class (cl, final, mets, vals) ->
+  | Virtual_class (cl, imm, mets, vals) ->
       let print_mets ppf mets =
         List.iter (function met -> fprintf ppf "@ %s" met) mets in
-      let cl_mark = if cl then "" else " type" in
       let missings =
         match mets, vals with
           [], _ -> "variables"
         | _, [] -> "methods"
-        | _ -> "methods and variables" in
-      let message =
-        if final
-        then "cannot be subclassed, and so cannot have virtual " ^ missings
-        else "should be virtual" in
+        | _ -> "methods and variables" 
+      in
+      let print_msg ppf = 
+        if imm then
+          fprintf ppf
+            "This object has virtual %s"
+            missings
+        else
+          let cl_mark = if cl then "" else " type" in
+            fprintf ppf
+              "This class%s should be virtual"
+              cl_mark
+      in
       fprintf ppf
-        "@[This class%s %s.@ \
-           @[<2>The following %s are undefined :%a@]@]"
-          cl_mark message missings print_mets (mets @ vals)
+        "@[%t.@ @[<2>The following %s are undefined :%a@]@]"
+        print_msg missings print_mets (mets @ vals)
   | Parameter_arity_mismatch(lid, expected, provided) ->
       fprintf ppf
         "@[The class constructor %a@ expects %i type argument(s),@ \
