@@ -31,6 +31,7 @@ OCaml Releases:
 
 * 4.00.0: OCaml version 4.00.0
 * 4.00.1: OCaml version 4.00.1
+* 4.01.0: OCaml version 4.01.0
 
 Project Releases:
 
