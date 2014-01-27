@@ -606,6 +606,7 @@ and module_type_declaration =
     {
      pmtd_name: string loc;
      pmtd_type: module_type option;
+     pmtd_private: private_flag;
      pmtd_attributes: attributes; (* ... [@@id1] [@@id2] *)
     }
 (* S = MT

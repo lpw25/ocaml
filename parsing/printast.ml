@@ -616,6 +616,7 @@ and signature_item i ppf x =
   | Psig_modtype x ->
       line i ppf "Psig_modtype %a\n" fmt_string_loc x.pmtd_name;
       attributes i ppf x.pmtd_attributes;
+      line i ppf "%a\n" fmt_private_flag x.pmtd_private;
       modtype_declaration i ppf x.pmtd_type
   | Psig_open (ovf, li, attrs) ->
       line i ppf "Psig_open %a %a\n"
@@ -725,6 +726,7 @@ and structure_item i ppf x =
   | Pstr_modtype x ->
       line i ppf "Pstr_modtype %a\n" fmt_string_loc x.pmtd_name;
       attributes i ppf x.pmtd_attributes;
+      line i ppf "%a\n" fmt_private_flag x.pmtd_private;
       modtype_declaration i ppf x.pmtd_type
   | Pstr_open (ovf, li, attrs) ->
       line i ppf "Pstr_open %a %a\n"

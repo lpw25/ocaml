@@ -495,6 +495,7 @@ module Module :
           mt_name : Name.t ; (** Complete name of the module type. *)
           mutable mt_info : info option ; (** Information found in the optional associated comment. *)
           mutable mt_type : Types.module_type option ; (** [None] means that the module type is abstract. *)
+          mt_private : bool ;
           mt_is_interface : bool ; (** [true] for modules read from interface files. *)
           mt_file : string ; (** The file the module type is defined in. *)
           mutable mt_kind : module_type_kind option ;

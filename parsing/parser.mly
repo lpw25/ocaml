@@ -625,8 +625,8 @@ structure_item:
       { mkstr(Pstr_recmodule(List.rev $3)) }
   | MODULE TYPE ident post_item_attributes
       { mkstr(Pstr_modtype (Mtd.mk (mkrhs $3 3) ~attrs:$4)) }
-  | MODULE TYPE ident EQUAL module_type post_item_attributes
-      { mkstr(Pstr_modtype (Mtd.mk (mkrhs $3 3) ~typ:$5 ~attrs:$6)) }
+  | MODULE TYPE ident EQUAL private_flag module_type post_item_attributes
+      { mkstr(Pstr_modtype (Mtd.mk (mkrhs $3 3) ~typ:$6 ~priv:$5 ~attrs:$7)) }
   | OPEN override_flag mod_longident post_item_attributes
       { mkstr(Pstr_open ($2, mkrhs $3 3, $4)) }
   | CLASS class_declarations
@@ -722,8 +722,8 @@ signature_item:
       { mksig(Psig_recmodule (List.rev $3)) }
   | MODULE TYPE ident post_item_attributes
       { mksig(Psig_modtype (Mtd.mk (mkrhs $3 3) ~attrs:$4)) }
-  | MODULE TYPE ident EQUAL module_type post_item_attributes
-      { mksig(Psig_modtype (Mtd.mk (mkrhs $3 3) ~typ:$5 ~attrs:$6)) }
+  | MODULE TYPE ident EQUAL private_flag module_type post_item_attributes
+      { mksig(Psig_modtype (Mtd.mk (mkrhs $3 3) ~typ:$6 ~priv:$5 ~attrs:$7)) }
   | OPEN override_flag mod_longident post_item_attributes
       { mksig(Psig_open ($2, mkrhs $3 3, $4)) }
   | INCLUDE module_type post_item_attributes %prec below_WITH

@@ -912,14 +912,14 @@ class printer  ()= object(self:'self)
     | Psig_include (mt, _attrs) ->
         pp f "@[<hov2>include@ %a@]"
           self#module_type  mt
-    | Psig_modtype {pmtd_name=s; pmtd_type=md} ->
+    | Psig_modtype {pmtd_name=s; pmtd_type=md; pmtd_private=priv} ->
         pp f "@[<hov2>module@ type@ %s%a@]"
           s.txt
           (fun f md -> match md with
           | None -> ()
           | Some mt ->
               pp_print_space f () ;
-              pp f "@ =@ %a"  self#module_type mt
+              pp f "@ =@ %a%a" self#private_flag priv self#module_type mt
           ) md
     | Psig_class_type (l) ->
         self#class_type_declaration_list f l ;
@@ -1056,14 +1056,14 @@ class printer  ()= object(self:'self)
             )) x.pmb_expr
     | Pstr_open (ovf, li, _attrs) ->
         pp f "@[<2>open%s@;%a@]" (override ovf) self#longident_loc li;
-    | Pstr_modtype {pmtd_name=s; pmtd_type=md} ->
+    | Pstr_modtype {pmtd_name=s; pmtd_type=md; pmtd_private=priv} ->
         pp f "@[<hov2>module@ type@ %s%a@]"
           s.txt
           (fun f md -> match md with
           | None -> ()
           | Some mt ->
               pp_print_space f () ;
-              pp f "@ =@ %a"  self#module_type mt
+              pp f "@ =@ %a%a" self#private_flag priv self#module_type mt
           ) md
     | Pstr_class l ->
         let class_declaration f  (* for the second will be changed to and FIXME*)

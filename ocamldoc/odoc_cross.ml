@@ -343,7 +343,7 @@ let rec associate_in_module module_list (acc_b_modif, acc_incomplete_top_module_
 
     | Module_with (tk, _) ->
         associate_in_module_type module_list (acc_b, acc_inc, acc_names)
-          { mt_name = "" ; mt_info = None ; mt_type = None ;
+          { mt_name = "" ; mt_info = None ; mt_type = None ; mt_private = false;
             mt_is_interface = false ; mt_file = ""; mt_kind = Some tk ;
             mt_loc = Odoc_types.dummy_loc }
 
@@ -354,7 +354,7 @@ let rec associate_in_module module_list (acc_b_modif, acc_incomplete_top_module_
     | Module_constraint (k, tk) ->
         let (acc_b2, acc_inc2, acc_names2) = iter_kind (acc_b, acc_inc, acc_names) k in
         associate_in_module_type module_list (acc_b2, acc_inc2, acc_names2)
-          { mt_name = "" ; mt_info = None ; mt_type = None ;
+          { mt_name = "" ; mt_info = None ; mt_type = None ; mt_private = false ;
             mt_is_interface = false ; mt_file = "" ; mt_kind = Some tk ;
             mt_loc = Odoc_types.dummy_loc }
 

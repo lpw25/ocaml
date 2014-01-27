@@ -1397,7 +1397,7 @@ module Analyser =
           let eles = f ~first: true loc.Location.loc_start.Lexing.pos_cnum mods in
           (0, new_env, eles)
 
-      | Parsetree.Pstr_modtype {Parsetree.pmtd_name=name; pmtd_type=modtype} ->
+      | Parsetree.Pstr_modtype {Parsetree.pmtd_name=name; pmtd_type=modtype; pmtd_private=priv} ->
           let complete_name = Name.concat current_module_name name.txt in
           let tt_module_type =
             try Typedtree_search.search_module_type table name.txt
@@ -1417,6 +1417,7 @@ module Analyser =
               mt_name = complete_name ;
               mt_info = comment_opt ;
               mt_type = sig_mtype ;
+              mt_private = priv = Asttypes.Private ;
               mt_is_interface = false ;
               mt_file = !file_name ;
               mt_kind = kind ;

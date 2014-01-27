@@ -467,10 +467,11 @@ let default_mapper =
       );
 
     module_type_declaration =
-      (fun this {pmtd_name; pmtd_type; pmtd_attributes} ->
+      (fun this {pmtd_name; pmtd_type; pmtd_private; pmtd_attributes} ->
          {
            pmtd_name = map_loc this pmtd_name;
-           pmtd_type =map_opt (this.module_type this) pmtd_type;
+           pmtd_type = map_opt (this.module_type this) pmtd_type;
+           pmtd_private = pmtd_private;
            pmtd_attributes = this.attributes this pmtd_attributes;
          }
       );

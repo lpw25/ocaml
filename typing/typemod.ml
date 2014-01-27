@@ -670,7 +670,7 @@ and transl_signature env sg =
   sg
 
 and transl_modtype_decl modtype_names env loc
-    {pmtd_name; pmtd_type; pmtd_attributes} =
+    {pmtd_name; pmtd_type; pmtd_private; pmtd_attributes} =
   check "module type" loc modtype_names pmtd_name.txt;
   let tmty = Misc.may_map (transl_modtype env) pmtd_type in
   let decl =
@@ -685,6 +685,7 @@ and transl_modtype_decl modtype_names env loc
      mtd_id=id;
      mtd_name=pmtd_name;
      mtd_type=tmty;
+     mtd_private=pmtd_private;
      mtd_attributes=pmtd_attributes;
     }
   in

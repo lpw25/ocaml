@@ -598,6 +598,7 @@ and signature_item i ppf x =
   | Tsig_modtype x ->
       line i ppf "Psig_modtype \"%a\"\n" fmt_ident x.mtd_id;
       attributes i ppf x.mtd_attributes;
+      line i ppf "%a\n" fmt_private_flag x.mtd_private;
       modtype_declaration i ppf x.mtd_type
   | Tsig_open (ovf, li,_,attrs) ->
       line i ppf "Psig_open %a %a\n" fmt_override_flag ovf  fmt_path li;
@@ -704,6 +705,7 @@ and structure_item i ppf x =
   | Tstr_modtype x ->
       line i ppf "Pstr_modtype \"%a\"\n" fmt_ident x.mtd_id;
       attributes i ppf x.mtd_attributes;
+      line i ppf "%a\n" fmt_private_flag x.mtd_private;
       modtype_declaration i ppf x.mtd_type
   | Tstr_open (ovf, li, _, attrs) ->
       line i ppf "Pstr_open %a %a\n" fmt_override_flag ovf fmt_path li;

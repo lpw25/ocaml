@@ -825,7 +825,7 @@ module Analyser =
             let (maybe_more, mods) = f ~first: true 0 pos_start_ele decls in
             (maybe_more, new_env, mods)
 
-        | Parsetree.Psig_modtype {Parsetree.pmtd_name=name; pmtd_type=pmodtype_decl} ->
+        | Parsetree.Psig_modtype {Parsetree.pmtd_name=name; pmtd_type=pmodtype_decl; pmtd_private=priv} ->
             let complete_name = Name.concat current_module_name name.txt in
             let sig_mtype =
               try Signature_search.search_module_type table name.txt
@@ -846,6 +846,7 @@ module Analyser =
                 mt_name = complete_name ;
                 mt_info = comment_opt ;
                 mt_type = sig_mtype ;
+                mt_private = priv = Asttypes.Private;
                 mt_is_interface = true ;
                 mt_file = !file_name ;
                 mt_kind = module_type_kind ;

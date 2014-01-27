@@ -703,6 +703,7 @@ class man =
       bs b ".I module type ";
       bs b (Name.simple mt.mt_name);
       bs b " = ";
+      if mt.mt_private then bs b "private ";
       (match mt.mt_type with
         None -> ()
       | Some t ->
@@ -888,6 +889,7 @@ class man =
         bs b (Odoc_messages.module_type^"\n");
         bs b (".BI \""^(Name.simple mt.mt_name)^"\"\n");
         bs b " = ";
+        if mt.mt_private then bs b "private ";
         (
          match mt.mt_type with
            None -> ()

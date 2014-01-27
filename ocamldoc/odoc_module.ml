@@ -95,6 +95,7 @@ and t_module_type = {
     mt_name : Name.t ;
     mutable mt_info : Odoc_types.info option ;
     mutable mt_type : Types.module_type option ; (** [None] = abstract module type *)
+    mt_private : bool ;
     mt_is_interface : bool ; (** true for modules read from interface files *)
     mt_file : string ; (** the file the module type is defined in. *)
     mutable mt_kind : module_type_kind option ; (** [None] = abstract module type if mt_type = None ;
@@ -227,7 +228,7 @@ let rec module_elements ?(trans=true) m =
     | Module_with (tk,_) ->
         print_DEBUG "Odoc_module.module_element: Module_with";
         module_type_elements ~trans: trans
-          { mt_name = "" ; mt_info = None ; mt_type = None ;
+          { mt_name = "" ; mt_info = None ; mt_type = None ; mt_private = false ;
             mt_is_interface = false ; mt_file = "" ; mt_kind = Some tk ;
             mt_loc = Odoc_types.dummy_loc ;
           }
@@ -249,7 +250,7 @@ let rec module_elements ?(trans=true) m =
     | Module_unpack _ -> []
 (*
    module_type_elements ~trans: trans
-   { mt_name = "" ; mt_info = None ; mt_type = None ;
+   { mt_name = "" ; mt_info = None ; mt_type = None ; mt_private = false ;
    mt_is_interface = false ; mt_file = "" ; mt_kind = Some tk ;
    mt_loc = Odoc_types.dummy_loc }
 *)
@@ -399,7 +400,7 @@ and module_parameters ?(trans=true) m =
           []
     | Module_constraint (k, tk) ->
         module_type_parameters ~trans: trans
-          { mt_name = "" ; mt_info = None ; mt_type = None ;
+          { mt_name = "" ; mt_info = None ; mt_type = None ; mt_private = false ;
             mt_is_interface = false ; mt_file = "" ; mt_kind = Some tk ;
             mt_loc = Odoc_types.dummy_loc }
     | Module_struct _

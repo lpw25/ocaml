@@ -297,6 +297,7 @@ and module_type_declaration =
      mtd_id: Ident.t;
      mtd_name: string loc;
      mtd_type: module_type option;
+     mtd_private: private_flag;
      mtd_attributes: attribute list;
     }
 

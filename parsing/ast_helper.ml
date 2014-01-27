@@ -273,10 +273,11 @@ module Md = struct
 end
 
 module Mtd = struct
-  let mk ?(attrs = []) ?typ name =
+  let mk ?(attrs = []) ?typ ?(priv = Public) name =
     {
      pmtd_name = name;
      pmtd_type = typ;
+     pmtd_private = priv;
      pmtd_attributes = attrs;
     }
 end

@@ -219,7 +219,7 @@ module Md:
 (** Module type declarations *)
 module Mtd:
   sig
-    val mk: ?attrs:attrs -> ?typ:module_type -> str -> module_type_declaration
+    val mk: ?attrs:attrs -> ?typ:module_type -> ?priv:private_flag -> str -> module_type_declaration
   end
 
 (** Module bindings *)

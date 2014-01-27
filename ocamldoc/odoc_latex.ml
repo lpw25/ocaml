@@ -886,6 +886,7 @@ class latex =
        match mt.mt_type, mt.mt_kind with
        | Some mtyp, Some kind ->
            self#latex_of_text fmt [ Code " = " ];
+           if mt.mt_private then self#latex_of_text fmt [ Code "private " ];
            self#latex_of_text fmt [ Latex "\\end{ocamldoccode}\n" ];
            self#latex_for_module_type_label fmt mt;
            self#latex_for_module_type_index fmt mt;
