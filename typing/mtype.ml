@@ -140,10 +140,13 @@ let nondep_supertype env mid mty =
           :: rem'
       | Sig_modtype(id, d) ->
           begin try
-            Sig_modtype(id, nondep_modtype_decl env d) :: rem'
+            Sig_modtype(id, nondep_modtype_decl env va d) :: rem'
           with Not_found ->
             match va with
-              Co -> Sig_modtype(id, {mtd_type=None; mtd_attributes=[]}) :: rem'
+              Co -> Sig_modtype(id, { mtd_type=None; 
+                                      mtd_attributes=[]; 
+                                      mtd_private=Public}) 
+                    :: rem'
             | _  -> raise Not_found
           end
       | Sig_class(id, d, rs) ->
@@ -153,8 +156,13 @@ let nondep_supertype env mid mty =
           Sig_class_type(id, Ctype.nondep_cltype_declaration env mid d, rs)
           :: rem'
 
-  and nondep_modtype_decl env mtd =
-    {mtd with mtd_type = Misc.may_map (nondep_mty env Strict) mtd.mtd_type}
+  and nondep_modtype_decl env va mtd =
+    let va = 
+      match mtd.mtd_private with 
+        Public -> Strict 
+      | Private -> va
+    in
+      {mtd with mtd_type = Misc.may_map (nondep_mty env va) mtd.mtd_type}
 
   in
     nondep_mty env Co mty

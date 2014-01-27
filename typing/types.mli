@@ -274,6 +274,7 @@ and module_declaration =
 and modtype_declaration =
   {
     mtd_type: module_type option;  (* None: abstract *)
+    mtd_private: private_flag;
     mtd_attributes: Parsetree.attributes;
   }
 

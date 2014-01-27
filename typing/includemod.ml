@@ -36,6 +36,7 @@ type symptom =
       Ctype.class_match_failure list
   | Unbound_modtype_path of Path.t
   | Unbound_module_path of Path.t
+  | Modtype_privacy
 
 type pos =
     Module of Ident.t | Modtype of Ident.t | Arg of Ident.t | Body of Ident.t
@@ -348,29 +349,47 @@ and signature_components env cxt subst = function
   | _ ->
       assert false
 
+(* Inclusion between "private" annotations *)
+
+and check_private_flags env cxt mtd1 mtd2 =
+  match mtd1.mtd_private, mtd2.mtd_private with
+  | Asttypes.Private, Asttypes.Public when mtd2.mtd_type <> None -> 
+      raise (Error [cxt, env, Modtype_privacy])
+  | _, _ -> ()
+
 (* Inclusion between module type specifications *)
 
 and modtype_infos env cxt subst id info1 info2 =
   let info2 = Subst.modtype_declaration subst info2 in
   let cxt' = Modtype id :: cxt in
   try
+    check_private_flags env cxt info1 info2;
     match (info1.mtd_type, info2.mtd_type) with
       (None, None) -> ()
     | (Some mty1, None) -> ()
     | (Some mty1, Some mty2) ->
-        check_modtype_equiv env cxt' mty1 mty2
+        check_modtype_equiv env cxt' mty1 mty2 info2.mtd_private
     | (None, Some mty2) ->
-        check_modtype_equiv env cxt' (Mty_ident(Pident id)) mty2
+        check_modtype_equiv env cxt' 
+          (Mty_ident(Pident id)) mty2 info2.mtd_private
   with Error reasons ->
     raise(Error((cxt, env, Modtype_infos(id, info1, info2)) :: reasons))
 
-and check_modtype_equiv env cxt mty1 mty2 =
-  match
-    (modtypes env cxt Subst.identity mty1 mty2,
-     modtypes env cxt Subst.identity mty2 mty1)
-  with
-    (Tcoerce_none, Tcoerce_none) -> ()
-  | (_, _) -> raise(Error [cxt, env, Modtype_permutation])
+and check_modtype_equiv env cxt mty1 mty2 priv2 =
+  match priv2 with 
+    Asttypes.Public -> begin
+      match
+        (modtypes env cxt Subst.identity mty1 mty2,
+         modtypes env cxt Subst.identity mty2 mty1)
+      with
+        (Tcoerce_none, Tcoerce_none) -> ()
+      | (_, _) -> raise(Error [cxt, env, Modtype_permutation])
+    end
+  | Asttypes.Private -> begin
+      match modtypes env cxt Subst.identity mty1 mty2 with
+        Tcoerce_none -> ()
+      | _ -> raise(Error [cxt, env, Modtype_permutation])
+    end
 
 (* Simplified inclusion check between module types (for Env) *)
 
@@ -473,6 +492,8 @@ let include_err ppf = function
       fprintf ppf "Unbound module type %a" Printtyp.path path
   | Unbound_module_path path ->
       fprintf ppf "Unbound module %a" Printtyp.path path
+  | Modtype_privacy ->
+      fprintf ppf "Private module type would be revealed"
 
 let rec context ppf = function
     Module id :: rem ->

@@ -366,6 +366,7 @@ and module_declaration s decl =
 and modtype_declaration s decl  =
   {
     mtd_type = may_map (modtype s) decl.mtd_type;
+    mtd_private = decl.mtd_private;
     mtd_attributes = attrs s decl.mtd_attributes;
   }
 

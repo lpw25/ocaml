@@ -1158,7 +1158,11 @@ and tree_of_modtype_declaration id decl =
   let mty =
     match decl.mtd_type with
     | None -> Omty_abstract
-    | Some mty -> tree_of_modtype mty
+    | Some mty -> 
+        let mty = tree_of_modtype mty in
+          match decl.mtd_private with
+            Public -> mty
+          | Private -> Omty_private mty
   in
   Osig_modtype (Ident.name id, mty)
 

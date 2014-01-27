@@ -387,6 +387,7 @@ and approx_sig env ssg =
 and approx_modtype_info env sinfo =
   {
    mtd_type = may_map (approx_modtype env) sinfo.pmtd_type;
+   mtd_private = sinfo.pmtd_private;
    mtd_attributes = sinfo.pmtd_attributes;
   }
 
@@ -676,6 +677,7 @@ and transl_modtype_decl modtype_names env loc
   let decl =
     {
      mtd_type=may_map (fun t -> t.mty_type) tmty;
+     mtd_private = pmtd_private;
      mtd_attributes=pmtd_attributes;
     }
   in
