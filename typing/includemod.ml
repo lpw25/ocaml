@@ -160,6 +160,85 @@ let simplify_structure_coercion cc id_pos_list =
   then Tcoerce_none
   else Tcoerce_structure (cc, id_pos_list)
 
+(* Explain why a coercion is needed, for error messages. *)
+
+let rec explain_module_coercion env cxt subst mty1 mty2 = function
+    Tcoerce_none -> ()
+  | Tcoerce_primitive _ -> assert false
+  | Tcoerce_alias _ -> 
+      raise (Error [cxt, env, Module_types(Subst.modtype subst mty2, mty1)])
+  | Tcoerce_functor(argcc, rescc) -> begin
+      match (Mtype.scrape env mty1), (Mtype.scrape env mty2) with
+      | Mty_functor(param1, None, res1), Mty_functor(param2, None, res2) ->
+          explain_module_coercion env (Body param1::cxt) subst res1 res2 rescc
+      | Mty_functor(param1, Some arg1, res1), Mty_functor(param2, Some arg2, res2) ->
+          let arg2' = Subst.modtype subst arg2 in
+            explain_module_coercion env (Arg param1::cxt) Subst.identity 
+              arg2' arg1 argcc;
+            explain_module_coercion 
+              (Env.add_module param1 arg2' env) (Body param1::cxt)
+              (Subst.add_module param2 (Pident param1) subst) 
+              res1 res2 rescc
+      | _, _ -> assert false
+      end
+  | Tcoerce_structure(cc, _) ->
+      match (Mtype.scrape env mty1), (Mtype.scrape env mty2) with
+        Mty_signature sig1, Mty_signature sig2 ->
+          let new_env = Env.add_signature sig1 (Env.in_signature env) in
+          let build_tables (pos, pos_tbl, name_tbl) item =
+            let (_, name) = item_ident_name item in
+            let name_tbl = Tbl.add name item name_tbl in
+              if is_runtime_component item then
+                (pos + 1, Tbl.add pos item pos_tbl, name_tbl)
+              else
+                (pos, pos_tbl, name_tbl)
+          in
+          let _, pitems1, nitems1 =
+            List.fold_left build_tables (0, Tbl.empty, Tbl.empty) sig1
+          in
+          let _, pitems2, _ =
+            List.fold_left build_tables (0, Tbl.empty, Tbl.empty) sig2
+          in
+          let explain_item_coercion (pos2, unpaired) (pos1, cc) =
+            let item2 = Tbl.find pos2 pitems2 in
+            let (_, name) = item_ident_name item2 in
+            let item1 = Tbl.find name nitems1 in
+            begin
+              match item1, item2 with
+                Sig_value(id1, vd1), Sig_value(id2, vd2) ->
+                  explain_value_coercion new_env cxt subst id1 vd1 vd2 cc
+              | Sig_exception _, Sig_exception _ -> ()
+              | Sig_module(id1, mty1, _), Sig_module(id2, mty2, _) ->
+                  explain_module_coercion new_env (Module id1::cxt) subst
+                    (Mtype.strengthen env mty1.md_type (Pident id1)) 
+                    mty2.md_type
+                    cc
+              | Sig_class _, Sig_class _ -> ()
+              | _ -> assert false
+            end;
+            pos2 + 1, Tbl.remove pos1 unpaired
+          in
+          let _, unpaired = List.fold_left explain_item_coercion (0, pitems1) cc in
+          let unpaired = 
+            Tbl.fold 
+              (fun _ item acc ->
+                 let (id, _) = item_ident_name item in
+                   (cxt, env, Missing_field id) :: acc)
+              unpaired
+              []
+          in
+            if unpaired = [] then raise (Error [cxt, env, Modtype_permutation])
+            else raise (Error unpaired)
+      | _ -> assert false
+
+and explain_value_coercion env cxt subst id vd1 vd2 = function
+    Tcoerce_none -> ()
+  | Tcoerce_primitive _ -> 
+      let vd2 = Subst.value_description subst vd2 in
+        raise (Error [cxt, env, Value_descriptions(id, vd2, vd1)])
+  | Tcoerce_alias _ | Tcoerce_functor _ | Tcoerce_structure _ -> assert false
+
+
 (* Inclusion between module types.
    Return the restriction that transforms a value of the smaller type
    into a value of the bigger type. *)
@@ -349,14 +428,6 @@ and signature_components env cxt subst = function
   | _ ->
       assert false
 
-(* Inclusion between "private" annotations *)
-
-and check_private_flags env cxt mtd1 mtd2 =
-  match mtd1.mtd_private, mtd2.mtd_private with
-  | Asttypes.Private, Asttypes.Public when mtd2.mtd_type <> None -> 
-      raise (Error [cxt, env, Modtype_privacy])
-  | _, _ -> ()
-
 (* Inclusion between module type specifications *)
 
 and modtype_infos env cxt subst id info1 info2 =
@@ -375,21 +446,25 @@ and modtype_infos env cxt subst id info1 info2 =
   with Error reasons ->
     raise(Error((cxt, env, Modtype_infos(id, info1, info2)) :: reasons))
 
+and check_private_flags env cxt mtd1 mtd2 =
+  match mtd1.mtd_private, mtd2.mtd_private with
+  | Asttypes.Private, Asttypes.Public when mtd2.mtd_type <> None -> 
+      raise (Error [cxt, env, Modtype_privacy])
+  | _, _ -> ()
+
 and check_modtype_equiv env cxt mty1 mty2 priv2 =
-  match priv2 with 
-    Asttypes.Public -> begin
-      match
-        (modtypes env cxt Subst.identity mty1 mty2,
-         modtypes env cxt Subst.identity mty2 mty1)
-      with
-        (Tcoerce_none, Tcoerce_none) -> ()
-      | (_, _) -> raise(Error [cxt, env, Modtype_permutation])
-    end
-  | Asttypes.Private -> begin
-      match modtypes env cxt Subst.identity mty1 mty2 with
-        Tcoerce_none -> ()
-      | _ -> raise(Error [cxt, env, Modtype_permutation])
-    end
+  let cc1 = modtypes env cxt Subst.identity mty1 mty2 in
+  let cc2 = 
+    match priv2 with 
+      Asttypes.Public -> modtypes env cxt Subst.identity mty2 mty1
+    | Asttypes.Private -> Tcoerce_none
+  in
+    match cc1, cc2 with
+      (Tcoerce_none, Tcoerce_none) -> ()
+    | (cc1, cc2) -> 
+        explain_module_coercion env cxt Subst.identity mty1 mty2 cc1;
+        explain_module_coercion env cxt Subst.identity mty1 mty2 cc2;
+        assert false
 
 (* Simplified inclusion check between module types (for Env) *)
 
