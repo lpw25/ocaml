@@ -38,7 +38,7 @@ Project Releases:
 
 * 4.00.0+open_types: OCaml version 4.00.0 with open types
 * 4.00.1+open_types: OCaml version 4.00.1 with open types
-* 4.01.0+open_types: OCaml version 4.00.1 with open types
+* 4.01.0+open_types: OCaml version 4.01.0 with open types
 * 4.00.1+check-injectivity: OCaml version 4.00.1 that warns if non-injectivity is hidden
 
 
