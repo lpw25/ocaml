@@ -16,6 +16,7 @@ Projects:
 
 * open_types: Adds open types to OCaml
 * 4.00+open_types: Add open types to the 4.00 release branch of OCaml
+* 4.01+open_types: Add open types to the 4.01 release branch of OCaml
 * yacc-force: Add a "force" feature to OCamlYacc to support the "lexer hack"
 * multicore: Add multicore support to OCaml
 * macros: Add macros to OCaml
@@ -37,6 +38,7 @@ Project Releases:
 
 * 4.00.0+open_types: OCaml version 4.00.0 with open types
 * 4.00.1+open_types: OCaml version 4.00.1 with open types
+* 4.01.0+open_types: OCaml version 4.00.1 with open types
 * 4.00.1+check-injectivity: OCaml version 4.00.1 that warns if non-injectivity is hidden
 
 
