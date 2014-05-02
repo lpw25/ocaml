@@ -124,7 +124,7 @@ let apply_rewriters ?restore ~tool_name magic ast =
 
 exception Outdated_version
 
-let file ppf ~tool_name inputfile parse_fun ast_magic =
+let file ppf ~tool_name sourcefile inputfile parse_fun ?doc_fun ast_magic =
   let ic = open_in_bin inputfile in
   let is_ast_file =
     try
@@ -157,6 +157,11 @@ let file ppf ~tool_name inputfile parse_fun ast_magic =
     with x -> close_in ic; raise x
   in
   close_in ic;
+  let ast =
+    match doc_fun with
+    | None -> ast
+    | Some doc_fun -> doc_fun sourcefile ast
+  in
   apply_rewriters ~restore:false ~tool_name ast_magic ast
 
 let report_error ppf = function
@@ -174,11 +179,15 @@ let () =
       | _ -> None
     )
 
-let parse_all ~tool_name parse_fun magic ppf sourcefile =
+let parse_all ~tool_name parse_fun doc_fun magic ppf sourcefile =
   Location.input_name := sourcefile;
   let inputfile = preprocess sourcefile in
+  let doc_fun =
+    if !Clflags.include_documentation then Some doc_fun else None
+  in
   let ast =
-    try file ppf ~tool_name inputfile parse_fun magic
+    try
+      file ppf ~tool_name sourcefile inputfile parse_fun ?doc_fun magic
     with exn ->
       remove_preprocessed inputfile;
       raise exn
@@ -187,8 +196,8 @@ let parse_all ~tool_name parse_fun magic ppf sourcefile =
   ast
 
 let parse_implementation ppf ~tool_name sourcefile =
-  parse_all ~tool_name Parse.implementation
+  parse_all ~tool_name Parse.implementation Parsedoc.implementation
     Config.ast_impl_magic_number ppf sourcefile
 let parse_interface ppf ~tool_name sourcefile =
-  parse_all ~tool_name Parse.interface
+  parse_all ~tool_name Parse.interface Parsedoc.interface
     Config.ast_intf_magic_number ppf sourcefile

@@ -68,7 +68,7 @@ let process_implementation_file ppf sourcefile =
   let env = initial_env () in
   try
     let parsetree =
-      Pparse.file ~tool_name Format.err_formatter inputfile
+      Pparse.file ~tool_name Format.err_formatter sourcefile inputfile
         Parse.implementation ast_impl_magic_number
     in
     let typedtree =
@@ -99,7 +99,7 @@ let process_interface_file ppf sourcefile =
   Env.set_unit_name modulename;
   let inputfile = preprocess sourcefile in
   let ast =
-    Pparse.file ~tool_name Format.err_formatter inputfile
+    Pparse.file ~tool_name Format.err_formatter inputfile sourcefile
       Parse.interface ast_intf_magic_number
   in
   let sg = Typemod.type_interface (initial_env()) ast in

@@ -73,6 +73,10 @@ let mk_dtypes f =
   "-dtypes", Arg.Unit f, " (deprecated) same as -annot"
 ;;
 
+let mk_doc f =
+  "-doc", Arg.Unit f, " Include documentation"
+;;
+
 let mk_for_pack_byt f =
   "-for-pack", Arg.String f,
   "<ident>  Generate code that can later be `packed' with\n\
@@ -510,6 +514,7 @@ module type Compiler_options = sig
   val _cclib : string -> unit
   val _ccopt : string -> unit
   val _config : unit -> unit
+  val _doc : unit -> unit
   val _for_pack : string -> unit
   val _g : unit -> unit
   val _i : unit -> unit
@@ -645,6 +650,7 @@ struct
     mk_dllib F._dllib;
     mk_dllpath F._dllpath;
     mk_dtypes F._annot;
+    mk_doc F._doc;
     mk_for_pack_byt F._for_pack;
     mk_g_byt F._g;
     mk_i F._i;
@@ -761,6 +767,7 @@ struct
     mk_compact F._compact;
     mk_config F._config;
     mk_dtypes F._annot;
+    mk_doc F._doc;
     mk_for_pack_opt F._for_pack;
     mk_g_opt F._g;
     mk_i F._i;
