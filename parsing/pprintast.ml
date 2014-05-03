@@ -1047,6 +1047,7 @@ class printer  ()= object(self:'self)
     | PPat (x, Some e) ->
       pp f "?"; self#pattern f x;
       pp f " when "; self#expression f e
+    | PDoc _ -> ()
 
   (* transform [f = fun g h -> ..] to [f g h = ... ] could be improved *)
   method binding f {pvb_pat=p; pvb_expr=x; _} =
