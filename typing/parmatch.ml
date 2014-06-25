@@ -17,6 +17,18 @@ open Asttypes
 open Types
 open Typedtree
 
+type matrix = pattern list list
+
+type simple_pattern =
+    Sany
+  | Sconstant of constant
+  | Sconstruct of constructor_description * int
+  | Svariant of label * bool
+  | Stuple of int
+  | Srecord of label_description list
+  | Sarray of int
+  | Slazy
+
 (*************************************)
 (* Utilities for building patterns   *)
 (*************************************)
@@ -127,164 +139,29 @@ let get_type_path ty tenv =
   | Tconstr (path,_,_) -> path
   | _ -> fatal_error "Parmatch.get_type_path"
 
-(*************************************)
-(* Values as patterns pretty printer *)
-(*************************************)
-
-open Format
-;;
-
-let is_cons = function
-| {cstr_name = "::"} -> true
-| _ -> false
-
-let pretty_const c = match c with
-| Const_int i -> Printf.sprintf "%d" i
-| Const_char c -> Printf.sprintf "%C" c
-| Const_string (s, _) -> Printf.sprintf "%S" s
-| Const_float f -> Printf.sprintf "%s" f
-| Const_int32 i -> Printf.sprintf "%ldl" i
-| Const_int64 i -> Printf.sprintf "%LdL" i
-| Const_nativeint i -> Printf.sprintf "%ndn" i
-
-let rec pretty_val ppf v =
-  match v.pat_extra with
-      (cstr, _loc, _attrs) :: rem ->
-        begin match cstr with
-          | Tpat_unpack ->
-            fprintf ppf "@[(module %a)@]" pretty_val { v with pat_extra = rem }
-          | Tpat_constraint ctyp ->
-            fprintf ppf "@[(%a : _)@]" pretty_val { v with pat_extra = rem }
-          | Tpat_type _ ->
-            fprintf ppf "@[(# %a)@]" pretty_val { v with pat_extra = rem }
-        end
-    | [] ->
-  match v.pat_desc with
-  | Tpat_any -> fprintf ppf "_"
-  | Tpat_var (x,_) -> Ident.print ppf x
-  | Tpat_constant c -> fprintf ppf "%s" (pretty_const c)
-  | Tpat_tuple vs ->
-      fprintf ppf "@[(%a)@]" (pretty_vals ",") vs
-  | Tpat_construct (_, cstr, []) ->
-      fprintf ppf "%s" cstr.cstr_name
-  | Tpat_construct (_, cstr, [w]) ->
-      fprintf ppf "@[<2>%s@ %a@]" cstr.cstr_name pretty_arg w
-  | Tpat_construct (_, cstr, vs) ->
-      let name = cstr.cstr_name in
-      begin match (name, vs) with
-        ("::", [v1;v2]) ->
-          fprintf ppf "@[%a::@,%a@]" pretty_car v1 pretty_cdr v2
-      |  _ ->
-          fprintf ppf "@[<2>%s@ @[(%a)@]@]" name (pretty_vals ",") vs
-      end
-  | Tpat_variant (l, None, _) ->
-      fprintf ppf "`%s" l
-  | Tpat_variant (l, Some w, _) ->
-      fprintf ppf "@[<2>`%s@ %a@]" l pretty_arg w
-  | Tpat_record (lvs,_) ->
-      fprintf ppf "@[{%a}@]"
-        pretty_lvals
-        (List.filter
-           (function
-             | (_,_,{pat_desc=Tpat_any}) -> false (* do not show lbl=_ *)
-             | _ -> true) lvs)
-  | Tpat_array vs ->
-      fprintf ppf "@[[| %a |]@]" (pretty_vals " ;") vs
-  | Tpat_lazy v ->
-      fprintf ppf "@[<2>lazy@ %a@]" pretty_arg v
-  | Tpat_alias (v, x,_) ->
-      fprintf ppf "@[(%a@ as %a)@]" pretty_val v Ident.print x
-  | Tpat_or (v,w,_)    ->
-      fprintf ppf "@[(%a|@,%a)@]" pretty_or v pretty_or w
-
-and pretty_car ppf v = match v.pat_desc with
-| Tpat_construct (_,cstr, [_ ; _])
-    when is_cons cstr ->
-      fprintf ppf "(%a)" pretty_val v
-| _ -> pretty_val ppf v
-
-and pretty_cdr ppf v = match v.pat_desc with
-| Tpat_construct (_,cstr, [v1 ; v2])
-    when is_cons cstr ->
-      fprintf ppf "%a::@,%a" pretty_car v1 pretty_cdr v2
-| _ -> pretty_val ppf v
-
-and pretty_arg ppf v = match v.pat_desc with
-| Tpat_construct (_,_,_::_) -> fprintf ppf "(%a)" pretty_val v
-|  _ -> pretty_val ppf v
-
-and pretty_or ppf v = match v.pat_desc with
-| Tpat_or (v,w,_) ->
-    fprintf ppf "%a|@,%a" pretty_or v pretty_or w
-| _ -> pretty_val ppf v
-
-and pretty_vals sep ppf = function
-  | [] -> ()
-  | [v] -> pretty_val ppf v
-  | v::vs ->
-      fprintf ppf "%a%s@ %a" pretty_val v sep (pretty_vals sep) vs
-
-and pretty_lvals ppf = function
-  | [] -> ()
-  | [_,lbl,v] ->
-      fprintf ppf "%s=%a" lbl.lbl_name pretty_val v
-  | (_, lbl,v)::rest ->
-      fprintf ppf "%s=%a;@ %a"
-        lbl.lbl_name pretty_val v pretty_lvals rest
-
-let top_pretty ppf v =
-  fprintf ppf "@[%a@]@?" pretty_val v
-
-
-let pretty_pat p =
-  top_pretty Format.str_formatter p ;
-  prerr_string (Format.flush_str_formatter ())
-
-type matrix = pattern list list
-
-let pretty_line ps =
-  List.iter
-    (fun p ->
-      top_pretty Format.str_formatter p ;
-      prerr_string " <" ;
-      prerr_string (Format.flush_str_formatter ()) ;
-      prerr_string ">")
-    ps
-
-let pretty_matrix (pss : matrix) =
-  prerr_endline "begin matrix" ;
-  List.iter
-    (fun ps ->
-      pretty_line ps ;
-      prerr_endline "")
-    pss ;
-  prerr_endline "end matrix"
-
 
 (****************************)
 (* Utilities for matching   *)
 (****************************)
 
 (* Check top matching *)
-let simple_match p1 p2 =
-  match p1.pat_desc, p2.pat_desc with
-  | Tpat_construct(_, c1, _), Tpat_construct(_, c2, _) ->
+let simple_match sp1 p2 =
+  match sp1, p2.pat_desc with
+  | Sconstruct(c1, _), Tpat_construct(_, c2, _) ->
       c1.cstr_tag = c2.cstr_tag
-  | Tpat_variant(l1, _, _), Tpat_variant(l2, _, _) ->
+  | Svariant(l1, _), Tpat_variant(l2, _, _) ->
       l1 = l2
-  | Tpat_constant(c1), Tpat_constant(c2) -> const_compare c1 c2 = 0
-  | Tpat_tuple _, Tpat_tuple _ -> true
-  | Tpat_lazy _, Tpat_lazy _ -> true
-  | Tpat_record _ , Tpat_record _ -> true
-  | Tpat_array p1s, Tpat_array p2s -> List.length p1s = List.length p2s
+  | Sconstant(c1), Tpat_constant(c2) -> const_compare c1 c2 = 0
+  | Stuple _, Tpat_tuple _ -> true
+  | Slazy _, Tpat_lazy _ -> true
+  | Srecord _ , Tpat_record _ -> true
+  | Sarray p1s, Tpat_array p2s -> List.length p1s = List.length p2s
   | _, (Tpat_any | Tpat_var(_)) -> true
   | _, _ -> false
 
 
-
-
 (* extract record fields as a whole *)
-let record_arg p = match p.pat_desc with
+let record_arg = function
 | Tpat_any -> []
 | Tpat_record (args,_) -> args
 | _ -> fatal_error "Parmatch.as_record"
@@ -343,27 +220,14 @@ let rec simple_match_args p1 p2 = match p2.pat_desc with
 *)
 
 let rec normalize_pat q = match q.pat_desc with
-  | Tpat_any | Tpat_constant _ -> q
-  | Tpat_var _ -> make_pat Tpat_any q.pat_type q.pat_env
+  | Tpat_any | Tpat_var _  | Tpat_lazy _ -> Stotal
+  | Tpat_constant c -> Sconstant c
+  | Tpat_tuple args -> Stuple (List.length args)
   | Tpat_alias (p,_,_) -> normalize_pat p
-  | Tpat_tuple (args) ->
-      make_pat (Tpat_tuple (omega_list args)) q.pat_type q.pat_env
-  | Tpat_construct  (lid, c,args) ->
-      make_pat
-        (Tpat_construct (lid, c,omega_list args))
-        q.pat_type q.pat_env
-  | Tpat_variant (l, arg, row) ->
-      make_pat (Tpat_variant (l, may_map (fun _ -> omega) arg, row))
-        q.pat_type q.pat_env
-  | Tpat_array (args) ->
-      make_pat (Tpat_array (omega_list args))  q.pat_type q.pat_env
-  | Tpat_record (largs, closed) ->
-      make_pat
-        (Tpat_record (List.map (fun (lid,lbl,_) ->
-                                 lid, lbl,omega) largs, closed))
-        q.pat_type q.pat_env
-  | Tpat_lazy _ ->
-      make_pat (Tpat_lazy omega) q.pat_type q.pat_env
+  | Tpat_construct  (lid, c,args) -> Sconstruct(lid, c)
+  | Tpat_variant (l, arg, row) -> Svariant(l, arg, row)
+  | Tpat_array (args) -> Sarray (List.length args)
+  | Tpat_record (largs, closed) -> Srecord (List.map (fun (_,lbl,_) -> lbl) largs)
   | Tpat_or _ -> fatal_error "Parmatch.normalize_pat"
 
 (*
@@ -1234,21 +1098,6 @@ type answer =
     - right ->  elements to be processed
 *)
 type 'a row = {no_ors : 'a list ; ors : 'a list ; active : 'a list}
-
-
-let pretty_row {ors=ors ; no_ors=no_ors; active=active} =
-  pretty_line ors ; prerr_string " *" ;
-  pretty_line no_ors ; prerr_string " *" ;
-  pretty_line active
-
-let pretty_rows rs =
-  prerr_endline "begin matrix" ;
-  List.iter
-    (fun r ->
-      pretty_row r ;
-      prerr_endline "")
-    rs ;
-  prerr_endline "end matrix"
 
 (* Initial build *)
 let make_row ps = {ors=[] ; no_ors=[]; active=ps}
