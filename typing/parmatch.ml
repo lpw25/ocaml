@@ -19,15 +19,16 @@ open Typedtree
 
 type matrix = pattern list list
 
-type simple_pattern =
+type pattern_head =
     Sany
   | Sconstant of constant
-  | Sconstruct of constructor_description * int
+  | Sconstruct of constructor_description
   | Svariant of label * bool
-  | Stuple of int
-  | Srecord of label_description list
+  | Srecord of label_description list * bool
   | Sarray of int
-  | Slazy
+
+type simple_pattern = pattern_head * int
+
 
 (*************************************)
 (* Utilities for building patterns   *)
@@ -145,17 +146,17 @@ let get_type_path ty tenv =
 (****************************)
 
 (* Check top matching *)
-let simple_match sp1 p2 =
-  match sp1, p2.pat_desc with
-  | Sconstruct(c1, _), Tpat_construct(_, c2, _) ->
+let simple_match sp p =
+  match fst sp, p.pat_desc with
+  | Sconstruct c1, Tpat_construct(_, c2, _) ->
       c1.cstr_tag = c2.cstr_tag
   | Svariant(l1, _), Tpat_variant(l2, _, _) ->
       l1 = l2
-  | Sconstant(c1), Tpat_constant(c2) -> const_compare c1 c2 = 0
-  | Stuple _, Tpat_tuple _ -> true
-  | Slazy _, Tpat_lazy _ -> true
+  | Sconstant c1, Tpat_constant c2 ->
+      const_compare c1 c2 = 0
+  | Sany, Tpat_tuple _ -> true
   | Srecord _ , Tpat_record _ -> true
-  | Sarray p1s, Tpat_array p2s -> List.length p1s = List.length p2s
+  | Sarray l, Tpat_array ps -> l = List.length ps
   | _, (Tpat_any | Tpat_var(_)) -> true
   | _, _ -> false
 
@@ -193,25 +194,16 @@ let all_record_args lbls = match lbls with
 |  _ -> fatal_error "Parmatch.all_record_args"
 
 
-(* Build argument list when p2 >= p1, where p1 is a simple pattern *)
-let rec simple_match_args p1 p2 = match p2.pat_desc with
-| Tpat_alias (p2,_,_) -> simple_match_args p1 p2
+(* Build argument list when p >= sp *)
+let rec simple_match_args sp p = match p.pat_desc with
+| Tpat_alias (p,_,_) -> simple_match_args sp p
 | Tpat_construct(_, cstr, args) -> args
 | Tpat_variant(lab, Some arg, _) -> [arg]
 | Tpat_tuple(args)  -> args
-| Tpat_record(args,_) ->  extract_fields (record_arg p1) args
+| Tpat_record(args,_) ->  extract_fields (record_arg sp) args
 | Tpat_array(args) -> args
 | Tpat_lazy arg -> [arg]
-| (Tpat_any | Tpat_var(_)) ->
-    begin match p1.pat_desc with
-      Tpat_construct(_, _,args) -> omega_list args
-    | Tpat_variant(_, Some _, _) -> [omega]
-    | Tpat_tuple(args) -> omega_list args
-    | Tpat_record(args,_) ->  omega_list args
-    | Tpat_array(args) ->  omega_list args
-    | Tpat_lazy _ -> [omega]
-    | _ -> []
-    end
+| (Tpat_any | Tpat_var(_)) -> omega_list (snd sp)
 | _ -> []
 
 (*
