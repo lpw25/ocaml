@@ -57,7 +57,6 @@ and text_element =
   | List of text list (** A list. *)
   | Enum of text list (** An enumerated list. *)
   | Newline   (** To force a line break. *)
-  | Block of text (** Like html's block quote. *)
   | Title of int * string option * text
               (** Style number, optional label, and text. *)
   | Ref of ref_kind * string * text option

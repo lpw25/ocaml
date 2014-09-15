@@ -106,9 +106,6 @@ let rec text_element i ppf x =
       list i text ppf txtl
   | Newline ->
       line i ppf "Newline\n"
-  | Block txt ->
-      line i ppf "Block\n";
-      text i ppf txt
   | Title(n, so, txt) ->
       line i ppf "Title %d\n" n;
       option i string ppf so;
