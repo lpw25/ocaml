@@ -585,7 +585,7 @@ and reference = parse
 
 and module_list = parse
 | escape
-    { buffer_char chr; reference lexbuf }
+    { buffer_char chr; module_list lexbuf }
 | end
     { if buffer_not_empty () then add_module (get_buffered_string ());
       Special_Ref(SRK_module_list (get_module_list ())) }
@@ -596,16 +596,16 @@ and module_list = parse
         add_module (get_buffered_string ());
         reset_string_buffer ()
       end;
-      reference lexbuf }
+      module_list lexbuf }
 | newline
     { incr_line lexbuf;
       if buffer_not_empty () then begin
         add_module (get_buffered_string ());
         reset_string_buffer ()
       end;
-      reference lexbuf }
+      module_list lexbuf }
 | safe+ | _
-    { buffer_lexeme lexbuf; reference lexbuf }
+    { buffer_lexeme lexbuf; module_list lexbuf }
 
 {
 
