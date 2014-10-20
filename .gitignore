@@ -732,6 +732,11 @@
 /parsing/parser.output
 /parsing/parser.automaton
 /parsing/parser.conflicts
+/parsing/comments.ml
+/parsing/doclexer.ml
+/parsing/docparser.ml
+/parsing/docparser.mli
+/parsing/docparser.output
 
 # /stdlib/
 /stdlib/*.o
