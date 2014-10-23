@@ -171,7 +171,7 @@ let make_constructor env type_path type_params sargs sret_type =
       widen z;
       targs, Some tret_type, args, Some ret_type
 
-let transl_declaration env sdecl id =
+let transl_declaration env recur sdecl id =
   (* Bind type parameters *)
   reset_type_variables();
   Ctype.begin_def ();
@@ -183,6 +183,7 @@ let transl_declaration env sdecl id =
       transl_simple_type env false sty', loc)
     sdecl.ptype_cstrs
   in
+  let old_recur = !recur in
   let (tkind, kind) =
     match sdecl.ptype_kind with
         Ptype_abstract -> Ttype_abstract, Type_abstract
@@ -266,6 +267,7 @@ let transl_declaration env sdecl id =
         Ttype_record lbls, Type_record(lbls', rep)
       | Ptype_open -> Ttype_open, Type_open
       in
+    recur := old_recur;
     let (tman, man) = match sdecl.ptype_manifest with
         None -> None, None
       | Some sty ->
@@ -1000,7 +1002,18 @@ let transl_type_decl env sdecl_list =
   (* Translate each declaration. *)
   let current_slot = ref None in
   let warn_unused = Warnings.is_active (Warnings.Unused_type_declaration "") in
+  let recursive = ref None in
+  let warn_recursive = Warnings.is_active (Warnings.Recursive_type "") in
   let id_slots id =
+    if warn_recursive then begin
+      let td = Env.find_type (Path.Pident id) temp_env in
+      let name = Ident.name id in
+        Env.set_type_used_callback
+          name td
+          (fun old_callback ->
+             recursive := Some (name, td.type_loc);
+             old_callback ())
+      end;
     if not warn_unused then id, None
     else
       (* See typecore.ml for a description of the algorithm used
@@ -1021,12 +1034,18 @@ let transl_type_decl env sdecl_list =
       id, Some slot
   in
   let transl_declaration name_sdecl (id, slot) =
-    current_slot := slot; transl_declaration temp_env name_sdecl id in
+    current_slot := slot; transl_declaration temp_env recursive name_sdecl id in
   let tdecls =
     List.map2 transl_declaration sdecl_list (List.map id_slots id_list) in
   let decls =
     List.map (fun tdecl -> (tdecl.typ_id, tdecl.typ_type)) tdecls in
   current_slot := None;
+  begin
+    match !recursive with
+    | None -> ()
+    | Some(name, loc) ->
+        Location.prerr_warning loc (Warnings.Recursive_type name)
+  end;
   (* Check for duplicates *)
   check_duplicates sdecl_list;
   (* Build the final env. *)

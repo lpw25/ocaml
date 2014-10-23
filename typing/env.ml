@@ -820,7 +820,8 @@ let set_type_used_callback name td callback =
   else let key = (name, loc) in
   let old =
     try Hashtbl.find type_declarations key
-    with Not_found -> assert false
+
+    with Not_found -> fun () -> ()
   in
   Hashtbl.replace type_declarations key (fun () -> callback old)
 
