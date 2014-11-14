@@ -263,7 +263,7 @@ let parse_closed_list ~file ~item_loc ~parse_item ?attr_item ~bound items =
           | None ->
               let start = item_loc item in
               let after = lex_comments ~bound ~start file in
-                after, rest
+                after, []
           | Some(next, rest) ->
               let start = item_loc item in
               let finish = item_loc next in
