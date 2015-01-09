@@ -8,7 +8,7 @@ module NonDet : sig
   val fail : 'a stream
 
       (* a.k.a bind or disjunction *)
-  val (let!) : 'a stream -> ('a -> 'b stream) -> 'b stream
+  val (>>=) : 'a stream -> ('a -> 'b stream) -> 'b stream
       (* a.k.a. fair disjunction *)
   val mplus  : 'a stream -> 'a stream -> 'a stream
 
@@ -39,11 +39,11 @@ end = struct
 	end
 
   (* a fair conjunction *)
-  let rec (let!) m f = fun () -> 
+  let rec (>>=) m f = fun () -> 
     match m () with
     | Nil        -> fail ()
-    | InC a      -> InC ((let!) a f)
-    | Cons (a,b) -> mplus (f a) ((let!) b f) ()
+    | InC a      -> InC ((>>=) a f)
+    | Cons (a,b) -> mplus (f a) ((>>=) b f) ()
 
   let guard be = if be then ret () else fail
   let yield m  () = InC m
@@ -62,20 +62,19 @@ open NonDet;;
 (* Don't try this in Prolog or in Haskell's MonadPlus. *)
 
 let rec numb () = 			(* infinite stream of integers *)
-    yield (mplus (let! n = numb in ret (n+1))         (* left recursion! *)
+    yield (mplus (numb >>= fun n -> ret (n+1))         (* left recursion! *)
 	       (ret 0)) ()
 ;;
 
 let pyth : (int * int * int) NonDet.stream =
-  let! i  = numb in
-  let! () = guard (i>0) in
-  let! j  = numb in
-  let! () = guard (j>0) in
-  let! k  = numb in
-  let! () = guard (k>0) in
-  (* Just to illustrate the `let' form within let! *)
+  numb >>= fun i ->
+  guard (i>0) >>= fun () ->
+  numb >>= fun j ->
+  guard (j>0) >>= fun () ->
+  numb >>= fun k ->
+  guard (k>0) >>= fun () ->
   let test x = x*x = j*j + k*k in
-  let! () = guard (test i) in
+  guard (test i) >>= fun () ->
   ret (i,j,k)
 ;;
 
