@@ -129,7 +129,7 @@ let global_stage : Env.stage ref  = ref []
    The current classifier is left-most, and the lists don't have
    to have the same length.
    Example:
-   .<fun x -> .< x >. >.
+   <<fun x -> << x >> >>
    When type-checking the innermost bracket, the global_stage
    will contain ['b,'a] and the level of x will be ['a]
    The unification will succeed, without changing anything, as expected.

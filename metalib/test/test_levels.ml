@@ -35,7 +35,7 @@ let glist_eq x =
      let myrun : 'a code -> 'a = fun x -> failwith ""
    doesn't provoke the bug.
  *)
-let _ = Runcode.run .<()>.;;
+let _ = Runcode.run <<()>>;;
 
 (* This has to use glist_eq.  Using get_cde instead won't cut it.  *)
 let sumF env = glist_eq env;;

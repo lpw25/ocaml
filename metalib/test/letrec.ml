@@ -22,9 +22,9 @@ module Ex1(S:LETRECS) = struct
     make_letrecs @@ fun lid ->
       add_letrec lid (fun even' ->
       add_letrec lid (fun odd'  ->
-        let even = .<fun n -> n = 0 || .~odd' (n-1)>.
-        and odd  = .<fun n -> not (n=0) && .~even' (n-1)>.
-        in (odd, (even, .<fun n -> (.~odd n, .~even n)>.))
+        let even = <<fun n -> n = 0 || $odd' (n-1)>>
+        and odd  = <<fun n -> not (n=0) && $even' (n-1)>>
+        in (odd, (even, <<fun n -> ($odd n, $even n)>>))
   ))
 end
 
@@ -52,14 +52,14 @@ module Ex2(S:LETRECS) = struct
   let r k =
     make_letrecs @@ fun lid ->
       let rec loop = function
-        | k when k <= 0 -> .<[| |]>.
-        | 1 -> .<[| true |]>.
+        | k when k <= 0 -> <<[| |]>>
+        | 1 -> <<[| true |]>>
         | k -> 
       add_letrec lid (fun even' ->
       add_letrec lid (fun odd'  ->
-        let even = .<fun n -> n = 0 || .~odd' (n-1)>.
-        and odd  = .<fun n -> not (n=0) && .~even' (n-1)>.
-        in (odd, (even, .<fun n -> (.~odd n, .~even n)>.))
+        let even = <<fun n -> n = 0 || $odd' (n-1)>>
+        and odd  = <<fun n -> not (n=0) && $even' (n-1)>>
+        in (odd, (even, <<fun n -> ($odd n, $even n)>>))
   ))
 end
 
@@ -71,7 +71,7 @@ module Nested : LETRECS = struct
   let add_letrec : letrec_id -> 
   (('cl,'a->'b) code -> ('cl,'a->'b) code) -> 
     (('cl,'a->'b) code -> ('cl,'w) code) -> ('cl,'w) code =
-  fun lid exp body -> .<let rec x = .~(exp .<x>.) in .~(body .<x>.)>.
+  fun lid exp body -> <<let rec x = $(exp <<x>>) in $(body <<x>>)>>
    
   val make_letrecs : (letrec_id -> 'w code) -> 'w code
     fun body -> body ()

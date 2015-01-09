@@ -9,19 +9,19 @@ open Gprint;;
 
 let pr_type et = Format.printf "\n%s@." et
 
-let () = pr_type (print .<1>.)
+let () = pr_type (print <<1>>)
 ;;
 
 
-let () = pr_type (let x = 1 in print .<x>.);;
+let () = pr_type (let x = 1 in print <<x>>);;
 
-let () = pr_type (print .<10.0>.)
+let () = pr_type (print <<10.0>>)
 ;;
 
-let () = pr_type (print .<"xxx">.)
+let () = pr_type (print <<"xxx">>)
 ;;
 
-let () = pr_type (let x = Some ([|(10,true);(11,false)|]) in print .<x>.);;
+let () = pr_type (let x = Some ([|(10,true);(11,false)|]) in print <<x>>);;
 
 module C = struct
   type 'a color = Blue | Green | Rgb of 'a
@@ -37,13 +37,13 @@ let v = [
    pixels = [| C.Green |]};
 ] ;;
 
-let () = pr_type (print .<v>.)
+let () = pr_type (print <<v>>)
 ;;
 
 (* current drawback due to the lack of integration, and the work-around*)
-let foo (x : int option) = print .<x>. in pr_type (foo None );;
+let foo (x : int option) = print <<x>> in pr_type (foo None );;
 
-let foo (x : int option) = print (let z = [x] in .<z>.) in pr_type (foo None);;
+let foo (x : int option) = print (let z = [x] in <<z>>) in pr_type (foo None);;
 
 
 (* Now we open C *)
@@ -57,16 +57,16 @@ let some_processing ims =
 		  | Rgb x -> Rgb (x+1) in
       let () = Format.printf "@.pixel: %a -> %a @."
 	       (fun ppf v -> ignore (fprint ppf v))
-	       (let x = [px] in .<x>.)
+	       (let x = [px] in <<x>>)
 	       (fun ppf v -> ignore (fprint ppf v))
-	       (let x = [new_px] in .<x>.) in
+	       (let x = [new_px] in <<x>>) in
       new_px in
   let process im =
     let () = Format.printf "Processing: " in
-    let _  = print .<im>. in
+    let _  = print <<im>> in
     {im with pixels = Array.map brighten im.pixels} in
   let res = List.map process ims in
-  let _ = print .<res>. in
+  let _ = print <<res>> in
   Format.printf "@."
 ;;
 
@@ -82,7 +82,7 @@ let () = some_processing v;;
 
 let extv = Vgprint_aux.T2 (Some "extv");;
 
-let () = pr_type (print .<extv>.)
+let () = pr_type (print <<extv>>)
 ;;
 
 print_endline "\nAll done"

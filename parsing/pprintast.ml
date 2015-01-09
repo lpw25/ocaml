@@ -522,25 +522,25 @@ class printer  ()= object(self:'self)
     *)
     match x.pexp_attributes with
     | ({txt="metaocaml.bracket"},_) :: t ->
-        pp f "@[<hov2>.<@ %a @ >.@]" self#expression {x with pexp_attributes=t}
+        pp f "@[<hov2><<@ %a @ >>@]" self#expression {x with pexp_attributes=t}
     | ({txt="metaocaml.escape"},_) :: t ->
         begin
         match x.pexp_desc with
-        | Pexp_ident li when t = [] -> pp f ".~%a" self#longident_loc li
-        | _ -> pp f ".~%a" (self#paren true self#expression)
+        | Pexp_ident li when t = [] -> pp f "$%a" self#longident_loc li
+        | _ -> pp f "$%a" (self#paren true self#expression)
                               {x with pexp_attributes=t}
         end
-    | [({txt = "metaocaml.csp"},PStr [{pstr_desc = 
-            Pstr_eval ({pexp_desc=Pexp_ident li},_)}])] -> 
+    | [({txt = "metaocaml.csp"},PStr [{pstr_desc =
+            Pstr_eval ({pexp_desc=Pexp_ident li},_)}])] ->
               begin
                 (* This CSP is easy to print, so we print it *)
                 match x.pexp_desc with
                 | Pexp_apply (_,[("",{pexp_desc=Pexp_constant (Const_int _)})])
-                    -> 
+                    ->
                       pp f "(* CSP %a *) %a"
                         self#longident_loc li
                         self#expression {x with pexp_attributes=[]}
-                | _ -> 
+                | _ ->
                       pp f "(* CSP %a *)"
                         self#longident_loc li
               end

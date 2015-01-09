@@ -101,7 +101,7 @@ type t1 = A of int | B of bool list;;
 
 let t1exp' () = (failwith "na" : t1);;
 
-do_describe .<t1exp'>.;;
+do_describe <<t1exp'>>;;
 
 (*
 Arrow:
@@ -118,7 +118,7 @@ type t1 =
 type 'a t2 = | A of t1 | B of 'a;;
 let t2exp' () = (failwith "na" : 'a t2);;
 
-do_describe .<t2exp'>.;;
+do_describe <<t2exp'>>;;
 
 (*
 Arrow:
@@ -148,7 +148,7 @@ end = struct
      let to_meters x=x
      let add x y = x +. y
      let print (x : 'a t) = Printf.printf "%f (units)" x;
-       do_describe .<x>.
+       do_describe <<x>>
 end;;
 open Units;;
 
@@ -166,32 +166,32 @@ end = struct
      let to_meters x=x
      let add x y = x +. y
      let print (x : 'a t) = Printf.printf "%f (units)" x;
-       .! .<do_describe .<x>.>.
+       .! <<do_describe <<x>> >>
 end;;
 open Units1;;
 
-let printx (x : 'a t) = .! .<do_describe .~(let v = .<x>. in .<v>.)>.;;
+let printx (x : 'a t) = .! <<do_describe $(let v = <<x>> in <<v>>)>>;;
 let tt = printx (to_meters 1.);;
 
 
 let test_unit1 = print (add (to_meters 1.) (to_meters 2.));;
 
-let x = to_meters 1. in do_describe .<x>.;;
+let x = to_meters 1. in do_describe <<x>>;;
 
 type 'a ft = int;;
 type uf;;
 type um;;
 
 
-let printfx (x : 'a ft) = .! .<do_describe .~(let v = .<x>. in .<[v]>.)>.;;
+let printfx (x : 'a ft) = .! <<do_describe $(let v = <<x>> in <<[v]>>)>>;;
 
-let printfx (x : 'a ft) = let v = .<[x]>. in .! .<do_describe v>.;;
+let printfx (x : 'a ft) = let v = <<[x]>> in .! <<do_describe v>>;;
 let tt = printfx (1 : uf ft);;
 
-let printfx (x : 'a ft) = let v1 = .<[x]>. in
+let printfx (x : 'a ft) = let v1 = <<[x]>> in
    do_describe ((.! v1));;
 
 
-let v = .<[x]>. in .! .<do_describe v>.;;
+let v = <<[x]>> in .! <<do_describe v>>;;
 
 *)

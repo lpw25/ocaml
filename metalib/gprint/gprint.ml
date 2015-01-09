@@ -12,7 +12,7 @@ $Id: gprint.ml,v 1.3 2006/04/17 01:46:50 oleg Exp $
 open Ident   (* Just to make sure Ident is loaded first! *)
 
 
-(* Given an expression like .<something>., extract the parse tree
+(* Given an expression like <<something>>, extract the parse tree
    corresponding to something.
    Recall that an object of type code is actually a parsetree
 *)
@@ -61,7 +61,7 @@ let rec string_of_path p =
    The inconsistency did cause me a lot of trouble once.
 *)
 let true_env = 
-  match get_elem_parsetree .<[None]>. with
+  match get_elem_parsetree <<[None]>> with
     {Parsetree.pexp_ext = Some tr} ->
 	 let t : Typedtree.expression = Obj.obj tr in
 	 t.Typedtree.exp_env

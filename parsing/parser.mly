@@ -308,9 +308,9 @@ let mkctf_attrs d attrs =
 
 /* Tokens */
 
-%token DOTLESS     /* NNN */
-%token GREATERDOT  /* NNN */
-%token DOTTILDE    /* NNN */
+%token LESSLESS
+%token GREATERGREATER
+%token DOLLAR
 %token AMPERAMPER
 %token AMPERSAND
 %token AND
@@ -1223,10 +1223,10 @@ simple_expr:
       { reloc_exp $2 }
   | LPAREN seq_expr error
       { unclosed "(" 1 ")" 3 }
-  | DOTLESS expr GREATERDOT                 /* NNN */
-      { wrap_exp_attrs $2 
-           (None,[ghloc "metaocaml.bracket",PStr []]) }            /* NNN */
-  | DOTTILDE simple_expr %prec prec_escape  /* NNN */
+  | LESSLESS expr GREATERGREATER
+      { wrap_exp_attrs $2
+           (None,[ghloc "metaocaml.bracket",PStr []]) }
+  | DOLLAR simple_expr %prec prec_escape  /* NNN */
       { wrap_exp_attrs $2 
            (None,[ghloc "metaocaml.escape",PStr []]) }             /* NNN */
   | BEGIN ext_attributes seq_expr END

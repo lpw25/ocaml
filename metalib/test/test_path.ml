@@ -22,13 +22,13 @@ Fatal error: exception Failure("Error type-checking generated code: scope extrus
 
 (*
 let _ =
-   .< Test_path_a.A >.
+   << Test_path_a.A >>
 *)
 
 (* This is needed to run the generated code *)
 let () = Runcode.add_search_path "/tmp"
 
 let _ =
-  Runcode.run .< Test_path_a.A >.
+  Runcode.run << Test_path_a.A >>
 
 let _ = Printf.printf "All Done\n"

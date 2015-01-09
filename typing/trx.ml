@@ -72,7 +72,7 @@
   <fun x -> ~(r := <x + 1>; <()>)>
 
   let r = <0> in
-  <fun x -> .~(<fun x -> ~(let v = <x> in r := <fun x -> ~v>; <()>)>; !r)>
+  <fun x -> $(<fun x -> ~(let v = <x> in r := <fun x -> ~v>; <()>)>; !r)>
 
   exception E of int code
   try <fun x -> ~(raise (E <x>)> with E x -> x
@@ -318,7 +318,7 @@ let check_path_quotable msg path =
    with a persistent module identifier: for example, Scanf.Scan_failure.
    The major complexity comes from this scenario:
       open Scanf
-      .<raise (Scan_failure "xx")>.
+      <<raise (Scan_failure "xx")>>
    The Texp_construct node of Typedtree contains the lid and (was: the
    path) that refer to "Scan_failure" without any module qualifications.
    We have to find the fully qualified path and check
@@ -822,9 +822,9 @@ let scope_extrusion_error :
    no longer valid:
 
   let r = ref ... in
-  .<fun x1 x2 -> .~(reset .<fun y1 y2 -> 
-                              .~(shift k (r := k; k .<0>.))>.)>.
-  .r .<2>.
+  <<fun x1 x2 -> $(reset <<fun y1 y2 ->
+                              $(shift k (r := k; k <<0>>))>>)>>
+  .r <<2>>
   Here, y1 and y2 are valid but x1 and x2 are not.
 *)
 let validate_vars : Location.t -> code_repr -> code_repr = 

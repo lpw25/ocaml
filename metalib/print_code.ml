@@ -34,7 +34,7 @@ let format_code : Format.formatter -> 'a closed_code -> unit = fun ppf cde ->
 
 let print_closed_code  : Format.formatter -> 'a closed_code -> unit = 
   fun ppf cde ->  
-    Format.fprintf ppf ".<@,%a>.@ " format_code cde
+    Format.fprintf ppf "<<@ %a >>@ " format_code cde
 
 let print_code ppf (cde : 'a code) = 
   let (cde, check) = close_code_delay_check cde in
