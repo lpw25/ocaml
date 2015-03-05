@@ -160,7 +160,7 @@ let file ppf ~tool_name sourcefile inputfile parse_fun ?doc_fun ast_magic =
   let ast =
     match doc_fun with
     | None -> ast
-    | Some doc_fun -> doc_fun sourcefile ast
+    | Some doc_fun -> doc_fun !Location.input_name ast
   in
   apply_rewriters ~restore:false ~tool_name ast_magic ast
 
