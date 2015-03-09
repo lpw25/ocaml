@@ -272,84 +272,57 @@ string_char:
 /* Basic text */
 
 text:
-| whitespace                                  { $1 }
-| error                                       { expecting 1 "text" }
-| text_body whitespace                        { List.rev_append $1 $2 }
-| text_body newline shortcuts_final           { List.rev_append $1 (List.rev $3) }
-| text_body blank_line shortcuts_final        { List.rev_append $1 (Blank_line :: (List.rev $3)) }
-| newline shortcuts_final                     { List.rev $2 }
-| blank_line shortcuts_final                  { Blank_line :: (List.rev $2) }
+| whitespace                                 { $1 }
+| error                                      { expecting 1 "text" }
+| text_body whitespace                       { List.rev_append $1 $2 }
+| text_body_with_line shortcut_list_final    { List.rev_append $1 [Element (List $2)] }
+| text_body_with_line shortcut_enum_final    { List.rev_append $1 [Element (Enum $2)] }
 ;
 
 text_body:
-| text_item                        { List.rev $1 }
-| text_body text_item              { List.rev_append $2 $1 }
+| text_item                                  { [$1] }
+| blanks text_item                           { [$2; Blank] }
+| text_body text_item                        { $2 :: $1 }
+| text_body blanks text_item                 { $3 :: Blank :: $1 }
+| text_body_with_line text_item_after_line   { List.rev_append $2 $1 }
+;
+
+text_body_with_line:
+| newline                                    { [Newline] }
+| blank_line                                 { [Blank_line] }
+| text_body newline                          { Newline :: $1 }
+| text_body blank_line                        { Blank_line :: $1 }
+| text_body_with_line shortcut_list          { (Element (List $2)) :: $1 }
+| text_body_with_line shortcut_enum          { (Element (Enum $2)) :: $1 }
 ;
 
 text_item:
-| simple_text_item                 { [$1] }
-| text_item_no_line                { [$1] }
-| blanks simple_text_item          { [Blank; $2] }
-| blanks text_item_no_line         { [Blank; $2] }
-| newline simple_text_item         { [Newline; $2] }
-| newline text_item_with_line      { $2 }
-| blank_line simple_text_item      { [Blank_line; $2] }
-| blank_line text_item_with_line   { Blank_line :: $2 }
-;
-
-simple_text_item:
+| MINUS                              { iminus }
+| PLUS                               { iplus }
 | text_element                       { Element $1 }
 | html_text_element                  { Element $1 }
 | Char                               { String $1 }
 ;
 
-text_item_no_line:
-| MINUS                              { iminus }
-| PLUS                               { iplus }
-;
-
-text_item_with_line:
-| shortcuts simple_text_item         { List.rev_append $1 [$2] }
-| MINUS simple_text_item             { [Newline; iminus; $2] }
-| MINUS text_item_no_line            { [Newline; iminus; $2] }
-| PLUS simple_text_item              { [Newline; iplus; $2] }
-| PLUS text_item_no_line             { [Newline; iplus; $2] }
+text_item_after_line:
+| MINUS text_item            { [iminus; $2] }
+| PLUS text_item             { [iplus; $2] }
+| text_element               { [Element $1] }
+| html_text_element          { [Element $1] }
+| Char                       { [String $1] }
 ;
 
 /* Text within shortcut lists and enums */
 
 shortcut_text_body:
-| blanks simple_text_item                  { [$2; Blank] }
-| blanks text_item_no_line                 { [$2; Blank] }
-| newline simple_text_item                 { [$2; Newline] }
-| newline shortcut_text_item_with_line     { List.rev $2 }
-| shortcut_text_body shortcut_text_item    { List.rev_append $2 $1 }
-;
-
-shortcut_text_item:
-| simple_text_item                           { [$1] }
-| text_item_no_line                          { [$1] }
-| blanks simple_text_item                    { [Blank; $2] }
-| blanks text_item_no_line                   { [Blank; $2] }
-| newline simple_text_item                   { [Newline; $2] }
-| newline shortcut_text_item_with_line       { $2 }
-;
-
-shortcut_text_item_with_line:
-| MINUS simple_text_item             { [Newline; iminus; $2] }
-| MINUS text_item_no_line            { [Newline; iminus; $2] }
-| PLUS simple_text_item              { [Newline; iplus; $2] }
-| PLUS text_item_no_line             { [Newline; iplus; $2] }
+| blanks text_item                                  { [$2; Blank] }
+| newline text_item_after_line                      { List.rev_append $2 [Newline] }
+| shortcut_text_body text_item                      { $2 :: $1 }
+| shortcut_text_body blanks text_item               { $3 :: Blank :: $1 }
+| shortcut_text_body newline text_item_after_line   { List.rev_append $3 (Newline :: $1) }
 ;
 
 /* Shortcut lists and enums */
-
-shortcuts:
-| shortcut_list                       { [Element (List $1)] }
-| shortcut_enum                       { [Element (Enum $1)] }
-| shortcuts shortcut_list             { Element (List $2) :: $1 }
-| shortcuts shortcut_enum             { Element (Enum $2) :: $1 }
-;
 
 shortcut_list:
 | MINUS blank_line                                  { [[]] }
@@ -368,13 +341,6 @@ shortcut_enum:
 ;
 
 /* Shortcut lists and enums that don't require a final blank line */
-
-shortcuts_final:
-| shortcut_list_final                 { [Element (List $1)] }
-| shortcut_enum_final                 { [Element (Enum $1)] }
-| shortcuts shortcut_list_final       { Element (List $2) :: $1 }
-| shortcuts shortcut_enum_final       { Element (Enum $2) :: $1 }
-;
 
 shortcut_list_final:
 | MINUS whitespace                                      { [[]] }
