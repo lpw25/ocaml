@@ -364,7 +364,7 @@ shortcut_enum:
 | PLUS shortcut_text_body blank_line                { [inner (List.rev $2)] }
 | PLUS newline shortcut_enum                        { [] :: $3 }
 | PLUS shortcut_text_body newline shortcut_enum     { (inner (List.rev $2)) :: $4 }
-| PLUS error                                        { expecting 2 "list item" }
+| PLUS error                                        { expecting 2 "enumerated list item" }
 ;
 
 /* Shortcut lists and enums that don't require a final blank line */
@@ -413,7 +413,7 @@ text_element:
 | ENUM whitespace list error
     { unclosed "{ol" 1 "}" 4 }
 | ENUM whitespace error
-    { expecting 3 "list item" }
+    { expecting 3 "enumerated list item" }
 | Ref
     { let k, n = $1 in
         Ref (k, n, None) }
@@ -482,13 +482,13 @@ html_text_element:
 | HTML_List whitespace html_list error
     { unclosed (html_open_to_string $1) 1 (html_close_to_string $1) 4 }
 | HTML_List whitespace error
-    { expecting 2 "html list item" }
+    { expecting 2 "HTML list item" }
 | HTML_Enum whitespace html_list whitespace HTML_END_ENUM
     { Enum (List.rev $3) }
 | HTML_Enum whitespace html_list error
     { unclosed (html_open_to_string $1) 1 (html_close_to_string $1) 4 }
 | HTML_Enum whitespace error
-    { expecting 3 "html list item" }
+    { expecting 3 "HTML list item" }
 ;
 
 /* HTML-style lists */
