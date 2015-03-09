@@ -24,9 +24,8 @@ type lexer_error =
 | Unterminated_see_file
 | Unterminated_see_doc
 | Expected_ident
-| Expected_name
+| Expected_string
 | Expected_version
-| Expected_exception
 
 type comment_error =
   Unterminated_simple
@@ -80,12 +79,10 @@ let lexer_error_message = function
       "Documentation syntax error: unterminated document name"
   | Expected_ident ->
       "Documentation syntax error: expected identifier"
-  | Expected_name ->
-      "Documentation syntax error: expected author name"
+  | Expected_string ->
+      "Documentation syntax error: expected string"
   | Expected_version ->
       "Documentation syntax error: expected version string"
-  | Expected_exception ->
-      "Documentation syntax error: expected exception name"
 
 let parser_error_message = function
   | Unclosed(opening_loc, opening, closing) ->

@@ -91,14 +91,42 @@ let buffer_not_empty () = not !buffer_empty
 
 (* To store the position of the beginning of a
    verbatim string or code section *)
-let string_start_loc = ref Location.none;;
-let code_start_locs = ref [];;
+let start_loc = ref Location.none;;
+
+let set_start_loc lexbuf =
+  start_loc := Location.curr lexbuf
+
+let get_start_loc () = !start_loc
+
+let use_start_loc lexbuf =
+  lexbuf.lex_start_p <- !start_loc.Location.loc_start
+
+(* To store the positions of nested code sections *)
+let inner_start_locs = ref [];;
+
+let push_inner_start_loc lexbuf =
+  inner_start_locs := (Location.curr lexbuf) :: !inner_start_locs
+
+let pop_inner_start_loc () =
+  match !inner_start_locs with
+  | [] -> None
+  | l :: rest ->
+      inner_start_locs := rest;
+      Some l
 
 (* To store the format of a target *)
 let target_format = ref None;;
 
 (* To store the kind of a reference *)
 let ref_kind = ref RK_element;;
+
+(* To store the start of a see description *)
+let see_loc = ref Location.none;;
+
+let set_see_loc lexbuf =
+  see_loc := Location.curr lexbuf
+
+let get_see_loc () = !see_loc
 
 (* To store the modules of a module list *)
 let module_list_modules = ref [];;
@@ -132,22 +160,16 @@ let identchar =
 let decimal_literal =
   ['0'-'9'] ['0'-'9' '_']*
 let versionchar =
-  ['A'-'Z' 'a'-'z' '_' '\192'-'\214' '\216'-'\246' '\248'-'\255'
-   '0'-'9' '+' '-' '.' '/' ':' '<' '=' '>' '?' '^' '~' ]
-let namechar =
-  ['a'-'z' '\223'-'\246' '\248'-'\255' 'A'-'Z' '\192'-'\214'
-   '\216'-'\222' '.' '-' ' ' ]
-
-let ident = alpha identchar*
-let version = versionchar+
-let uident = uppercase identchar*
-let exception = uident ('.' uident)*
-let name = namechar+
+  ['A'-'Z' 'a'-'z' '_' '\192'-'\214' '\216'-'\246' '\248'-'\255' '\'' '0'-'9'
+   '!' '$' '%' '&' '*' '+' '-' '.' '/' ':' '<' '=' '>' '?' '^' '|' '~']
 
 (* The characters which are not the start of any tokens other than Char *)
 let safe = [^ ' ' '\009' '\012' '\010' '\013' '\\' '{' '}' '[' ']' '<' 'v' '%' '@' '-' '+']
 
 let escape = '\\' (['{' '}' '[' ']' '@'] as chr)
+
+let ident = alpha identchar* ('.' alpha identchar*)*
+let version = versionchar+
 
 let tag = '@'
 
@@ -211,6 +233,7 @@ rule main = parse
 | tag (ident as tag)
     { try
         let f = Hashtbl.find tag_table tag in
+          set_start_loc lexbuf;
           f lexbuf
       with Not_found -> Custom tag }
 | begin
@@ -219,37 +242,37 @@ rule main = parse
     { END }
 | begin verb
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       verb lexbuf }
 | verb end
     { raise (Error(Location.curr lexbuf, Lexer Unmatched_verbatim)) }
 | begin target target_format
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       target_format := Some fmt;
       target lexbuf }
 | begin target
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       target_format := None;
       target lexbuf }
 | target end
     { raise (Error(Location.curr lexbuf, Lexer Unmatched_target)) }
 | begin_code
     { reset_string_buffer ();
-      code_start_locs := [Location.curr lexbuf];
+      set_start_loc lexbuf;
       code lexbuf }
 | end_code
     { raise (Error(Location.curr lexbuf, Lexer Unmatched_code)) }
 | begin_pre_code
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       pre_code lexbuf }
 | end_pre_code
     { raise (Error(Location.curr lexbuf, Lexer Unmatched_pre_code)) }
 | begin ref
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       ref_kind := RK_element;
       reference lexbuf }
 | begin ref (ident as lbl) end
@@ -257,7 +280,7 @@ rule main = parse
       else Ref(RK_element, lbl) }
 | begin ref ref_kind
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       if kind = "modules" then begin
         reset_module_list ();
         module_list lexbuf
@@ -272,7 +295,7 @@ rule main = parse
       end }
 | begin link
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       ref_kind := RK_link;
       reference lexbuf }
 | begin title title_label?
@@ -289,7 +312,7 @@ rule main = parse
     { Style SK_subscript }
 | html_code
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
+      set_start_loc lexbuf;
       html_code lexbuf }
 | html_end_code
     { raise (Error(Location.curr lexbuf, Lexer Unmatched_html_code)) }
@@ -342,138 +365,90 @@ rule main = parse
     { Char (Lexing.lexeme lexbuf) }
 | eof                    { EOF }
 
-and author_tag = parse
+and identifier = parse
 | blank+
-    { author_tag lexbuf }
+    { identifier lexbuf }
 | newline
     { incr_line lexbuf;
-      author_tag lexbuf }
-| name as name
-    { let name =
-        name
-        |> remove_opening_blanks
-        |> remove_closing_blanks
-      in
-        Author name }
-| eof | _
-    { raise (Error(Location.curr lexbuf, Lexer Expected_name)) }
-
-and param_tag = parse
-| blank+
-    { param_tag lexbuf }
-| newline
-    { incr_line lexbuf;
-      param_tag lexbuf }
+      identifier lexbuf }
 | ident as id
-    { Param id }
+    { use_start_loc lexbuf;
+      id }
 | eof | _
     { raise (Error(Location.curr lexbuf, Lexer Expected_ident)) }
 
-and raise_tag = parse
+and see = parse
 | blank+
-    { raise_tag lexbuf }
+    { see lexbuf }
 | newline
     { incr_line lexbuf;
-      raise_tag lexbuf }
-| exception as exn
-    { Raise exn }
-| eof | _
-    { raise (Error(Location.curr lexbuf, Lexer Expected_exception)) }
-
-and see_tag = parse
-| blank+
-    { see_tag lexbuf }
-| newline
-    { incr_line lexbuf;
-      see_tag lexbuf }
+      see lexbuf }
 | '<'
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
-      see_tag_url lexbuf }
+      set_see_loc lexbuf;
+      see_url lexbuf }
 | '\''
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
-      see_tag_file lexbuf }
+      set_see_loc lexbuf;
+      see_file lexbuf }
 | '"'
     { reset_string_buffer ();
-      string_start_loc := Location.curr lexbuf;
-      see_tag_doc lexbuf }
+      set_see_loc lexbuf;
+      see_doc lexbuf }
 | eof | _
     { raise (Error(Location.curr lexbuf, Lexer Expected_see)) }
 
-and see_tag_url = parse
+and see_url = parse
 | '>'
-    { See (See_url (get_raw_buffered_string ())) }
+    { use_start_loc lexbuf;
+      See_url (get_raw_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_see_url)) }
+    { raise (Error(get_see_loc (), Lexer Unterminated_see_url)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
-      see_tag_url lexbuf }
+      see_url lexbuf }
 | [^ '>' '\010' '\013' ]+ | _
     { buffer_lexeme lexbuf;
-      see_tag_url lexbuf }
+      see_url lexbuf }
 
-and see_tag_file = parse
-| '\\' '\''
-    { buffer_char '\''; verb lexbuf }
+and see_file = parse
 | '\''
-    { See (See_file (get_raw_buffered_string ())) }
+    { use_start_loc lexbuf;
+      See_file (get_raw_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_see_file)) }
+    { raise (Error(get_see_loc (), Lexer Unterminated_see_file)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
-      see_tag_file lexbuf }
-| [^ '\'' '\\' '\010' '\013' ]+ | _
+      see_file lexbuf }
+| [^ '\'' '\010' '\013' ]+ | _
     { buffer_lexeme lexbuf;
-      see_tag_file lexbuf }
+      see_file lexbuf }
 
-and see_tag_doc = parse
-| '\\' '\"'
-    { buffer_char '\"'; verb lexbuf }
+and see_doc = parse
 | '\"'
-    { See (See_doc (get_raw_buffered_string ())) }
+    { use_start_loc lexbuf;
+      See_doc (get_raw_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_see_doc)) }
+    { raise (Error(get_see_loc (), Lexer Unterminated_see_doc)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
-      see_tag_doc lexbuf }
-| [^ '\"' '\\' '\010' '\013' ]+ | _
+      see_doc lexbuf }
+| [^ '\"' '\010' '\013' ]+ | _
     { buffer_lexeme lexbuf;
-      see_tag_doc lexbuf }
+      see_doc lexbuf }
 
-and since_tag = parse
+and version = parse
 | blank+
-    { since_tag lexbuf }
+    { version lexbuf }
 | newline
     { incr_line lexbuf;
-      since_tag lexbuf }
-| version as ver
-    { Since ver }
-| eof | _
-    { raise (Error(Location.curr lexbuf, Lexer Expected_version)) }
-
-and before_tag = parse
-| blank+
-    { before_tag lexbuf }
-| newline
-    { incr_line lexbuf;
-      before_tag lexbuf }
-| version as ver
-    { Before ver }
-| eof | _
-    { raise (Error(Location.curr lexbuf, Lexer Expected_version)) }
-
-and version_tag = parse
-| blank+
-    { version_tag lexbuf }
-| newline
-    { incr_line lexbuf;
-      version_tag lexbuf }
-| version as ver
-    { Version ver }
+      version lexbuf }
+| version as v
+    { use_start_loc lexbuf;
+      v }
 | eof | _
     { raise (Error(Location.curr lexbuf, Lexer Expected_version)) }
 
@@ -483,9 +458,10 @@ and verb = parse
 | begin verb
     { raise (Error(Location.curr lexbuf, Lexer Nested_verbatim)) }
 | verb end
-    { Verb (get_buffered_string ()) }
+    { use_start_loc lexbuf;
+      Verb (get_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_verbatim)) }
+    { raise (Error(get_start_loc (), Lexer Unterminated_verbatim)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
@@ -499,9 +475,10 @@ and target = parse
 | begin target
     { raise (Error(Location.curr lexbuf, Lexer Nested_target)) }
 | target end
-    { Target(!target_format, get_buffered_string ()) }
+    { use_start_loc lexbuf;
+      Target(!target_format, get_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_target)) }
+    { raise (Error(get_start_loc (), Lexer Unterminated_target)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
@@ -513,23 +490,21 @@ and code = parse
 | escape
     { buffer_char chr; code lexbuf }
 | begin_code
-    { code_start_locs := (Location.curr lexbuf) :: !code_start_locs;
+    { push_inner_start_loc lexbuf;
       buffer_lexeme lexbuf;
       code lexbuf }
 | end_code
-    { match !code_start_locs with
-        [] -> assert false
-      | [l] ->
-        code_start_locs := [];
-        Code(get_buffered_string ())
-      | _ :: rest ->
-        code_start_locs := rest;
-        buffer_lexeme lexbuf;
-        code lexbuf }
+    { match pop_inner_start_loc () with
+      | None ->
+          use_start_loc lexbuf;
+          Code(get_buffered_string ())
+      | Some _ ->
+          buffer_lexeme lexbuf;
+          code lexbuf }
 | eof
-    { match !code_start_locs with
-        [] -> assert false
-      | l:: _ -> raise (Error(l, Lexer Unterminated_code)) }
+    { match pop_inner_start_loc () with
+      | None -> raise (Error(get_start_loc (), Lexer Unterminated_code))
+      | Some l -> raise (Error(l, Lexer Unterminated_code)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
@@ -543,9 +518,10 @@ and pre_code = parse
 | begin_pre_code
     { raise (Error(Location.curr lexbuf, Lexer Nested_pre_code)) }
 | end_pre_code
-    { Pre_Code (get_buffered_string ()) }
+    { use_start_loc lexbuf;
+      Pre_Code (get_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_pre_code)) }
+    { raise (Error(get_start_loc (), Lexer Unterminated_pre_code)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
@@ -559,9 +535,10 @@ and html_code = parse
 | html_code
     { raise (Error(Location.curr lexbuf, Lexer Nested_html_code))  }
 | html_end_code
-    { Code(get_buffered_string ()) }
+    { use_start_loc lexbuf;
+      Code(get_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_html_code)) }
+    { raise (Error(get_start_loc (), Lexer Unterminated_html_code)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
@@ -573,9 +550,10 @@ and reference = parse
 | escape
     { buffer_char chr; reference lexbuf }
 | end
-    { Ref(!ref_kind, get_buffered_string ()) }
+    { use_start_loc lexbuf;
+      Ref(!ref_kind, get_buffered_string ()) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_ref)) }
+    { raise (Error(get_start_loc (), Lexer Unterminated_ref)) }
 | newline
     { incr_line lexbuf;
       buffer_lexeme lexbuf;
@@ -588,9 +566,10 @@ and module_list = parse
     { buffer_char chr; module_list lexbuf }
 | end
     { if buffer_not_empty () then add_module (get_buffered_string ());
+      use_start_loc lexbuf;
       Special_Ref(SRK_module_list (get_module_list ())) }
 | eof
-    { raise (Error(!string_start_loc, Lexer Unterminated_ref)) }
+    { raise (Error(get_start_loc (), Lexer Unterminated_ref)) }
 | blank+
     { if buffer_not_empty () then begin
         add_module (get_buffered_string ());
@@ -644,14 +623,14 @@ let _ =
 let _ =
   List.iter
     (fun (tag, tok) -> Hashtbl.add tag_table tag tok)
-    [ ("author", author_tag);
+    [ ("author", fun _ -> AUTHOR);
       ("deprecated", fun _ -> DEPRECATED);
-      ("param", param_tag);
-      ("raise", raise_tag);
+      ("param", fun lexbuf -> Param (identifier lexbuf));
+      ("raise", fun lexbuf -> Raise (identifier lexbuf));
       ("return", fun _ -> RETURN);
-      ("see", see_tag);
-      ("since", since_tag);
-      ("before", before_tag);
-      ("version", version_tag); ]
+      ("see", fun lexbuf -> See (see lexbuf));
+      ("since", fun lexbuf -> Since (version lexbuf));
+      ("before", fun lexbuf -> Before (version lexbuf));
+      ("version", fun lexbuf -> Version (version lexbuf)); ]
 
 }

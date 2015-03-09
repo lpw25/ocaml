@@ -27,6 +27,12 @@ let minus = String "-"
 
 let plus = String "+"
 
+let space = " "
+
+let newline = "\n"
+
+let blank_line = "\n\n"
+
 let skip_blank_or_newline = function
   | Blank :: rest -> rest
   | Newline :: rest -> rest
@@ -45,8 +51,8 @@ let rec convert acc stracc = function
   | ti :: rest ->
       let acc, stracc =
         match ti with
-        | Blank -> acc, (" " :: stracc)
-        | Newline -> acc, ("\n" :: stracc)
+        | Blank -> acc, (space :: stracc)
+        | Newline -> acc, (newline :: stracc)
         | String s -> acc, (s :: stracc)
         | Blank_line ->
             let acc =
@@ -107,7 +113,7 @@ let html_close_to_string t = "</" ^ t ^ ">"
 %}
 
 %token <string> Param
-%token <string> Author
+%token AUTHOR
 %token <string> Version
 %token <Documentation.see_ref> See
 %token <string> Since
@@ -189,12 +195,12 @@ tags:
 ;
 
 simple_tag:
-| Author            { Author $1 }
 | Version           { Version $1 }
 | Since             { Since $1 }
 ;
 
 text_tag:
+| AUTHOR string          { Author (String.concat "" $2) }
 | See text               { See($1, (text $2)) }
 | Before text            { Before($1, (text $2)) }
 | DEPRECATED text        { Deprecated (text $2) }
@@ -228,6 +234,26 @@ whitespace:
 | blanks                { [Blank] }
 | newline               { [Newline] }
 | blank_line            { [Blank_line] }
+;
+
+/* Strings */
+
+string:
+| whitespace                                      { [] }
+| error                                           { expecting 1 "string" }
+| string_body whitespace                          { List.rev $1 }
+;
+
+string_body:
+| string_item                      { [snd $1] }
+| string_body string_item          { (snd $2) :: (fst $2) :: $1 }
+;
+
+string_item:
+| Char                        { ("", $1) }
+| blanks Char                 { (space, $2) }
+| newline Char                { (newline, $2) }
+| blank_line Char             { (blank_line, $2) }
 ;
 
 /* Basic text */

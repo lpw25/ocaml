@@ -24,9 +24,8 @@ type lexer_error =
 | Unterminated_see_file
 | Unterminated_see_doc
 | Expected_ident
-| Expected_name
+| Expected_string
 | Expected_version
-| Expected_exception
 
 type comment_error =
   Unterminated_simple
