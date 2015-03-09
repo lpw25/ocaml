@@ -322,15 +322,24 @@ shortcut_text_body:
 | blanks simple_text_item                  { [$2; Blank] }
 | blanks text_item_no_line                 { [$2; Blank] }
 | newline simple_text_item                 { [$2; Newline] }
+| newline shortcut_text_item_with_line     { List.rev $2 }
 | shortcut_text_body shortcut_text_item    { List.rev_append $2 $1 }
 ;
 
 shortcut_text_item:
-| simple_text_item                    { [$1] }
-| text_item_no_line                   { [$1] }
-| blanks simple_text_item             { [Blank; $2] }
-| blanks text_item_no_line            { [Blank; $2] }
-| newline simple_text_item            { [Newline; $2] }
+| simple_text_item                           { [$1] }
+| text_item_no_line                          { [$1] }
+| blanks simple_text_item                    { [Blank; $2] }
+| blanks text_item_no_line                   { [Blank; $2] }
+| newline simple_text_item                   { [Newline; $2] }
+| newline shortcut_text_item_with_line       { $2 }
+;
+
+shortcut_text_item_with_line:
+| MINUS simple_text_item             { [Newline; iminus; $2] }
+| MINUS text_item_no_line            { [Newline; iminus; $2] }
+| PLUS simple_text_item              { [Newline; iplus; $2] }
+| PLUS text_item_no_line             { [Newline; iplus; $2] }
 ;
 
 /* Shortcut lists and enums */
