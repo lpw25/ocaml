@@ -14,6 +14,20 @@
 open Documentation
 open Docerr
 
+(* Useful strings *)
+
+let sempty = ""
+
+let sspace = " "
+
+let snewline = "\n"
+
+let sblank_line = "\n\n"
+
+let sminus = "-"
+
+let splus = "+"
+
 (* Accumulators for text elements *)
 
 type text_item =
@@ -23,15 +37,9 @@ type text_item =
   | String of string
   | Element of text_element
 
-let minus = String "-"
+let iminus = String sminus
 
-let plus = String "+"
-
-let space = " "
-
-let newline = "\n"
-
-let blank_line = "\n\n"
+let iplus = String splus
 
 let skip_blank_or_newline = function
   | Blank :: rest -> rest
@@ -47,23 +55,23 @@ let rec skip_whitespace = function
 let rec convert acc stracc = function
   | [] ->
         if stracc = [] then acc
-        else (Raw (String.concat "" stracc)) :: acc
+        else (Raw (String.concat sempty stracc)) :: acc
   | ti :: rest ->
       let acc, stracc =
         match ti with
-        | Blank -> acc, (space :: stracc)
-        | Newline -> acc, (newline :: stracc)
+        | Blank -> acc, (sspace :: stracc)
+        | Newline -> acc, (snewline :: stracc)
         | String s -> acc, (s :: stracc)
         | Blank_line ->
             let acc =
               if stracc = [] then acc
-              else (Raw (String.concat "" stracc)) :: acc
+              else (Raw (String.concat sempty stracc)) :: acc
             in
               (Newline :: acc), []
         | Element e ->
             let acc =
               if stracc = [] then acc
-              else (Raw (String.concat "" stracc)) :: acc
+              else (Raw (String.concat sempty stracc)) :: acc
             in
               (e :: acc), []
       in
@@ -200,7 +208,7 @@ simple_tag:
 ;
 
 text_tag:
-| AUTHOR string          { Author (String.concat "" $2) }
+| AUTHOR string          { Author (String.concat sempty $2) }
 | See text               { See($1, (text $2)) }
 | Before text            { Before($1, (text $2)) }
 | DEPRECATED text        { Deprecated (text $2) }
@@ -250,11 +258,16 @@ string_body:
 ;
 
 string_item:
-| Char                        { ("", $1) }
-| blanks Char                 { (space, $2) }
-| newline Char                { (newline, $2) }
-| blank_line Char             { (blank_line, $2) }
+| string_char                 { (sempty, $1) }
+| blanks string_char          { (sspace, $2) }
+| newline string_char         { (snewline, $2) }
+| blank_line string_char      { (sblank_line, $2) }
 ;
+
+string_char:
+| Char                        { $1 }
+| MINUS                       { sminus }
+| PLUS                        { splus }
 
 /* Basic text */
 
@@ -291,16 +304,16 @@ simple_text_item:
 ;
 
 text_item_no_line:
-| MINUS                              { minus }
-| PLUS                               { plus }
+| MINUS                              { iminus }
+| PLUS                               { iplus }
 ;
 
 text_item_with_line:
 | shortcuts simple_text_item         { List.rev_append $1 [$2] }
-| MINUS simple_text_item             { [Newline; minus; $2] }
-| MINUS text_item_no_line            { [Newline; minus; $2] }
-| PLUS simple_text_item              { [Newline; plus; $2] }
-| PLUS text_item_no_line             { [Newline; plus; $2] }
+| MINUS simple_text_item             { [Newline; iminus; $2] }
+| MINUS text_item_no_line            { [Newline; iminus; $2] }
+| PLUS simple_text_item              { [Newline; iplus; $2] }
+| PLUS text_item_no_line             { [Newline; iplus; $2] }
 ;
 
 /* Text within shortcut lists and enums */
