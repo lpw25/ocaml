@@ -271,6 +271,10 @@ text_item_no_line:
 
 text_item_with_line:
 | shortcuts simple_text_item         { List.rev_append $1 [$2] }
+| MINUS simple_text_item             { [Newline; minus; $2] }
+| MINUS text_item_no_line            { [Newline; minus; $2] }
+| PLUS simple_text_item              { [Newline; plus; $2] }
+| PLUS text_item_no_line             { [Newline; plus; $2] }
 ;
 
 /* Text within shortcut lists and enums */
