@@ -34,24 +34,6 @@ let loc_greater l1 l2 = pos_greater l1.loc_start l2.loc_end
 
 let is_ghost l = l.Location.loc_ghost
 
-(* Adjust locations from the lexer/parser based on a starting position *)
-
-let adjust_pos base p =
-  { base with pos_cnum = base.pos_cnum + p.pos_cnum;
-              pos_lnum = base.pos_lnum + p.pos_lnum - 1;
-              pos_bol = if p.pos_bol = 0 then base.pos_bol
-                        else base.pos_cnum + p.pos_bol }
-
-let adjust_loc base l =
-  { l with loc_start = adjust_pos base l.loc_start;
-           loc_end = adjust_pos base l.loc_end; }
-
-let adjust_comment base = function
-    Special(s, loc) -> Special(s, adjust_loc base loc)
-  | Simple -> Simple
-  | Blank_line -> Blank_line
-  | Stop loc -> Stop (adjust_loc base loc)
-
 (* Functions for obtaining documentation from comments *)
 
 (* Lex the comments within (optional) bound, before
@@ -83,14 +65,28 @@ let lex_comments ?bound ?start ?finish file =
                 (finish_cnum - start_pos.pos_cnum)
     with Invalid_argument _ -> ""
   in
-  let comments =
     try
-      Comments.lex s
+      Comments.lex s start_pos
     with Docerr.Error(loc, err) ->
-      !report_error (adjust_loc start_pos loc) err;
+      !report_error loc err;
       []
-  in
-    List.map (adjust_comment start_pos) comments
+
+(* Adjust locations from the lexer/parser based on a starting position *)
+let adjust_pos base p =
+  { base with pos_cnum = base.pos_cnum + p.pos_cnum;
+              pos_lnum = base.pos_lnum + p.pos_lnum - 1;
+              pos_bol = if p.pos_bol = 0 then base.pos_bol
+                        else base.pos_cnum + p.pos_bol }
+
+let adjust_loc base l =
+  { l with loc_start = adjust_pos base l.loc_start;
+           loc_end = adjust_pos base l.loc_end; }
+
+let adjust_comment base = function
+    Special(s, loc) -> Special(s, adjust_loc base loc)
+  | Simple -> Simple
+  | Blank_line -> Blank_line
+  | Stop loc -> Stop (adjust_loc base loc)
 
 (* Parse documentation from a string *)
 let parse_info str =

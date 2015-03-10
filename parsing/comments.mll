@@ -217,8 +217,9 @@ and special_comment = parse
       special_comment lexbuf }
 
 {
-  let lex s =
+  let lex s pos =
     let lexbuf = Lexing.from_string s in
+    lexbuf.lex_curr_p <- pos;
     let rec loop acc =
       match main lexbuf with
         Some c -> loop (c :: acc)
