@@ -31,15 +31,25 @@ let keep_stars = ref false
 
 (* Update the current location with file name and line number. *)
 
-let update_loc lexbuf loc =
-  lexbuf.lex_curr_p <- loc
-
 let incr_line ?(lines = 1) ?(chars = 0) lexbuf =
   let pos = lexbuf.lex_curr_p in
   lexbuf.lex_curr_p <-
-    { lexbuf.lex_curr_p with
-      pos_lnum = pos.pos_lnum + lines;
-      pos_bol = pos.pos_cnum - chars; }
+    { pos with
+        pos_lnum = pos.pos_lnum + lines;
+        pos_bol = pos.pos_cnum - chars; }
+
+let update_loc lexbuf fname lnum =
+  let pos = lexbuf.lex_curr_p in
+  let fname =
+    match fname with
+    | None -> pos.pos_fname
+    | Some fname -> fname
+  in
+  lexbuf.lex_curr_p <-
+    { pos with
+        pos_fname = fname;
+        pos_lnum = lnum;
+        pos_bol = pos.pos_cnum; }
 
 (* To buffer special comments *)
 
@@ -103,11 +113,16 @@ rule main = parse
     { comment_start_locs := [Location.curr lexbuf];
       reset_string_buffer ();
       special_comment lexbuf }
-| eof
-    { None }
 | "(*"
     { comment_start_locs := [Location.curr lexbuf];
       simple_comment lexbuf }
+| "#" [' ' '\t']* (['0'-'9']+ as num) [' ' '\t']*
+      ("\"" ([^ '\010' '\013' '"' ] * as name) "\"")?
+      [^ '\010' '\013'] * newline
+    { update_loc lexbuf name (int_of_string num);
+      main lexbuf }
+| eof
+    { None }
 | safe+ | _
     { main lexbuf }
 
