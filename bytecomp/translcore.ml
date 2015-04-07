@@ -206,6 +206,11 @@ let primitives_table = create_hashtable 57 [
   "%obj_size", Parraylength Pgenarray;
   "%obj_field", Parrayrefu Pgenarray;
   "%obj_set_field", Parraysetu Pgenarray;
+  "%float_array_length", Parraylength Pfloatarray;
+  "%float_array_safe_get", Parrayrefs Pfloatarray;
+  "%float_array_safe_set", Parraysets Pfloatarray;
+  "%float_array_unsafe_get", Parrayrefu Pfloatarray;
+  "%float_array_unsafe_set", Parraysetu Pfloatarray;
   "%obj_is_int", Pisint;
   "%lazy_force", Plazyforce;
   "%nativeint_of_int", Pbintofint Pnativeint;
@@ -314,6 +319,50 @@ let primitives_table = create_hashtable 57 [
   "%int_as_pointer", Pint_as_pointer;
 ]
 
+let fast_index_primitives_table =
+  create_hashtable 12 [
+    "%array_opt_get", Parrayrefu Pgenarray;
+    "%array_opt_set", Parraysetu Pgenarray;
+    "%float_array_opt_get", Parrayrefu Pfloatarray;
+    "%float_array_opt_set", Parraysetu Pfloatarray;
+    "%string_opt_get", Pstringrefu;
+    "%string_opt_set", Pstringsetu;
+    "%caml_ba_opt_ref_1",
+       Pbigarrayref(true, 1, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_ref_2",
+       Pbigarrayref(true, 2, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_ref_3",
+       Pbigarrayref(true, 3, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_set_1",
+       Pbigarrayset(true, 1, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_set_2",
+       Pbigarrayset(true, 2, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_set_3",
+       Pbigarrayset(true, 3, Pbigarray_unknown, Pbigarray_unknown_layout);
+]
+
+let safe_index_primitives_table =
+  create_hashtable 12 [
+    "%array_opt_get", Parrayrefs Pgenarray;
+    "%array_opt_set", Parraysets Pgenarray;
+    "%float_array_opt_get", Parrayrefs Pfloatarray;
+    "%float_array_opt_set", Parraysets Pfloatarray;
+    "%string_opt_get", Pstringrefs;
+    "%string_opt_set", Pstringsets;
+    "%caml_ba_opt_ref_1",
+       Pbigarrayref(false, 1, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_ref_2",
+       Pbigarrayref(false, 2, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_ref_3",
+       Pbigarrayref(false, 3, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_set_1",
+       Pbigarrayset(false, 1, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_set_2",
+       Pbigarrayset(false, 2, Pbigarray_unknown, Pbigarray_unknown_layout);
+    "%caml_ba_opt_set_3",
+       Pbigarrayset(false, 3, Pbigarray_unknown, Pbigarray_unknown_layout);
+]
+
 let prim_makearray =
   { prim_name = "caml_make_vect"; prim_arity = 2; prim_alloc = true;
     prim_native_name = ""; prim_native_float = false }
@@ -331,7 +380,13 @@ let find_primitive loc prim_name =
     | "%loc_LINE" -> Ploc Loc_LINE
     | "%loc_POS" -> Ploc Loc_POS
     | "%loc_MODULE" -> Ploc Loc_MODULE
-    | name -> Hashtbl.find primitives_table name
+    | name ->
+      let index_primitives_table =
+        if !Clflags.fast then fast_index_primitives_table
+        else safe_index_primitives_table
+      in
+        try Hashtbl.find index_primitives_table name with
+        | Not_found -> Hashtbl.find primitives_table name
 
 let transl_prim loc prim args =
   let prim_name = prim.prim_name in
