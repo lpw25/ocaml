@@ -25,20 +25,22 @@ external append_prim : 'a array -> 'a array -> 'a array = "caml_array_append"
 external concat : 'a array list -> 'a array = "caml_array_concat"
 external unsafe_blit :
   'a array -> int -> 'a array -> int -> int -> unit = "caml_array_blit"
-external make_float: int -> float array = "caml_make_float_vect"
 
 let init l f =
   if l = 0 then [||] else
-   let res = create l (f 0) in
+   let res = make l (f 0) in
    for i = 1 to pred l do
      unsafe_set res i (f i)
    done;
    res
 
+let make_float l =
+  make l 0.0
+
 let make_matrix sx sy init =
-  let res = create sx [||] in
+  let res = make sx [||] in
   for x = 0 to pred sx do
-    unsafe_set res x (create sy init)
+    unsafe_set res x (make sy init)
   done;
   res
 
@@ -75,7 +77,7 @@ let iter f a =
 let map f a =
   let l = length a in
   if l = 0 then [||] else begin
-    let r = create l (f(unsafe_get a 0)) in
+    let r = make l (f(unsafe_get a 0)) in
     for i = 1 to l - 1 do
       unsafe_set r i (f(unsafe_get a i))
     done;
@@ -88,7 +90,7 @@ let iteri f a =
 let mapi f a =
   let l = length a in
   if l = 0 then [||] else begin
-    let r = create l (f 0 (unsafe_get a 0)) in
+    let r = make l (f 0 (unsafe_get a 0)) in
     for i = 1 to l - 1 do
       unsafe_set r i (f i (unsafe_get a i))
     done;
@@ -109,7 +111,7 @@ let rec list_length accu = function
 let of_list = function
     [] -> [||]
   | hd::tl as l ->
-      let a = create (list_length 0 l) hd in
+      let a = make (list_length 0 l) hd in
       let rec fill i = function
           [] -> a
         | hd::tl -> unsafe_set a i hd; fill (i+1) tl in

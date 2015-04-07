@@ -13,8 +13,12 @@
 (* Auxiliaries for type-based optimizations, e.g. array kinds *)
 
 val has_base_type : Typedtree.expression -> Path.t -> bool
-val maybe_pointer : Typedtree.expression -> bool
-val array_kind : Typedtree.expression -> Lambda.array_kind
-val array_pattern_kind : Typedtree.pattern -> Lambda.array_kind
+
+val maybe_addr_type : Env.t -> Types.type_expr -> Lambda.maybe_addr
+val maybe_addr : Typedtree.expression -> Lambda.maybe_addr
+
+val maybe_addr_array_type : Env.t -> Types.type_expr -> Lambda.maybe_addr
+val maybe_addr_array : Typedtree.expression -> Lambda.maybe_addr
+
 val bigarray_kind_and_layout :
       Typedtree.expression -> Lambda.bigarray_kind * Lambda.bigarray_layout

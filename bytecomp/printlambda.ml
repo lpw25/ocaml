@@ -40,6 +40,10 @@ let rec struct_const ppf = function
         List.iter (fun f -> fprintf ppf "@ %s" f) fl in
       fprintf ppf "@[<1>[|@[%s%a@]|]@]" f1 floats fl
 
+let maybe_addr = function
+  | Pnot_addr -> "int"
+  | Pmaybe_addr -> "addr"
+
 let boxed_integer_name = function
   | Pnativeint -> "nativeint"
   | Pint32 -> "int32"
@@ -105,12 +109,14 @@ let primitive ppf = function
   | Pmakeblock(tag, Immutable) -> fprintf ppf "makeblock %i" tag
   | Pmakeblock(tag, Mutable) -> fprintf ppf "makemutable %i" tag
   | Pfield n -> fprintf ppf "field %i" n
-  | Psetfield(n, ptr) ->
-      let instr = if ptr then "setfield_ptr " else "setfield_imm " in
-      fprintf ppf "%s%i" instr n
+  | Psetfield(n, addr) ->
+      fprintf ppf "setfield[%s]%i" (maybe_addr addr) n
   | Pfloatfield n -> fprintf ppf "floatfield %i" n
   | Psetfloatfield n -> fprintf ppf "setfloatfield %i" n
   | Pduprecord (rep, size) -> fprintf ppf "duprecord %a %i" record_rep rep size
+  | Pobjsize -> fprintf ppf "obj.size"
+  | Pobjfield -> fprintf ppf "obj.field"
+  | Pobjsetfield -> fprintf ppf "obj.set_field"
   | Plazyforce -> fprintf ppf "force"
   | Pccall p -> fprintf ppf "%s" p.prim_name
   | Praise k -> fprintf ppf "%s" (Lambda.raise_kind k)
@@ -156,12 +162,18 @@ let primitive ppf = function
   | Pstringsetu -> fprintf ppf "string.unsafe_set"
   | Pstringrefs -> fprintf ppf "string.get"
   | Pstringsets -> fprintf ppf "string.set"
-  | Parraylength _ -> fprintf ppf "array.length"
-  | Pmakearray _ -> fprintf ppf "makearray "
-  | Parrayrefu _ -> fprintf ppf "array.unsafe_get"
-  | Parraysetu _ -> fprintf ppf "array.unsafe_set"
-  | Parrayrefs _ -> fprintf ppf "array.get"
-  | Parraysets _ -> fprintf ppf "array.set"
+  | Parraylength -> fprintf ppf "array.length"
+  | Pmakearray -> fprintf ppf "makearray"
+  | Parrayrefu -> fprintf ppf "array.unsafe_get"
+  | Parraysetu addr -> fprintf ppf "array.unsafe_set[%s]" (maybe_addr addr)
+  | Parrayrefs -> fprintf ppf "array.get"
+  | Parraysets addr -> fprintf ppf "array.set[%s]" (maybe_addr addr)
+  | Pfloatarraylength -> fprintf ppf "floatarray.length"
+  | Pmakefloatarray -> fprintf ppf "makefloatarray"
+  | Pfloatarrayrefu -> fprintf ppf "floatarray.unsafe_get"
+  | Pfloatarraysetu -> fprintf ppf "floatarray.unsafe_set"
+  | Pfloatarrayrefs -> fprintf ppf "floatarray.get"
+  | Pfloatarraysets -> fprintf ppf "floatarray.set"
   | Pctconst c ->
      let const_name = match c with
        | Big_endian -> "big_endian"
