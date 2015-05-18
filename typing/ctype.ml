@@ -80,6 +80,8 @@ open Btype
 
 (**** Errors ****)
 
+let pr6787 = ref false
+
 exception Unify of (type_expr * type_expr) list
 
 exception Tags of label * label
@@ -1054,22 +1056,46 @@ let rec copy ?env ?partial ?keep_names ty =
               in
               (* Open row if partial for pattern and contains Reither *)
               let more', row =
-                match partial with
-                  Some (free_univars, false) when row.row_closed
-                  && not row.row_fixed && TypeSet.is_empty (free_univars ty) ->
-                    let not_reither (_, f) =
-                      match row_field_repr f with
-                        Reither _ -> false
-                      | _ -> true
-                    in
-                    if List.for_all not_reither row.row_fields
-                    then (more', row) else
-                    (newty2 (if keep then more.level else !current_level)
-                       (Tvar None),
-                     {row_fields = List.filter not_reither row.row_fields;
-                      row_more = more; row_bound = ();
-                      row_closed = false; row_fixed = false; row_name = None})
-                | _ -> (more', row)
+                if !pr6787 then begin
+                  match partial with
+                    Some (free_univars, false) ->
+                      let more' =
+                        if more.id != more'.id then more' else
+                        let lv = if keep then more.level else !current_level in
+                        newty2 lv (Tvar None)
+                      in
+                      let not_reither (_, f) =
+                        match row_field_repr f with
+                          Reither _ -> false
+                        | _ -> true
+                      in
+                      if row.row_closed && not row.row_fixed
+                      && TypeSet.is_empty (free_univars ty)
+                      && not (List.for_all not_reither row.row_fields) then
+                        (more',
+                         {row_fields = List.filter not_reither row.row_fields;
+                          row_more = more'; row_bound = ();
+                          row_closed = false; row_fixed = false; row_name = None})
+                      else (more', row)
+                  | _ -> (more', row)
+                end else begin
+                  match partial with
+                    Some (free_univars, false) when row.row_closed
+                    && not row.row_fixed && TypeSet.is_empty (free_univars ty) ->
+                      let not_reither (_, f) =
+                        match row_field_repr f with
+                          Reither _ -> false
+                        | _ -> true
+                      in
+                      if List.for_all not_reither row.row_fields
+                      then (more', row) else
+                      (newty2 (if keep then more.level else !current_level)
+                         (Tvar None),
+                       {row_fields = List.filter not_reither row.row_fields;
+                        row_more = more; row_bound = ();
+                        row_closed = false; row_fixed = false; row_name = None})
+                  | _ -> (more', row)
+                end
               in
               (* Register new type first for recursion *)
               more.desc <- Tsubst(newgenty(Ttuple[more';t]));

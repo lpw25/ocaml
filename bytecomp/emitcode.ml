@@ -399,6 +399,13 @@ let to_file outchan unit_name objfile code =
   seek_out outchan pos_depl;
   output_binary_int outchan pos_compunit
 
+let to_digest code =
+  init();
+  emit code;
+  let code = Bytes.create !out_position in
+  LongString.unsafe_blit_to_bytes !out_buffer 0 code 0 !out_position;
+  Digest.bytes code
+
 (* Emission to a memory block *)
 
 let to_memory init_code fun_code =

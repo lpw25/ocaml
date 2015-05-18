@@ -15,6 +15,8 @@
 open Asttypes
 open Types
 
+val pr6787 : bool ref
+
 exception Unify of (type_expr * type_expr) list
 exception Tags of label * label
 exception Subtype of

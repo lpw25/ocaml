@@ -96,6 +96,8 @@ ASMCOMP=asmcomp/arch.cmo asmcomp/debuginfo.cmo \
   asmcomp/schedgen.cmo asmcomp/scheduling.cmo \
   asmcomp/emitaux.cmo asmcomp/emit.cmo asmcomp/asmgen.cmo \
   asmcomp/asmlink.cmo asmcomp/asmlibrarian.cmo asmcomp/asmpackager.cmo \
+  bytecomp/instruct.cmo bytecomp/bytegen.cmo \
+  bytecomp/printinstr.cmo  bytecomp/opcodes.cmo bytecomp/emitcode.cmo \
   driver/opterrors.cmo driver/optcompile.cmo
 
 TOPLEVEL=toplevel/genprintval.cmo toplevel/toploop.cmo \

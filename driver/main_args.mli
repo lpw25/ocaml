@@ -43,6 +43,7 @@ module type Common_options = sig
   val _dtypedtree : unit -> unit
   val _drawlambda : unit -> unit
   val _dlambda : unit -> unit
+  val _dinstr : unit -> unit
 
   val anonymous : string -> unit
 end
@@ -94,8 +95,6 @@ module type Bytecomp_options = sig
   val _vmthread : unit -> unit
   val _use_runtime : string -> unit
 
-  val _dinstr : unit -> unit
-
   val _use_prims : string -> unit
 end;;
 
@@ -107,7 +106,6 @@ module type Bytetop_options = sig
   val _nopromptcont : unit -> unit
   val _stdin : unit -> unit
 
-  val _dinstr : unit -> unit
 end;;
 
 module type Optcommon_options = sig

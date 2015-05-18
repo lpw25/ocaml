@@ -57,6 +57,48 @@ let print_if ppf flag printer arg =
 let (++) x f = f x
 let (+++) (x, y) f = (x, f y)
 
+let reset_stuff () =
+  Translobj.reset ();
+  Translmod.reset ();
+  Bytegen.reset ();
+  Lambda.reset ();
+  Emitcode.reset ()
+
+let check_implementation ppf sourcefile outputprefix modulename ast =
+  let dont_write_files = !Clflags.dont_write_files in
+  Clflags.dont_write_files := true;
+  let without_fix =
+    reset_stuff ();
+    let env = Compmisc.initial_env() in
+    Ctype.pr6787 := false;
+    ast
+    ++ Typemod.type_implementation sourcefile outputprefix modulename env
+    ++ Translmod.transl_implementation modulename
+    ++ print_if ppf Clflags.dump_rawlambda Printlambda.lambda
+    ++ Simplif.simplify_lambda
+    ++ print_if ppf Clflags.dump_lambda Printlambda.lambda
+    ++ Bytegen.compile_implementation modulename
+    ++ print_if ppf Clflags.dump_instr Printinstr.instrlist
+    ++ Emitcode.to_digest
+  in
+  let with_fix =
+    reset_stuff ();
+    let env = Compmisc.initial_env() in
+    Ctype.pr6787 := true;
+    ast
+    ++ Typemod.type_implementation sourcefile outputprefix modulename env
+    ++ Translmod.transl_implementation modulename
+    ++ print_if ppf Clflags.dump_rawlambda Printlambda.lambda
+    ++ Simplif.simplify_lambda
+    ++ print_if ppf Clflags.dump_lambda Printlambda.lambda
+    ++ Bytegen.compile_implementation modulename
+    ++ print_if ppf Clflags.dump_instr Printinstr.instrlist
+    ++ Emitcode.to_digest
+  in
+  if with_fix <> without_fix then
+    Location.prerr_warning Location.none Warnings.PR6787;
+  Clflags.dont_write_files := dont_write_files
+
 let implementation ppf sourcefile outputprefix =
   Compmisc.init_path true;
   let modulename = module_of_filename ppf sourcefile outputprefix in
@@ -66,6 +108,7 @@ let implementation ppf sourcefile outputprefix =
   let cmxfile = outputprefix ^ ".cmx" in
   let objfile = outputprefix ^ ext_obj in
   let comp ast =
+    Ctype.pr6787 := true;
     if !Clflags.print_types
     then
       ast
@@ -83,10 +126,9 @@ let implementation ppf sourcefile outputprefix =
       ++ print_if ppf Clflags.dump_typedtree
           Printtyped.implementation_with_coercion
       ++ Translmod.transl_store_implementation modulename
-      +++ print_if ppf Clflags.dump_rawlambda Printlambda.lambda
       +++ Simplif.simplify_lambda
-      +++ print_if ppf Clflags.dump_lambda Printlambda.lambda
       ++ Asmgen.compile_implementation outputprefix ppf;
+      check_implementation ppf sourcefile outputprefix modulename ast;
       Compilenv.save_unit_info cmxfile;
     end;
     Warnings.check_fatal ();

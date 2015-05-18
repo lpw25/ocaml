@@ -21,6 +21,9 @@ val to_file: out_channel -> string -> string -> instruction list -> unit
              name of compilation unit implemented
              path of cmo file being written
              list of instructions to emit *)
+
+val to_digest: instruction list -> Digest.t
+
 val to_memory: instruction list -> instruction list ->
                     bytes * int * (reloc_info * int) list
         (* Arguments:

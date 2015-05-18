@@ -151,6 +151,7 @@ module Options = Main_args.Make_optcomp_options (struct
   let _dlinear = set dump_linear
   let _dstartup = set keep_startup_file
   let _opaque = set opaque
+  let _dinstr = set dump_instr
 
   let anonymous = anonymous
 end);;
