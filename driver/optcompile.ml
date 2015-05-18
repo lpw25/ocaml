@@ -65,6 +65,7 @@ let reset_stuff () =
   Emitcode.reset ()
 
 let check_implementation ppf sourcefile outputprefix modulename ast =
+  Clflags.native_code := false;
   let dont_write_files = !Clflags.dont_write_files in
   Clflags.dont_write_files := true;
   let without_fix =
@@ -97,7 +98,8 @@ let check_implementation ppf sourcefile outputprefix modulename ast =
   in
   if with_fix <> without_fix then
     Location.prerr_warning Location.none Warnings.PR6787;
-  Clflags.dont_write_files := dont_write_files
+  Clflags.dont_write_files := dont_write_files;
+  Clflags.native_code := true
 
 let implementation ppf sourcefile outputprefix =
   Compmisc.init_path true;
