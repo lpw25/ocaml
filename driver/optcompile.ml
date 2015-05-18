@@ -110,7 +110,7 @@ let implementation ppf sourcefile outputprefix =
   let cmxfile = outputprefix ^ ".cmx" in
   let objfile = outputprefix ^ ext_obj in
   let comp ast =
-    Ctype.pr6787 := true;
+    Ctype.pr6787 := false;
     if !Clflags.print_types
     then
       ast

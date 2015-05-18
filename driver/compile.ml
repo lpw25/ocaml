@@ -111,7 +111,7 @@ let implementation ppf sourcefile outputprefix =
   let env = Compmisc.initial_env() in
   if !Clflags.print_types then begin
     let comp ast =
-      Ctype.pr6787 := true;
+      Ctype.pr6787 := false;
       ast
       ++ print_if ppf Clflags.dump_parsetree Printast.implementation
       ++ print_if ppf Clflags.dump_source Pprintast.structure
@@ -130,7 +130,7 @@ let implementation ppf sourcefile outputprefix =
     let objfile = outputprefix ^ ".cmo" in
     let oc = open_out_bin objfile in
     let comp ast =
-      Ctype.pr6787 := true;
+      Ctype.pr6787 := false;
       ast
       ++ print_if ppf Clflags.dump_parsetree Printast.implementation
       ++ print_if ppf Clflags.dump_source Pprintast.structure
