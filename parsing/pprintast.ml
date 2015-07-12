@@ -653,6 +653,10 @@ class printer  ()= object(self:'self)
           self#expression  e
     | Pexp_variant (l,Some eo) ->
         pp f "@[<2>`%s@;%a@]" l  self#simple_expr eo
+    | Pexp_quote e ->
+        pp f "@[<2><<@ %a@ >>@]" self#expression  e
+    | Pexp_escape e ->
+        pp f "@[<2>$%a>>@]" self#simple_expr  e
     | Pexp_extension e -> self#extension f e
     | _ -> self#expression1 f x
    end (* NNN *)

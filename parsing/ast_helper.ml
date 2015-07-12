@@ -114,6 +114,8 @@ module Exp = struct
   let newtype ?loc ?attrs a b = mk ?loc ?attrs (Pexp_newtype (a, b))
   let pack ?loc ?attrs a = mk ?loc ?attrs (Pexp_pack a)
   let open_ ?loc ?attrs a b c = mk ?loc ?attrs (Pexp_open (a, b, c))
+  let quote ?loc ?attrs a = mk ?loc ?attrs (Pexp_quote a)
+  let escape ?loc ?attrs a = mk ?loc ?attrs (Pexp_escape a)
   let extension ?loc ?attrs a = mk ?loc ?attrs (Pexp_extension a)
 
   let case lhs ?guard rhs =

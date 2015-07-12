@@ -318,6 +318,8 @@ and expression_desc =
         (* let open M in E
            let! open M in E
         *)
+  | Pexp_quote of expression
+  | Pexp_escape of expression
   | Pexp_extension of extension
         (* [%id] *)
 

@@ -1205,11 +1205,9 @@ simple_expr:
   | LPAREN seq_expr error
       { unclosed "(" 1 ")" 3 }
   | LESSLESS expr GREATERGREATER
-      { wrap_exp_attrs $2
-           (None,[ghloc "metaocaml.bracket",PStr []]) }
+      { mkexp(Pexp_quote $2) }
   | DOLLAR simple_expr %prec prec_escape  /* NNN */
-      { wrap_exp_attrs $2 
-           (None,[ghloc "metaocaml.escape",PStr []]) }             /* NNN */
+      { mkexp(Pexp_escape $2) }             /* NNN */
   | BEGIN ext_attributes seq_expr END
       { wrap_exp_attrs (reloc_exp $3) $2 (* check location *) }
   | BEGIN ext_attributes END
