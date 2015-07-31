@@ -1313,17 +1313,30 @@ let transl_exception env sext =
   let newenv = Env.add_extension ~check:true ext.ext_id ext.ext_type env in
     ext, newenv
 
+let is_fixed_arity attrs =
+  List.exists
+    (function
+      | (({txt = "ocaml.fixed_arity"|"fixed_arity"; _}), _) -> true
+      | _ -> false)
+    attrs
+
 (* Translate a value declaration *)
 let transl_value_decl env loc valdecl =
   let cty = Typetexp.transl_type_scheme env valdecl.pval_type in
   let ty = cty.ctyp_type in
+  let arity = Ctype.arity ty in
+  let fixed = is_fixed_arity valdecl.pval_attributes in
+  let fixed_arity =
+    if fixed then Some arity
+    else None
+  in
   let v =
   match valdecl.pval_prim with
     [] ->
       { val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
-        val_attributes = valdecl.pval_attributes }
+        val_attributes = valdecl.pval_attributes;
+        val_fixed = fixed_arity; }
   | decl ->
-      let arity = Ctype.arity ty in
       let prim = Primitive.parse_declaration arity decl in
       if arity = 0 && prim.prim_name.[0] <> '%' then
         raise(Error(valdecl.pval_type.ptyp_loc, Null_arity_external));
@@ -1332,7 +1345,8 @@ let transl_value_decl env loc valdecl =
       && prim.prim_native_name = ""
       then raise(Error(valdecl.pval_type.ptyp_loc, Missing_native_external));
       { val_type = ty; val_kind = Val_prim prim; Types.val_loc = loc;
-        val_attributes = valdecl.pval_attributes }
+        val_attributes = valdecl.pval_attributes;
+        val_fixed = fixed_arity; }
   in
   let (id, newenv) =
     Env.enter_value valdecl.pval_name.txt v env

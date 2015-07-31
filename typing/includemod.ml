@@ -50,10 +50,19 @@ exception Error of error list
 
 (* Inclusion between value descriptions *)
 
+let check_fixed_arity id vd1 vd2 =
+  match vd1.val_fixed, vd2.val_fixed with
+  | None, _ -> ()
+  | Some i, Some j when i = j -> ()
+  | Some i, ar ->
+      Location.prerr_warning vd2.val_loc
+        (Warnings.Bad_arity(false, (Ident.name id), i, ar))
+
 let value_descriptions env cxt subst id vd1 vd2 =
   Cmt_format.record_value_dependency vd1 vd2;
   Env.mark_value_used env (Ident.name id) vd1;
   let vd2 = Subst.value_description subst vd2 in
+  check_fixed_arity id vd1 vd2;
   try
     Includecore.value_descriptions env vd1 vd2
   with Includecore.Dont_match ->

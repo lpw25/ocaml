@@ -88,6 +88,7 @@ type value_description =
     val_kind: value_kind;
     val_loc: Location.t;
     val_attributes: Parsetree.attributes;
+    val_fixed: int option;
  }
 
 and value_kind =

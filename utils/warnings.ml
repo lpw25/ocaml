@@ -68,6 +68,7 @@ type t =
   | Eliminated_optional_arguments of string list (* 48 *)
   | No_cmi_file of string                   (* 49 *)
   | Bad_docstring of bool                   (* 50 *)
+  | Bad_arity of bool * string * int * int option (* 51 *)
 ;;
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
@@ -127,9 +128,10 @@ let number = function
   | Eliminated_optional_arguments _ -> 48
   | No_cmi_file _ -> 49
   | Bad_docstring _ -> 50
+  | Bad_arity _ -> 51
 ;;
 
-let last_warning_number = 50
+let last_warning_number = 51
 (* Must be the max number returned by the [number] function. *)
 
 let letter = function
@@ -389,6 +391,23 @@ let message = function
   | Bad_docstring unattached ->
       if unattached then "unattached documentation comment (ignored)"
       else "ambiguous documentation comment"
+  | Bad_arity(true, s, i, None) ->
+      Printf.sprintf
+        "%s has fixed arity %d but is used without being applied"
+        s i
+  | Bad_arity(true, s, i, Some j) ->
+      Printf.sprintf
+        "%s has fixed arity %d but is used with arity %d"
+          s i j
+  | Bad_arity(false, s, i, None) ->
+      Printf.sprintf
+        "%s has fixed arity %d but is exported without fixed arity"
+          s i
+  | Bad_arity(false, s, i, Some j) ->
+      Printf.sprintf
+        "%s has fixed arity %d but is exported with fixed arity %d"
+          s i j
+
 ;;
 
 let nerrors = ref 0;;

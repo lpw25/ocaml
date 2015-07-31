@@ -1262,7 +1262,7 @@ let add_pattern_variables ?check ?check_as env =
        let check = if as_var then check_as else check in
        Env.add_value ?check id
          {val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
-          val_attributes = [];
+          val_attributes = []; val_fixed = None;
          } env
      )
      pv env,
@@ -1306,6 +1306,7 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
           Env.add_value id' {val_type = ty;
                              val_kind = Val_ivar (Immutable, cl_num);
                              val_attributes = [];
+                             val_fixed = None;
                              Types.val_loc = loc;
                             } ~check
             env))
@@ -1334,11 +1335,13 @@ let type_self_pattern cl_num privty val_env met_env par_env spat =
          (Env.add_value id {val_type = ty;
                             val_kind = Val_unbound;
                             val_attributes = [];
+                            val_fixed = None;
                             Types.val_loc = loc;
                            } val_env,
           Env.add_value id {val_type = ty;
                             val_kind = Val_self (meths, vars, cl_num, privty);
                             val_attributes = [];
+                            val_fixed = None;
                             Types.val_loc = loc;
                            }
             ~check:(fun s -> if as_var then Warnings.Unused_var s
@@ -1346,6 +1349,7 @@ let type_self_pattern cl_num privty val_env met_env par_env spat =
             met_env,
           Env.add_value id {val_type = ty; val_kind = Val_unbound;
                             val_attributes = [];
+                            val_fixed = None;
                             Types.val_loc = loc;
                            } par_env))
       pv (val_env, met_env, par_env)
@@ -1720,9 +1724,9 @@ let unify_exp env exp expected_ty =
     Printtyp.raw_type_expr expected_ty; *)
     unify_exp_types exp.exp_loc env exp.exp_type expected_ty
 
-let rec type_exp env sexp =
+let rec type_exp ?application env sexp =
   (* We now delegate everything to type_expect *)
-  type_expect env sexp (newvar ())
+  type_expect ?application env sexp (newvar ())
 
 (* Typing of an expression with an expected type.
    This provide better error messages, and allows controlled
@@ -1730,17 +1734,17 @@ let rec type_exp env sexp =
    In the principal case, [type_expected'] may be at generic_level.
  *)
 
-and type_expect ?in_function env sexp ty_expected =
+and type_expect ?in_function ?application env sexp ty_expected =
   let previous_saved_types = Cmt_format.get_saved_types () in
   Typetexp.warning_enter_scope ();
   Typetexp.warning_attribute sexp.pexp_attributes;
-  let exp = type_expect_ ?in_function env sexp ty_expected in
+  let exp = type_expect_ ?in_function ?application env sexp ty_expected in
   Typetexp.warning_leave_scope ();
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);
   exp
 
-and type_expect_ ?in_function env sexp ty_expected =
+and type_expect_ ?in_function ?application env sexp ty_expected =
   let loc = sexp.pexp_loc in
   (* Record the expression type before unifying it with the expected type *)
   let rue exp =
@@ -1759,6 +1763,14 @@ and type_expect_ ?in_function env sexp ty_expected =
           in
           let name = Path.name ~paren:Oprint.parenthesized_ident path in
           Stypes.record (Stypes.An_ident (loc, name, annot))
+        end;
+        begin
+          match application, desc.val_fixed with
+          | Some true, _ -> ()
+          | _, None -> ()
+          | _, Some ar ->
+              Location.prerr_warning loc
+                (Warnings.Bad_arity(true, Path.name path, ar, None));
         end;
         rue {
           exp_desc =
@@ -1890,7 +1902,7 @@ and type_expect_ ?in_function env sexp ty_expected =
         Syntaxerr.ill_formed_ast loc "Function application with no argument.";
       begin_def (); (* one more level for non-returning functions *)
       if !Clflags.principal then begin_def ();
-      let funct = type_exp env sfunct in
+      let funct = type_exp ~application:true env sfunct in
       if !Clflags.principal then begin
           end_def ();
           generalize_structure funct.exp_type
@@ -2200,6 +2212,7 @@ and type_expect_ ?in_function env sexp ty_expected =
         | Ppat_var {txt} ->
             Env.enter_value txt {val_type = instance_def Predef.type_int;
                                  val_attributes = [];
+                                 val_fixed = None;
                                  val_kind = Val_reg; Types.val_loc = loc; } env
               ~check:(fun s -> Warnings.Unused_for_index s)
         | _ ->
@@ -2362,6 +2375,7 @@ and type_expect_ ?in_function env sexp ty_expected =
                                            {val_type = method_type;
                                             val_kind = Val_reg;
                                             val_attributes = [];
+                                            val_fixed = None;
                                             Types.val_loc = Location.none});
                                 exp_loc = loc; exp_extra = [];
                                 exp_type = method_type;
@@ -3104,6 +3118,7 @@ and type_argument env sarg ty_expected' ty_expected =
          Texp_ident(Path.Pident id, mknoloc (Longident.Lident name),
                     {val_type = ty; val_kind = Val_reg;
                      val_attributes = [];
+                     val_fixed = None;
                      Types.val_loc = Location.none})}
       in
       let eta_pat, eta_var = var_pair "eta" ty_arg in
@@ -3216,7 +3231,7 @@ and type_application env funct sargs =
     end
   in
   let warned = ref false in
-  let rec type_args args omitted ty_fun ty_fun0 ty_old sargs more_sargs =
+  let rec type_args args omitted fixed ty_fun ty_fun0 ty_old sargs more_sargs =
     match expand_head env ty_fun, expand_head env ty_fun0 with
       {desc=Tarrow (l, ty, ty_fun, com); level=lv} as ty_fun',
       {desc=Tarrow (_, ty0, ty_fun0, _)}
@@ -3287,13 +3302,37 @@ and type_application env funct sargs =
             end else begin
               may_warn funct.exp_loc
                 (Warnings.Without_principality "commuted an argument");
+              (* TODO: We have missed a desired argument *)
               None
             end
+        in
+        let fixed =
+          match fixed, arg, sargs, more_sargs with
+          | None, _, _, _ -> None
+          | Some(i, ar, name, loc), None, _, _ ->
+              let call_arity = ar - i in
+                Location.prerr_warning loc
+                  (Warnings.Bad_arity(true, name, ar, Some call_arity));
+                None
+          | Some(1, ar, name, loc), _, [], [] -> None
+          | Some(1, ar, name, loc), _, _, _ ->
+              let call_arity =
+                ar + (List.length sargs) + (List.length more_sargs)
+              in
+                Location.prerr_warning loc
+                  (Warnings.Bad_arity(true, name, ar, Some call_arity));
+                None
+          | Some(i, ar, name, loc), _, [], [] ->
+              let call_arity = 1 + ar - i in
+                Location.prerr_warning loc
+                  (Warnings.Bad_arity(true, name, ar, Some call_arity));
+                None
+          | Some(i, ar, name, loc), _, _, _ -> Some (i - 1, ar, name, loc)
         in
         let omitted =
           if arg = None then (l,ty,lv) :: omitted else omitted in
         let ty_old = if sargs = [] then ty_fun else ty_old in
-        type_args ((l,arg,optional)::args) omitted ty_fun ty_fun0
+        type_args ((l,arg,optional)::args) omitted fixed ty_fun ty_fun0
           ty_old sargs more_sargs
     | _ ->
         match sargs with
@@ -3318,12 +3357,21 @@ and type_application env funct sargs =
       | _ -> ()
       end;
       (["", Some exp, Required], ty_res)
+  | Texp_ident(p, _, {val_fixed = Some i}), _ ->
+      let loc = funct.exp_loc in
+      let name = Path.name p in
+      let fixed = Some(i, i, name, loc) in
+      let ty = funct.exp_type in
+      if ignore_labels then
+        type_args [] [] fixed ty (instance env ty) ty [] sargs
+      else
+        type_args [] [] fixed ty (instance env ty) ty sargs []
   | _ ->
       let ty = funct.exp_type in
       if ignore_labels then
-        type_args [] [] ty (instance env ty) ty [] sargs
+        type_args [] [] None ty (instance env ty) ty [] sargs
       else
-        type_args [] [] ty (instance env ty) ty sargs []
+        type_args [] [] None ty (instance env ty) ty sargs []
 
 and type_construct env loc lid sarg ty_expected attrs =
   let opath =

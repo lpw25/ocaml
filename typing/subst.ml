@@ -307,6 +307,7 @@ let value_description s descr =
   { val_type = type_expr s descr.val_type;
     val_kind = descr.val_kind;
     val_loc = loc s descr.val_loc;
+    val_fixed = descr.val_fixed;
     val_attributes = attrs s descr.val_attributes;
    }
 

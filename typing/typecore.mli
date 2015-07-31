@@ -45,10 +45,11 @@ val check_partial:
         ?lev:int -> Env.t -> type_expr ->
 	Location.t -> Typedtree.case list -> Typedtree.partial
 val type_expect:
-        ?in_function:(Location.t * type_expr) ->
+        ?in_function:(Location.t * type_expr) -> ?application:bool ->
         Env.t -> Parsetree.expression -> type_expr -> Typedtree.expression
 val type_exp:
-        Env.t -> Parsetree.expression -> Typedtree.expression
+        ?application:bool -> Env.t ->
+        Parsetree.expression -> Typedtree.expression
 val type_approx:
         Env.t -> Parsetree.expression -> type_expr
 val type_argument:
