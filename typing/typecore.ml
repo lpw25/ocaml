@@ -109,38 +109,6 @@ also check all val_attributes and Val_reg
 *)
 let global_stage : Trx.stage ref  = ref 0
 
-(* Obsolete; kept for reference 
-
-  The list of active classifiers. The length of the list
-  is the level of an expression.
-  Type-checking the body of a bracket adds a type variable
-  to the list; type-checking of an escape removes the
-  top-most classifier.
-  Be sure to reset this list upon any exception;
-  alternatively; reset the list when beginning a new type-level
-  expression or binding
-  (whenever you do Typetexp.reset_type_variables();)
-
-let global_stage : Env.stage ref  = ref []
-
-   Unify classifier lists, *right-to-left*
-   See the bug Tue Jan 20 12:18:00 GMTST 2004 in XXCC-BUG-OPEN-FIXED
-   why we need this order.
-   The current classifier is left-most, and the lists don't have
-   to have the same length.
-   Example:
-   <<fun x -> << x >> >>
-   When type-checking the innermost bracket, the global_stage
-   will contain ['b,'a] and the level of x will be ['a]
-   The unification will succeed, without changing anything, as expected.
-
-let unify_stage env tl1 tl2 =
-   let rec loop = function
-   | (t1::tl1,t2::tl2) -> unify env t1 t2; loop (tl1,tl2)
-   | _ -> ()
-   in loop (List.rev tl1, List.rev tl2)
-*)
-
 (* This function does not take the env argument. Normally env affects
    the printing of paths (search for raise_wrong_stage_error
    in this file and printtyp.ml).
@@ -148,18 +116,18 @@ let unify_stage env tl1 tl2 =
 *)
 let raise_wrong_stage_error loc n m =
   raise @@
-  Error_forward(Location.errorf ~loc 
+  Error_forward(Location.errorf ~loc
    "Wrong level: variable bound at level %d and used at level %d" n m)
 
 let raise_unsupported loc txt =
   raise @@
-  Error_forward(Location.errorf ~loc 
+  Error_forward(Location.errorf ~loc
                   "Not supported within brackets: %s" txt)
 
 let with_stage_up body =
    let old_stage = !global_stage in
    let () = incr global_stage in
-   try 
+   try
     let r = body () in
     global_stage := old_stage; r
    with e ->
@@ -168,10 +136,10 @@ let with_stage_up body =
 let with_stage_down loc env body =
    let old_stage = !global_stage in
    if !global_stage = 0 then
-     raise @@ Error_forward(Location.errorf ~loc 
+     raise @@ Error_forward(Location.errorf ~loc
        "Wrong level: escape at level 0");
    decr global_stage;
-   try 
+   try
     let r = body () in
     global_stage := old_stage; r
    with e ->
@@ -1341,10 +1309,11 @@ let add_pattern_variables ?check ?check_as env =
   (List.fold_right
      (fun (id, ty, name, loc, as_var) env ->
        let check = if as_var then check_as else check in
-       Env.add_value ?check id
-         {val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
-          val_attributes = [Trx.attr_level !global_stage]    (* NNN *)
-         } env
+       let vd =
+         { val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
+           val_stage = !global_stage; val_attributes = [] }
+       in
+         Env.add_value ?check id vd env
      )
      pv env,
    get_ref module_variables)
@@ -1383,14 +1352,15 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
            if as_var then Warnings.Unused_var s
            else Warnings.Unused_var_strict s in
          let id' = Ident.create (Ident.name id) in
-         ((id', name, id, ty)::pv,
-          Env.add_value id' {val_type = ty;
-                             val_kind = Val_ivar (Immutable, cl_num);
-                             val_attributes = 
-                                   [Trx.attr_level !global_stage];    (* NNN *)
-                             Types.val_loc = loc;
-                            } ~check
-            env))
+         let vd =
+           { val_type = ty;
+             val_kind = Val_ivar (Immutable, cl_num);
+             val_attributes = [];
+             val_stage = !global_stage;
+             Types.val_loc = loc; }
+         in
+         let new_env = Env.add_value id' vd ~check env in
+           ((id', name, id, ty)::pv, new_env))
       !pattern_variables ([], met_env)
   in
   let val_env, _ = add_pattern_variables val_env in
@@ -1583,13 +1553,6 @@ let rec approx_type env sty =
   | _ -> newvar ()
 
 let rec type_approx env sexp =          (* NNN the whole function *)
-  let open Trx in
-  match what_stage_attr sexp.pexp_attributes with
-  | Stage0 -> type_approx_orig env sexp
-    (* instance env @@ Predef.type_code @@ type_approx_orig env sexp *)
-  | _ -> newvar ()
-and
-  type_approx_orig env sexp =          (* NNN end *)
   match sexp.pexp_desc with
     Pexp_let (_, _, e) -> type_approx env e
   | Pexp_fun (p, _, _, e) when is_optional p ->
@@ -1845,59 +1808,7 @@ and type_expect ?in_function env sexp ty_expected =
    bracket Texp node. Rather, invoke trx_bracket to translate 
    the bracket body and convert it to the c ode generator.
 *)
-and type_expect_ ?in_function env sexp ty_expected =
-  let loc = sexp.pexp_loc in
-  let open Trx in
-  (* Keep in mind that there may be several metaocaml attributes,
-     and their order matters. 
-  *)
-  match what_stage_attr sexp.pexp_attributes with
-  | Stage0 -> type_expect_orig ?in_function env sexp ty_expected
-  | Bracket(battr,attrs) ->
-       (* Typechecking bracket *)
-       (* follow Pexp_array or Pexp_lazy as a template *)
-       (* Expected type: ty code where ty is the type
-          of the expression within brackets.
-        *)
-      let ty = newgenvar() in     (* expected type for the bracketed sexp *)
-      let to_unify = Predef.type_code ty in
-      unify_exp_types loc env to_unify ty_expected;
-      let exp =
-        with_stage_up (fun () ->
-                (* drop bracket attr *)
-          let sexp = {sexp with pexp_attributes = attrs} in
-          type_expect env sexp ty) in
-      re @@
-      if !global_stage = 0 then
-        (* Check if the expression non-expansive before the translation *)
-        let nonexp = is_nonexpansive exp in
-        let exp = trx_bracket 1 exp in
-        {exp with exp_type = instance env ty_expected;
-                  exp_attributes = 
-                    if nonexp then attr_nonexpansive :: exp.exp_attributes
-                              else exp.exp_attributes}
-      else
-        texp_braesc battr exp env (instance env ty_expected)
-
-       (* NNN:  Typechecking escapes *)
-       (* If ~e is expected to have the type ty then
-          e is expected to have the type ty code
-        *)
-  | Escape(battr,attrs) ->    
-      with_stage_down loc env (fun () ->
-       let sexp_ty_expected = Predef.type_code ty_expected in
-       let sexp = {sexp with pexp_attributes = attrs} in (* drop bracket attr *)
-       let exp = type_expect env sexp sexp_ty_expected in
-       re @@
-         texp_braesc battr exp env (instance env ty_expected))
-
-       (* There is nothing special in type-checking CSPs.
-          After lifting, a CSP value becomes an ordinaru expression.
-        *)
-  | _ -> type_expect_orig ?in_function env sexp ty_expected
-  (* NNN end *)
-
-and type_expect_orig ?in_function env sexp ty_expected =  (* NNN *)
+and type_expect ?in_function env sexp ty_expected =  (* NNN *)
   let loc = sexp.pexp_loc in
   (* Record the expression type before unifying it with the expected type *)
   let rue exp =
@@ -1917,7 +1828,7 @@ and type_expect_orig ?in_function env sexp ty_expected =  (* NNN *)
           let name = Path.name ~paren:Oprint.parenthesized_ident path in
           Stypes.record (Stypes.An_ident (loc, name, annot))
         end;
-        let stage = Trx.get_level desc.val_attributes in        (* NNN *)
+        let stage = desc.val_stage in
         rue {
           exp_desc =
             begin match desc.val_kind with
@@ -2360,11 +2271,14 @@ and type_expect_orig ?in_function env sexp ty_expected =  (* NNN *)
         match param.ppat_desc with
         | Ppat_any -> Ident.create "_for", env
         | Ppat_var {txt} ->
-            Env.enter_value txt {val_type = instance_def Predef.type_int;
-                                 val_attributes =     (* NNN *)
-                                     [Trx.attr_level !global_stage];
-                                 val_kind = Val_reg; Types.val_loc = loc; } env
-              ~check:(fun s -> Warnings.Unused_for_index s)
+            let vd =
+              { val_type = instance_def Predef.type_int;
+                val_attributes = [];
+                val_stage = !global_stage;
+                val_kind = Val_reg; Types.val_loc = loc; }
+            in
+            let check s = Warnings.Unused_for_index s in
+              Env.enter_value txt vd env ~check
         | _ ->
             raise (Error (param.ppat_loc, env, Invalid_for_loop_index))
       in
@@ -2519,31 +2433,37 @@ and type_expect_orig ?in_function env sexp ty_expected =  (* NNN *)
                   let (obj_ty, res_ty) = filter_arrow env method_type "" in
                   unify env obj_ty desc.val_type;
                   unify env res_ty (instance env typ);
-                  let exp =
-                    Texp_apply({exp_desc =
-                                Texp_ident(Path.Pident method_id, lid,
-                                           {val_type = method_type;
-                                            val_kind = Val_reg;
-                                            val_attributes =        (* NNN *)
-                                               [Trx.attr_level !global_stage]; 
-                                            Types.val_loc = Location.none});
-                                exp_loc = loc; exp_extra = [];
-                                exp_type = method_type;
-                                exp_attributes = []; (* check *)
-                                exp_env = env},
-                          ["",
-                            Some {exp_desc = Texp_ident(path, lid, desc);
-                                  exp_loc = obj.exp_loc; exp_extra = [];
-                                  exp_type = desc.val_type;
-                                  exp_attributes = []; (* check *)
-                                  exp_env = env},
-                               Required])
+                  let method_desc =
+                    { val_type = method_type;
+                      val_kind = Val_reg;
+                      val_attributes = [];
+                      val_stage = !global_stage;
+                      Types.val_loc = Location.none }
                   in
-                  (Tmeth_name met, Some (re {exp_desc = exp;
-                                             exp_loc = loc; exp_extra = [];
-                                             exp_type = typ;
-                                             exp_attributes = []; (* check *)
-                                             exp_env = env}), typ)
+                  let method_exp =
+                    { exp_desc =
+                        Texp_ident(Path.Pident method_id, lid, method_desc);
+                      exp_loc = loc; exp_extra = [];
+                      exp_type = method_type;
+                      exp_attributes = []; (* check *)
+                      exp_env = env }
+                  in
+                  let anc_exp =
+                    { exp_desc = Texp_ident(path, lid, desc);
+                      exp_loc = obj.exp_loc; exp_extra = [];
+                      exp_type = desc.val_type;
+                      exp_attributes = []; (* check *)
+                      exp_env = env }
+                  in
+                  let exp =
+                    { exp_desc =
+                        Texp_apply(method_exp, ["", Some anc_exp, Required]);
+                      exp_loc = loc; exp_extra = [];
+                      exp_type = typ;
+                      exp_attributes = []; (* check *)
+                      exp_env = env }
+                  in
+                  (Tmeth_name met, Some (re exp), typ)
               |  _ ->
                   assert false
               end
@@ -2848,6 +2768,43 @@ and type_expect_orig ?in_function env sexp ty_expected =  (* NNN *)
                      sexp.pexp_attributes) ::
                       exp.exp_extra;
       }
+  | Pexp_quote sbody ->
+       (* Typechecking bracket *)
+       (* follow Pexp_array or Pexp_lazy as a template *)
+       (* Expected type: ty code where ty is the type
+          of the expression within brackets.
+        *)
+      let ty = newgenvar() in     (* expected type for the bracketed sexp *)
+      let to_unify = Predef.type_expr ty in
+      unify_exp_types loc env to_unify ty_expected;
+      let body = with_stage_up (fun () -> type_expect env sexp ty) in
+      re @@
+      if !global_stage = 0 then
+        (* Check if the expression non-expansive before the translation *)
+        let nonexp = is_nonexpansive body in
+        let body = trx_bracket 1 body in
+        {body with exp_type = instance env ty_expected;
+                   exp_attributes =
+                     if nonexp then attr_nonexpansive :: exp.exp_attributes
+                     else exp.exp_attributes}
+      else
+        texp_braesc battr exp env (instance env ty_expected)
+
+       (* NNN:  Typechecking escapes *)
+       (* If ~e is expected to have the type ty then
+          e is expected to have the type ty code
+        *)
+  | Pexp_escape sbody ->
+      with_stage_down loc env (fun () ->
+       let sexp_ty_expected = Predef.type_code ty_expected in
+       let sexp = {sexp with pexp_attributes = attrs} in (* drop bracket attr *)
+       let exp = type_expect env sexp sexp_ty_expected in
+       re @@
+         texp_braesc battr exp env (instance env ty_expected))
+
+       (* There is nothing special in type-checking CSPs.
+          After lifting, a CSP value becomes an ordinaru expression.
+        *)
   | Pexp_extension ext ->
       raise (Error_forward (Typetexp.error_of_extension ext))
 
@@ -3260,16 +3217,25 @@ and type_argument env sarg ty_expected' ty_expected =
       (* eta-expand to avoid side effects *)
       let var_pair name ty =
         let id = Ident.create name in
-        {pat_desc = Tpat_var (id, mknoloc name); pat_type = ty;pat_extra=[];
-         pat_attributes = [];
-         pat_loc = Location.none; pat_env = env},
-        {exp_type = ty; exp_loc = Location.none; exp_env = env;
-         exp_extra = []; exp_attributes = [];
-         exp_desc =
-         Texp_ident(Path.Pident id, mknoloc (Longident.Lident name),
-                    {val_type = ty; val_kind = Val_reg;
-                     val_attributes = [Trx.attr_level !global_stage]; (* NNN *)
-                     Types.val_loc = Location.none})}
+        let pat =
+          { pat_desc = Tpat_var (id, mknoloc name); pat_type = ty;
+            pat_extra = []; pat_attributes = [];
+            pat_loc = Location.none; pat_env = env }
+        in
+        let vd =
+          { val_type = ty;
+            val_kind = Val_reg;
+            val_attributes = [];
+            val_stage = !global_stage;
+            Types.val_loc = Location.none }
+        in
+        let exp =
+          { exp_type = ty; exp_loc = Location.none; exp_env = env;
+            exp_extra = []; exp_attributes = [];
+            exp_desc =
+              Texp_ident(Path.Pident id, mknoloc (Longident.Lident name), vd); }
+        in
+          pat, exp
       in
       let eta_pat, eta_var = var_pair "eta" ty_arg in
       let func texp =

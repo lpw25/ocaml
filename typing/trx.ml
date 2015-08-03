@@ -154,74 +154,6 @@ let rec map_accum : ('accum -> 'a -> 'b * 'accum) -> 'accum -> 'a list ->
 
 let initial_env = Env.initial_safe_string
 
-(* Attributes *)
-(* In a Parsetree, brackets, escape and CSPs are attributes on 
-   the corresponding nodes. 
-*)
-
-let attr_bracket = (Location.mknoloc "metaocaml.bracket",PStr [])
-
-let attr_escape = (Location.mknoloc "metaocaml.escape",PStr [])
-
-let rec get_attr : string -> attributes -> Parsetree.structure option =
-  fun name -> function
-    | [] -> None
-    | ({txt = n}, PStr str) :: _ when n = name -> Some str
-    | _ :: t -> get_attr name t
-
-let attr_csp : Longident.t loc -> attribute = fun lid ->
-  (Location.mknoloc "metaocaml.csp",PStr [
-     Ast_helper.Str.eval (Ast_helper.Exp.ident lid)])
-
-(* If the attribute is present, the expression is non-expansive 
-   We use physical equality comparison, to speed things up
-*)
-let attr_nonexpansive : attribute = 
-  (Location.mknoloc "metaocaml.nonexpansive",PStr [])
-
-  
-(* The result of what_stage_attr *)
-type stage_attr_elim = 
-  | Stage0
-  | Bracket of attribute * (* bracket attribute *)
-               attributes  (* other attributes  *)
-  | Escape  of attribute * (* escape attribute *)
-               attributes  (* other attributes  *)
-  | CSP     of attribute * Longident.t loc * (* CSP attribute and lid *)
-               attributes  (* other attributes  *)
-
-(* Determining if an AST node bears a staging attribute *)
-let what_stage_attr : attributes -> stage_attr_elim =
-  let rec loop acc = function
-    | [] -> Stage0
-    | (({txt = "metaocaml.bracket"},_) as a) :: t -> 
-        Bracket (a,acc @ t)
-    | (({txt = "metaocaml.escape"},_) as a) :: t -> 
-        Escape (a,acc @ t)
-    | (({txt = "metaocaml.csp"},PStr [{pstr_desc = 
-            Pstr_eval ({pexp_desc=Pexp_ident lid},_)}]) as a) :: t -> 
-        CSP (a,lid,acc @ t)
-    | a :: t -> loop (a::acc) t
-  in loop []
-
-(* Staging level 
-   It is set via an attribute on the value_description in the Typedtree 
-*)
-type stage = int                        (* staging level *)
-
-let attr_level n = 
-  (Location.mknoloc "metaocaml.level",PStr [
-   Ast_helper.Str.eval (Ast_helper.Exp.constant (Const_int n))])
-
-let get_level : Parsetree.attributes -> stage = fun attrs ->
-  match get_attr "metaocaml.level" attrs with
-  | None -> 0
-  | Some [{pstr_desc = 
-            Pstr_eval ({pexp_desc=Pexp_constant (Const_int n)},_)}] -> 
-     assert (n>=0); n
-  | _ -> assert false  (* Invalid level attribute *)
-
-
 (* In a Typedtree, <e> is represented as a sequence
         begin 0; e end
    again, with the corresponding attribute.
@@ -468,8 +400,8 @@ let texp_int : int -> Typedtree.expression = fun n ->
 let texp_zero = (* TExp node for constant 0 *)
   texp_int 0
 
-let texp_braesc : 
-  attribute -> Typedtree.expression -> Env.t -> type_expr -> 
+let texp_braesc :
+  attribute -> Typedtree.expression -> Env.t -> type_expr ->
   Typedtree.expression =
   fun attr exp env ty ->
     mk_texp ~env ~attrs:(attr :: exp.exp_attributes)
@@ -480,7 +412,7 @@ let texp_braesc :
    with an annotation that contains the name of the identifier
  *)
 
-let texp_csp_raw : 
+let texp_csp_raw :
   attribute -> Asttypes.constant -> Env.t -> type_expr -> Typedtree.expression =
   fun attr cnt env ty ->
     {
@@ -533,9 +465,9 @@ let texp_csp : Obj.t -> Typedtree.expression = fun v ->
   if Obj.is_int v then texp_int (Obj.obj v)
    (* We treat strings and bytes identically *)
   else if Obj.tag v = Obj.string_tag then texp_string (Obj.obj v)
-  else 
+  else
     let vstr = Marshal.to_string v [] in
-    let () = if false then debug_print ("texp_csp, marshall: size " ^ 
+    let () = if false then debug_print ("texp_csp, marshall: size " ^
                 string_of_int (String.length vstr)) in
     mk_texp
         (texp_apply (texp_ident "Marshal.from_string")
@@ -1599,96 +1531,17 @@ let map_option : ('a -> 'b) -> 'a option -> 'b option = fun f -> function
 
 
 let rec trx_bracket : int -> expression -> expression = fun n exp ->
-  (*
-      let _ = debug_print "Texp_bracket" in
-      let rec prattr = function
-        | [] -> ()
-        | ({txt=name},_) :: t -> 
-            debug_print ("attr: " ^ name); prattr t
-      in prattr   exp.exp_attributes;
-      let _ = Location.print Format.err_formatter (exp.exp_loc) in
-  *)
-  (* Handle staging constructs, which are distinguished solely by
-     attributes *)
-  match what_stage_attr exp.exp_attributes with
-  | Stage0 -> trx_bracket_ n exp
-        (* see texp_braesc for the representation of brackets and escapes
-           in the Typedtree *)
-  | Bracket(_,attrs) -> 
-  begin
-    match exp.exp_desc with
-    | Texp_sequence (_,exp) ->
-      {exp with exp_type = wrap_ty_in_code n exp.exp_type;
-                exp_attributes = attrs;
-                exp_desc =
-                 texp_apply (texp_ident "Trx.build_bracket")
-                   [texp_loc exp.exp_loc; trx_bracket (n+1) exp]}
-    | _ -> assert false   (* corrupted representation of bracket *)
-  end
-  | Escape(_,attrs) -> 
-  begin
-    match exp.exp_desc with
-    | Texp_sequence (_,exp) ->
-        if n = 1 then exp	               (* switch to 0 level *)
-        else
-        {exp with 
-          exp_type = wrap_ty_in_code n exp.exp_type;
-          exp_attributes = attrs;
-          exp_desc = texp_apply (texp_ident "Trx.build_escape")
-                      [texp_loc exp.exp_loc; trx_bracket (n-1) exp]}
-    | _ -> assert false   (* corrupted representation of escape *)
-  end
-  | CSP(_,li,attrs) -> (* For CSP, we only need to propagate the CSP attr *)
-     {exp with 
-         exp_type = wrap_ty_in_code n exp.exp_type;
-         exp_attributes = attrs;
-         exp_desc = texp_apply 
-                     (texp_ident "Trx.dyn_quote") [exp; texp_lid li]}
-
-  (* convert the case list to the function that receives the sequence
-     of bound variables and returns the array of translated guards and
-     bodies
-   *)
-and trx_case_list_body : int -> Typedtree.pattern -> 
-  expression ->  (* used as the template for the result: we use
-                    the env, location info *)
-  case list -> expression = fun n binding_pat exp cl ->
-  (* Translate the future-stage function as the present-stage 
-     function whose argument is an array of variables 
-     (should be a tuple, really) and the type
-     some_targ code array -> tres code array
-     Using array forces a single type to all arguments. Although
-     it is phantom anyway, it is still a bummer. Instead of
-     array, we should have used a tuple. But then we can't
-     generically write build_fun.
-   *)
-  (* Pattern representing the function's argument:
-     array of variables bound by the original pattern, in order.
-   *)
-  let body = 
-    texp_array (List.map (fun {c_guard;c_rhs;_} -> 
-      texp_tuple [texp_option @@ map_option (trx_bracket n) c_guard;
-                  trx_bracket n c_rhs])
-      cl) in
-  { exp with
-    exp_desc = Texp_function ("",[texp_case binding_pat body],Total);
-    exp_type = {exp.exp_type with desc =
-                   Tarrow ("",binding_pat.pat_type, body.exp_type, Cok)}
-  }
-
-
-and trx_bracket_ : int -> expression -> expression = fun n exp ->
-  let new_desc = match exp.exp_desc with
-    (* Don't just do only for vd.val_kind = Val_reg 
+  match exp.exp_desc with
+    (* Don't just do only for vd.val_kind = Val_reg
        because (+) or Array.get are Val_prim *)
   | Texp_ident (p,li,vd)  ->
-    let stage = get_level vd.val_attributes in
+    let stage = vd.val_stage in
     (* We make CSP only if the variable is bound at the stage 0.
        Variables bound at stage > 0 are subject to renaming.
        They are translated into stage 0 variable but of a different
        type (t code), as explained in the title comments.
      *)
-    if stage = 0 then trx_csp exp p li 
+    if stage = 0 then trx_csp exp p li
     else
          (* Future-stage bound variable becomes the present-stage
             bound-variable, but at a different type.
@@ -2010,15 +1863,41 @@ and trx_bracket_ : int -> expression -> expression = fun n exp ->
   | Texp_object (cl,fl) -> not_supported exp.exp_loc "Objects"
   | Texp_pack _         -> not_supported exp.exp_loc "First-class modules"
   (* | _ -> not_supported exp.exp_loc "not yet supported" *)
-  in                               
-  (* See untype_extra in tools/untypeast.ml *)
-  let trx_extra (extra, loc, attr) exp =  (* TODO: take care of attr *)
-   let desc =
+  | Texp_quote body -> begin
+      match body.exp_desc with
+      | Texp_sequence(_, exp) ->
+          {exp with exp_type = wrap_ty_in_code n exp.exp_type;
+                    exp_desc =
+                      texp_apply (texp_ident "Trx.build_bracket")
+                                 [texp_loc exp.exp_loc; trx_bracket (n+1) exp]}
+      | _ -> assert false   (* corrupted representation of bracket *)
+    end
+  | Texp_escape body -> begin
+      match body.exp_desc with
+      | Texp_sequence(_,exp) ->
+          if n = 1 then exp	               (* switch to 0 level *)
+          else
+            {exp with
+              exp_type = wrap_ty_in_code n exp.exp_type;
+              exp_desc = texp_apply (texp_ident "Trx.build_escape")
+                                    [texp_loc exp.exp_loc; trx_bracket (n-1) exp]}
+      | _ -> assert false   (* corrupted representation of escape *)
+    end
+  | CSP(_,li,attrs) -> (* For CSP, we only need to propagate the CSP attr *)
+     {exp with
+         exp_type = wrap_ty_in_code n exp.exp_type;
+         exp_attributes = attrs;
+         exp_desc = texp_apply
+                     (texp_ident "Trx.dyn_quote") [exp; texp_lid li]}
+
+
+and trx_extra (extra, loc, attr) exp =  (* TODO: take care of attr *)
+  let desc =
     match extra with
       (* Should check that cty1 and cty2 contain only globally declared
          type components
        *)
-    | Texp_constraint cty -> 
+    | Texp_constraint cty ->
         not_supported loc "Texp_constraint"
     | Texp_coerce (cto,ct) ->
         not_supported loc "Texp_coerce"
@@ -2037,8 +1916,43 @@ and trx_bracket_ : int -> expression -> expression = fun n exp ->
            *)
     | Texp_poly cto  -> not_supported loc "Texp_poly"
     | Texp_newtype s -> not_supported loc "Texp_newtype"
-    in {exp with exp_loc = loc; exp_desc = desc} (* type is the same: code *)
   in
-  List.fold_right trx_extra exp.exp_extra
-  {exp with exp_type = wrap_ty_in_code n exp.exp_type;
-            exp_desc = new_desc}
+    {exp with exp_loc = loc; exp_desc = desc} (* type is the same: code *)
+
+and tr_bracket : int -> expression -> expression = fun n exp ->
+  let new_desc = trx_bracket_ n exp in
+    List.fold_right
+      trx_extra exp.exp_extra
+      {exp with exp_type = wrap_ty_in_code n exp.exp_type;
+                exp_desc = new_desc}
+
+  (* convert the case list to the function that receives the sequence
+     of bound variables and returns the array of translated guards and
+     bodies
+   *)
+and trx_case_list_body : int -> Typedtree.pattern -> 
+  expression ->  (* used as the template for the result: we use
+                    the env, location info *)
+  case list -> expression = fun n binding_pat exp cl ->
+  (* Translate the future-stage function as the present-stage 
+     function whose argument is an array of variables 
+     (should be a tuple, really) and the type
+     some_targ code array -> tres code array
+     Using array forces a single type to all arguments. Although
+     it is phantom anyway, it is still a bummer. Instead of
+     array, we should have used a tuple. But then we can't
+     generically write build_fun.
+   *)
+  (* Pattern representing the function's argument:
+     array of variables bound by the original pattern, in order.
+   *)
+  let body = 
+    texp_array (List.map (fun {c_guard;c_rhs;_} -> 
+      texp_tuple [texp_option @@ map_option (trx_bracket n) c_guard;
+                  trx_bracket n c_rhs])
+      cl) in
+  { exp with
+    exp_desc = Texp_function ("",[texp_case binding_pat body],Total);
+    exp_type = {exp.exp_type with desc =
+                   Tarrow ("",binding_pat.pat_type, body.exp_type, Cok)}
+  }

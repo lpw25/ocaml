@@ -127,9 +127,9 @@ and ident_some = ident_create "Some"
    Eof, etc. Otherwise, binary compatibility with OCaml breaks,
    and we have to do the expensive bootstrapping.
 *)
-let ident_code = ident_create "code"    (* NNN *)
-let path_code  = Pident ident_code      (* NNN *)
-let type_code t = newgenty (Tconstr(path_code, [t], ref Mnil)) (* NNN *)
+let ident_epxr = ident_create "expr"    (* NNN *)
+let path_expr  = Pident ident_expr      (* NNN *)
+let type_expr t = newgenty (Tconstr(path_expr, [t], ref Mnil)) (* NNN *)
 
 let common_initial_env add_type add_extension empty_env =
   let decl_bool =
