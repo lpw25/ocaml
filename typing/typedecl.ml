@@ -1311,6 +1311,7 @@ let transl_value_decl env loc valdecl =
   match valdecl.pval_prim with
     [] ->
       { val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
+        val_stage = 0; (* TODO: should use global stage *)
         val_attributes = valdecl.pval_attributes }
   | decl ->
       let arity = Ctype.arity ty in
@@ -1322,6 +1323,7 @@ let transl_value_decl env loc valdecl =
       && prim.prim_native_name = ""
       then raise(Error(valdecl.pval_type.ptyp_loc, Missing_native_external));
       { val_type = ty; val_kind = Val_prim prim; Types.val_loc = loc;
+        val_stage = 0; (* TODO: should use global stage *)
         val_attributes = valdecl.pval_attributes }
   in
   let (id, newenv) =

@@ -127,7 +127,7 @@ and ident_some = ident_create "Some"
    Eof, etc. Otherwise, binary compatibility with OCaml breaks,
    and we have to do the expensive bootstrapping.
 *)
-let ident_epxr = ident_create "expr"    (* NNN *)
+let ident_expr = ident_create "expr"    (* NNN *)
 let path_expr  = Pident ident_expr      (* NNN *)
 let type_expr t = newgenty (Tconstr(path_expr, [t], ref Mnil)) (* NNN *)
 
@@ -169,7 +169,7 @@ let common_initial_env add_type add_extension empty_env =
      type_arity = 1;
      type_variance = [Variance.covariant]}
       (* NNN added decl_code *)
-  and decl_code =
+  and decl_expr =
     let tvar = newgenvar() in
     {decl_abstr with
      type_params = [tvar];
@@ -202,7 +202,7 @@ let common_initial_env add_type add_extension empty_env =
                          [newgenty (Ttuple[type_string; type_int; type_int])] (
   add_extension ident_undefined_recursive_module
                          [newgenty (Ttuple[type_string; type_int; type_int])] (
-  add_type ident_code decl_code (       (* NNN *)
+  add_type ident_expr decl_expr (       (* NNN *)
   add_type ident_int64 decl_abstr (
   add_type ident_int32 decl_abstr (
   add_type ident_nativeint decl_abstr (

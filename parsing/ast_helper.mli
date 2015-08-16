@@ -138,6 +138,9 @@ module Exp:
     val newtype: ?loc:loc -> ?attrs:attrs -> string -> expression -> expression
     val pack: ?loc:loc -> ?attrs:attrs -> module_expr -> expression
     val open_: ?loc:loc -> ?attrs:attrs -> override_flag -> lid -> expression -> expression
+                                                                               val quote : ?loc:loc -> ?attrs:attrs -> expression -> expression
+    val escape : ?loc:loc -> ?attrs:attrs -> expression -> expression
+
     val extension: ?loc:loc -> ?attrs:attrs -> extension -> expression
 
     val case: pattern -> ?guard:expression -> expression -> case

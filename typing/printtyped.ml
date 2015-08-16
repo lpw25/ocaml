@@ -372,6 +372,12 @@ and expression i ppf x =
   | Texp_pack me ->
       line i ppf "Pexp_pack";
       module_expr i ppf me
+  | Texp_quote e ->
+      line i ppf "Pexp_quote";
+      expression i ppf e
+  | Texp_escape e ->
+      line i ppf "Pexp_escape";
+      expression i ppf e
 
 and value_description i ppf x =
   line i ppf "value_description %a %a\n" fmt_ident x.val_id fmt_location x.val_loc;

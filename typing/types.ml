@@ -81,11 +81,15 @@ module OrderedString =
 module Meths = Map.Make(OrderedString)
 module Vars = Meths
 
+(* Stages *)
+type stage = int
+
 (* Value descriptions *)
 
 type value_description =
   { val_type: type_expr;                (* Type of the value *)
     val_kind: value_kind;
+    val_stage: stage;
     val_loc: Location.t;
     val_attributes: Parsetree.attributes;
  }
