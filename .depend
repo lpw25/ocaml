@@ -4,6 +4,7 @@ utils/clflags.cmi : utils/misc.cmi utils/ext_types.cmi
 utils/config.cmi :
 utils/consistbl.cmi :
 utils/ext_types.cmi :
+utils/varset.cmi :
 utils/misc.cmi :
 utils/sort_connected_components.cmi : utils/ext_types.cmi
 utils/tbl.cmi :
@@ -26,6 +27,8 @@ utils/consistbl.cmo : utils/consistbl.cmi
 utils/consistbl.cmx : utils/consistbl.cmi
 utils/ext_types.cmo : utils/misc.cmi utils/ext_types.cmi
 utils/ext_types.cmx : utils/misc.cmx utils/ext_types.cmi
+utils/varset.cmo : utils/varset.cmi
+utils/varset.cmx : utils/varset.cmi
 utils/misc.cmo : utils/misc.cmi
 utils/misc.cmx : utils/misc.cmi
 utils/sort_connected_components.cmo : utils/misc.cmi utils/ext_types.cmi \
@@ -1778,11 +1781,13 @@ middle_end/base_types/tag.cmo : utils/misc.cmi utils/ext_types.cmi \
     middle_end/base_types/tag.cmi
 middle_end/base_types/tag.cmx : utils/misc.cmx utils/ext_types.cmx \
     middle_end/base_types/tag.cmi
-middle_end/base_types/variable.cmo : utils/misc.cmi typing/ident.cmi \
-    utils/ext_types.cmi middle_end/base_types/compilation_unit.cmi \
+middle_end/base_types/variable.cmo : utils/misc.cmi utils/varset.cmi \
+    typing/ident.cmi utils/ext_types.cmi \
+    middle_end/base_types/compilation_unit.cmi \
     middle_end/base_types/variable.cmi
-middle_end/base_types/variable.cmx : utils/misc.cmx typing/ident.cmx \
-    utils/ext_types.cmx middle_end/base_types/compilation_unit.cmx \
+middle_end/base_types/variable.cmx : utils/misc.cmx utils/varset.cmi \
+    typing/ident.cmx utils/ext_types.cmx \
+    middle_end/base_types/compilation_unit.cmx \
     middle_end/base_types/variable.cmi
 middle_end/base_types/var_within_closure.cmo : \
     middle_end/base_types/closure_element.cmi \

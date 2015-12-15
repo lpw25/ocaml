@@ -21,10 +21,20 @@ module type PrintableHashOrdered = sig
   val equal : t -> t -> bool
 end
 
+module type ExtSet = sig
+  module M : PrintableHashOrdered
+  include Set.S with type elt = M.t
+  val output : out_channel -> t -> unit
+  val print : Format.formatter -> t -> unit
+  val to_string : t -> string
+  val of_list : elt list -> t
+  val map : (elt -> elt) -> t -> t
+end
+
 module type ExtMap = sig
   module M : PrintableHashOrdered
+  module MSet : ExtSet with module M := M
   include Map.S with type key = M.t
-                 and type 'a t = 'a Map.Make(M).t
   val map_option : (key -> 'a -> 'b option) -> 'a t -> 'b t
   val of_list : (key * 'a) list -> 'a t
 
@@ -43,47 +53,41 @@ module type ExtMap = sig
   val union_merge : ('a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
   val rename : key t -> key -> key
   val map_keys : (key -> key) -> 'a t -> 'a t
-  val keys : 'a t -> Set.Make(M).t
-  val of_set : (key -> 'a) -> Set.Make(M).t -> 'a t
+  val keys : 'a t -> MSet.t
+  val of_set : (key -> 'a) -> MSet.t -> 'a t
   (* CR mshinwell: rename revert -> transpose_keys_and_data *)
   val revert : key t -> key t
   val print :
     (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a t -> unit
 end
 
-module type ExtSet = sig
-  module M : PrintableHashOrdered
-  include Set.S with type elt = M.t
-                 and type t = Set.Make(M).t
-  val output : out_channel -> t -> unit
-  val print : Format.formatter -> t -> unit
-  val to_string : t -> string
-  val of_list : elt list -> t
-  val map : (elt -> elt) -> t -> t
-end
-
 module type ExtHashtbl = sig
   module M : PrintableHashOrdered
+  module MSet : ExtSet with module M := M
+  module MMap : ExtMap with module M := M and module MSet := MSet
   include Hashtbl.S with type key = M.t
-                     and type 'a t = 'a Hashtbl.Make(M).t
 
   val to_list : 'a t -> (M.t * 'a) list
   val of_list : (M.t * 'a) list -> 'a t
 
-  val to_map : 'a t -> 'a Map.Make(M).t
-  val of_map : 'a Map.Make(M).t -> 'a t
+  val to_map : 'a t -> 'a MMap.t
+  val of_map : 'a MMap.t -> 'a t
   val memoize : 'a t -> (key -> 'a) -> key -> 'a
   val map : 'a t -> ('a -> 'b) -> 'b t
 end
 
-module ExtMap :
-  functor (M : PrintableHashOrdered) -> ExtMap with module M := M
-
 module ExtSet :
   functor (M : PrintableHashOrdered) -> ExtSet with module M := M
 
+module ExtMap :
+  functor (M : PrintableHashOrdered) (MSet : ExtSet with module M := M) ->
+    ExtMap with module M := M and module MSet := MSet
+
 module ExtHashtbl :
-  functor (M : PrintableHashOrdered) -> ExtHashtbl with module M := M
+  functor (M : PrintableHashOrdered) (MSet : ExtSet with module M := M)
+    (MMap : ExtMap with module M := M and module MSet := MSet) ->
+    ExtHashtbl with module M := M and module MSet := MSet
+                                  and module MMap := MMap
 
 (** Generic identifier type *)
 module type BaseId =
@@ -127,8 +131,10 @@ module String_M : PrintableHashOrdered with type t = string
     String if Ext_types is openend *)
 
 module StringSet : ExtSet with module M := String_M
-module StringMap : ExtMap with module M := String_M
+module StringMap : ExtMap with module M := String_M and module MSet := StringSet
 module StringTbl : ExtHashtbl with module M := String_M
+                               and module MSet := StringSet
+                               and module MMap := StringMap
 
 (* CR mshinwell: We should use [Identifiable] above so everything is
    uniform. *)
@@ -137,8 +143,9 @@ module type Identifiable = sig
   module M : PrintableHashOrdered with type t = t
   include PrintableHashOrdered with type t := M.t
   module Set : ExtSet with module M := M
-  module Map : ExtMap with module M := M
-  module Tbl : ExtHashtbl with module M := M
+  module Map : ExtMap with module M := M and module MSet := Set
+  module Tbl : ExtHashtbl with module M := M and module MSet := Set
+                                             and module MMap := Map
 end
 
 module Identifiable : sig

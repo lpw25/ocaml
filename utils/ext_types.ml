@@ -21,10 +21,20 @@ module type PrintableHashOrdered = sig
   val equal : t -> t -> bool
 end
 
+module type ExtSet = sig
+  module M : PrintableHashOrdered
+  include Set.S with type elt = M.t
+  val output : out_channel -> t -> unit
+  val print : Format.formatter -> t -> unit
+  val to_string : t -> string
+  val of_list : elt list -> t
+  val map : (elt -> elt) -> t -> t
+end
+
 module type ExtMap = sig
   module M : PrintableHashOrdered
+  module MSet : ExtSet with module M := M
   include Map.S with type key = M.t
-                 and type 'a t = 'a Map.Make(M).t
   val map_option : (key -> 'a -> 'b option) -> 'a t -> 'b t
   val of_list : (key * 'a) list -> 'a t
   val disjoint_union : ?eq:('a -> 'a -> bool) -> 'a t -> 'a t -> 'a t
@@ -33,40 +43,48 @@ module type ExtMap = sig
   val union_merge : ('a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
   val rename : key t -> key -> key
   val map_keys : (key -> key) -> 'a t -> 'a t
-  val keys : 'a t -> Set.Make(M).t
-  val of_set : (key -> 'a) -> Set.Make(M).t -> 'a t
+  val keys : 'a t -> MSet.t
+  val of_set : (key -> 'a) -> MSet.t -> 'a t
   val revert : key t -> key t
   val print :
     (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a t -> unit
 end
 
-module type ExtSet = sig
-  module M : PrintableHashOrdered
-  include Set.S with type elt = M.t
-                 and type t = Set.Make(M).t
-  val output : out_channel -> t -> unit
-  val print : Format.formatter -> t -> unit
-  val to_string : t -> string
-  val of_list : elt list -> t
-  val map : (elt -> elt) -> t -> t
-end
-
 module type ExtHashtbl = sig
   module M : PrintableHashOrdered
+  module MSet : ExtSet with module M := M
+  module MMap : ExtMap with module M := M and module MSet := MSet
   include Hashtbl.S with type key = M.t
-                     and type 'a t = 'a Hashtbl.Make(M).t
 
   val to_list : 'a t -> (M.t * 'a) list
   val of_list : (M.t * 'a) list -> 'a t
 
-  val to_map : 'a t -> 'a Map.Make(M).t
-  val of_map : 'a Map.Make(M).t -> 'a t
+  val to_map : 'a t -> 'a MMap.t
+  val of_map : 'a MMap.t -> 'a t
   val memoize : 'a t -> (key -> 'a) -> key -> 'a
   val map : 'a t -> ('a -> 'b) -> 'b t
 end
 
+module ExtSet(M:PrintableHashOrdered) : ExtSet with module M := M =
+struct
+  include Set.Make(M)
+  let output oc s =
+    Printf.fprintf oc "( ";
+    iter (fun v -> Printf.fprintf oc "%a " M.output v) s;
+    Printf.fprintf oc ")"
+  let print ppf s =
+    let elts ppf s = iter (fun e -> Format.fprintf ppf "@ %a" M.print e) s in
+    Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
+  let to_string s = Format.asprintf "%a" print s
+  let of_list l = match l with
+    | [] -> empty
+    | [t] -> singleton t
+    | t :: q -> List.fold_left (fun acc e -> add e acc) (singleton t) q
+  let map f s = of_list (List.map f (elements s))
+end
 
-module ExtMap(M:PrintableHashOrdered) : ExtMap with module M := M =
+module ExtMap(M:PrintableHashOrdered)(MSet:ExtSet with module M := M)
+  : ExtMap with module M := M and module MSet := MSet =
 struct
   include Map.Make(M)
   let map_option f m =
@@ -131,8 +149,6 @@ struct
         Format.fprintf ppf "@ (@[%a@ %a@])" M.print id f v) s in
     Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
 
-  module MSet = Set.Make(M)
-
   let keys map = fold (fun k _ set -> MSet.add k set) map MSet.empty
   let of_set f set = MSet.fold (fun e map -> add e (f e) map) set empty
 
@@ -140,28 +156,12 @@ struct
 
 end
 
-module ExtSet(M:PrintableHashOrdered) : ExtSet with module M := M =
-struct
-  include Set.Make(M)
-  let output oc s =
-    Printf.fprintf oc "( ";
-    iter (fun v -> Printf.fprintf oc "%a " M.output v) s;
-    Printf.fprintf oc ")"
-  let print ppf s =
-    let elts ppf s = iter (fun e -> Format.fprintf ppf "@ %a" M.print e) s in
-    Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
-  let to_string s = Format.asprintf "%a" print s
-  let of_list l = match l with
-    | [] -> empty
-    | [t] -> singleton t
-    | t :: q -> List.fold_left (fun acc e -> add e acc) (singleton t) q
-  let map f s = of_list (List.map f (elements s))
-end
-
-module ExtHashtbl(M:PrintableHashOrdered) : ExtHashtbl with module M := M =
+module ExtHashtbl(M:PrintableHashOrdered) (MSet:ExtSet with module M := M)
+    (MMap:ExtMap with module M := M and module MSet := MSet)
+     : ExtHashtbl with module M := M and module MSet := MSet
+                                     and module MMap := MMap =
 struct
   include Hashtbl.Make(M)
-  module MMap = Map.Make(M)
 
   let to_list t =
     fold (fun key datum elts -> (key, datum)::elts) t []
@@ -271,16 +271,17 @@ module String_M = struct
 end
 
 module StringSet = ExtSet(String_M)
-module StringMap = ExtMap(String_M)
-module StringTbl = ExtHashtbl(String_M)
+module StringMap = ExtMap(String_M)(StringSet)
+module StringTbl = ExtHashtbl(String_M)(StringSet)(StringMap)
 
 module type Identifiable = sig
   type t
   module M : PrintableHashOrdered with type t = t
   include PrintableHashOrdered with type t := M.t
   module Set : ExtSet with module M := M
-  module Map : ExtMap with module M := M
-  module Tbl : ExtHashtbl with module M := M
+  module Map : ExtMap with module M := M and module MSet := Set
+  module Tbl : ExtHashtbl with module M := M and module MSet := Set
+                                             and module MMap := Map
 end
 
 module Identifiable = struct
@@ -289,8 +290,8 @@ module Identifiable = struct
     include M
 
     module Set = ExtSet(M)
-    module Map = ExtMap(M)
-    module Tbl = ExtHashtbl(M)
+    module Map = ExtMap(M)(Set)
+    module Tbl = ExtHashtbl(M)(Set)(Map)
   end
 end
 

@@ -11,7 +11,7 @@
 (*                                                                        *)
 (**************************************************************************)
 
-module T = struct
+module M = struct
   type t = {
     compilation_unit : Compilation_unit.t;
     name : string;
@@ -52,8 +52,200 @@ module T = struct
     end
 end
 
-include T
-include Ext_types.Identifiable.Make (T)
+include M
+
+module Set = struct
+
+  type elt = t
+
+  type t = elt Varset.t Compilation_unit.Map.t
+
+  let empty = Compilation_unit.Map.empty
+
+  let is_empty = Compilation_unit.Map.is_empty
+
+  let mem v s =
+    match Compilation_unit.Map.find v.compilation_unit s with
+    | vset -> Varset.mem v.name_stamp vset
+    | exception Not_found -> false
+
+  let add v s =
+    let previous =
+      match Compilation_unit.Map.find v.compilation_unit s with
+      | vset -> vset
+      | exception Not_found -> Varset.empty
+    in
+    let next = Varset.add v.name_stamp v previous in
+    Compilation_unit.Map.add v.compilation_unit next s
+
+  let singleton v =
+    let vset = Varset.singleton v.name_stamp v in
+    Compilation_unit.Map.singleton v.compilation_unit vset
+
+  let remove v s =
+    match Compilation_unit.Map.find v.compilation_unit s with
+    | previous ->
+      let next = Varset.remove v.name_stamp previous in
+      if Varset.is_empty next then
+        Compilation_unit.Map.remove v.compilation_unit s
+      else
+        Compilation_unit.Map.add v.compilation_unit next s
+    | exception Not_found -> s
+
+  let union s0 s1 =
+    Compilation_unit.Map.union
+      (fun _ vset1 vset2 -> Varset.union vset1 vset2)
+      s0 s1
+
+  let inter s0 s1 =
+    Compilation_unit.Map.merge
+      (fun _ vset1 vset2 ->
+         match vset1, vset2 with
+         | None, None -> None
+         | None, Some _ -> None
+         | Some _, None -> None
+         | Some vset1, Some vset2 ->
+           let vset = Varset.inter vset1 vset2 in
+           if Varset.is_empty vset then None
+           else Some vset)
+      s0 s1
+
+  let diff s0 s1 =
+    Compilation_unit.Map.merge
+      (fun _ vset1 vset2 ->
+         match vset1, vset2 with
+         | None, None -> None
+         | None, Some _ -> None
+         | Some _, None -> vset1
+         | Some vset1, Some vset2 ->
+           let vset = Varset.diff vset1 vset2 in
+           if Varset.is_empty vset then None
+           else Some vset)
+      s0 s1
+
+  let compare s0 s1 =
+    Compilation_unit.Map.compare Varset.compare s0 s1
+
+  let equal s0 s1 =
+    Compilation_unit.Map.equal Varset.equal s0 s1
+
+  let subset s0 s1 =
+    let conflicts =
+      Compilation_unit.Map.merge
+        (fun _ vset1 vset2 ->
+           match vset1, vset2 with
+           | None, _ -> None
+           | Some _, None -> Some ()
+           | Some vset1, Some vset2 ->
+               if Varset.subset vset1 vset2 then None
+               else Some ())
+        s0 s1
+    in
+    Compilation_unit.Map.is_empty conflicts
+
+  let iter f s =
+    Compilation_unit.Map.iter
+      (fun _ vset -> Varset.iter f vset)
+      s
+
+  let fold f s acc =
+    Compilation_unit.Map.fold
+      (fun _ vset acc -> Varset.fold f vset acc)
+      s acc
+
+  let for_all p s =
+    Compilation_unit.Map.for_all
+      (fun _ vset -> Varset.for_all p vset)
+      s
+
+  let exists p s =
+    Compilation_unit.Map.exists
+      (fun _ vset -> Varset.exists p vset)
+      s
+
+  let filter p s =
+    Compilation_unit.Map.map
+      (fun vset -> Varset.filter p vset)
+      s
+
+  let partition p s =
+    Compilation_unit.Map.fold
+      (fun unit vset (true_, false_) ->
+         let tset, fset = Varset.partition p vset in
+         let true_ = Compilation_unit.Map.add unit tset true_ in
+         let false_ = Compilation_unit.Map.add unit fset false_ in
+         (true_, false_))
+      s (empty, empty)
+
+  let cardinal s =
+    Compilation_unit.Map.fold
+      (fun _ vset acc ->
+         acc + (Varset.cardinal vset))
+      s 0
+
+  let elements s =
+    Compilation_unit.Map.fold
+      (fun _ vset acc -> List.rev_append (Varset.elements vset) acc)
+      s []
+
+  let min_elt s =
+    let _, vset = Compilation_unit.Map.min_binding s in
+    Varset.min_elt vset
+
+  let max_elt s =
+    let _, vset = Compilation_unit.Map.max_binding s in
+    Varset.max_elt vset
+
+  let choose s =
+    let _, vset = Compilation_unit.Map.choose s in
+    Varset.choose vset
+
+  let split v s =
+    let lt, vset, gt = Compilation_unit.Map.split v.compilation_unit s in
+    match vset with
+    | None -> lt, false, gt
+    | Some vset ->
+      let lset, mem, gset = Varset.split v.name_stamp vset in
+      let lt = Compilation_unit.Map.add v.compilation_unit lset lt in
+      let gt = Compilation_unit.Map.add v.compilation_unit gset gt in
+      lt, mem, gt
+
+  let find v s =
+    let vset = Compilation_unit.Map.find v.compilation_unit s in
+      Varset.find v.name_stamp vset
+
+  let of_list = function
+    | [] -> empty
+    | [t] -> singleton t
+    | t :: q -> List.fold_left (fun acc e -> add e acc) (singleton t) q
+
+  let output oc s =
+    Printf.fprintf oc "( ";
+    iter (fun v -> Printf.fprintf oc "%a " M.output v) s;
+    Printf.fprintf oc ")"
+
+  let print ppf s =
+    let elts ppf s =
+      iter (fun e -> Format.fprintf ppf "@ %a" M.print e) s
+    in
+    Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
+
+  let to_string s = Format.asprintf "%a" print s
+
+  let map f s = of_list (List.map f (elements s))
+
+end
+
+module Map = struct
+  include Ext_types.ExtMap(M)(Set)
+
+  let keys map = fold (fun k _ set -> Set.add k set) map Set.empty
+
+  let of_set f set = Set.fold (fun e map -> add e (f e) map) set empty
+
+end
+
+module Tbl = Ext_types.ExtHashtbl(M)(Set)(Map)
 
 let previous_name_stamp = ref (-1)
 
@@ -111,7 +303,7 @@ let print_opt ppf = function
   | Some t -> print ppf t
 
 type pair = t * t
-module Pair = Ext_types.Identifiable.Make (Ext_types.Pair (T) (T))
+module Pair = Ext_types.Identifiable.Make (Ext_types.Pair (M) (M))
 
 let compare_lists l1 l2 = Misc.compare_lists compare l1 l2
 
