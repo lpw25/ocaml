@@ -181,12 +181,14 @@ module type Optcomp_options = sig
   include Common_options
   include Compiler_options
   include Optcommon_options
+  val _linscan : unit -> unit
   val _no_float_const_prop : unit -> unit
   val _nodynlink : unit -> unit
   val _p : unit -> unit
   val _pp : string -> unit
   val _S : unit -> unit
   val _shared : unit -> unit
+  val _dinterval : unit -> unit
 end;;
 
 module type Opttop_options = sig
