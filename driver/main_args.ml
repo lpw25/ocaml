@@ -1139,6 +1139,7 @@ struct
     mk_inline_max_depth F._inline_max_depth;
     mk_alias_deps F._alias_deps;
     mk_no_alias_deps F._no_alias_deps;
+    mk_linscan F._linscan;
     mk_app_funct F._app_funct;
     mk_no_app_funct F._no_app_funct;
     mk_no_float_const_prop F._no_float_const_prop;
