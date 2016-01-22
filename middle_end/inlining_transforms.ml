@@ -154,13 +154,19 @@ let inline_by_copying_function_body ~env ~r ~function_decls ~lhs_of_application
   *)
   let expr =
     Variable.Map.fold (fun another_closure_in_the_same_set _ expr ->
+      let used =
+        Variable.Set.mem another_closure_in_the_same_set
+           function_decl.free_variables
+      in
+      if used then
         Flambda.create_let another_closure_in_the_same_set
           (Move_within_set_of_closures {
             closure = lhs_of_application;
             start_from = closure_id_being_applied;
             move_to = Closure_id.wrap another_closure_in_the_same_set;
           })
-          expr)
+          expr
+      else expr)
       function_decls.Flambda.funs
       bindings_for_vars_bound_by_closure_and_params_to_args
   in
