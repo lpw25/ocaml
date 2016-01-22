@@ -248,7 +248,7 @@ module Inlining_report = struct
              begin
                match decision with
                | Prevented _ -> ()
-               | Nonrecursive _ -> begin
+               | Nonrecursive _ | Recursive(Unrolled _, _)-> begin
                    match c.inlined with
                    | None -> ()
                    | Some inlined ->
