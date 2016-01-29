@@ -159,6 +159,11 @@ let middle_end ppf ~source_provenance ~prefixname ~backend
           Location.prerr_warning (Debuginfo.to_location apply.dbg)
             (Warnings.Inlining_impossible "[@inlined] attribute was not \
               used on this function application (the optimizer did not \
+              know what function was being applied)")
+        | Unroll _ ->
+          Location.prerr_warning (Debuginfo.to_location apply.dbg)
+            (Warnings.Inlining_impossible "[@unroll] attribute was not \
+              used on this function application (the optimizer did not \
               know what function was being applied)"));
     dump_and_check "End of middle end" flam;
     (* CR mshinwell: add -d... option for this *)
