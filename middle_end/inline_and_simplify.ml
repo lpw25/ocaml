@@ -1027,10 +1027,10 @@ and simplify_named env r (tree : Flambda.named) : Flambda.named * R.t =
       in
       Expr expr, (ret r (A.value_set_of_closures value_set_of_closures))
     in
-    (* This does the actual substitutions of free variables
-       for specialised args introduced by [Unbox_closures].
-       (Apart from simplifying the [Unbox_closures] output, this also
-       prevents applying [Unbox_closures] over and over.) *)
+    (* This does the actual substitutions of specialised args introduced
+       by [Unbox_closures] for free variables.  (Apart from simplifying
+       the [Unbox_closures] output, this also prevents applying
+       [Unbox_closures] over and over.) *)
     let set_of_closures =
       match Remove_free_vars_equal_to_args.run set_of_closures with
       | None -> set_of_closures
