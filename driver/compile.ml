@@ -63,8 +63,9 @@ let (++) x f = f x
 
 let implementation ppf sourcefile outputprefix =
   Compmisc.init_path false;
-  let modulename = module_of_filename ppf sourcefile outputprefix in
-  Env.set_unit_name modulename;
+  let modname = module_of_filename ppf sourcefile outputprefix in
+  let uname = Unit_name.simple ~name:modname in
+  Env.set_unit_name uname;
   let env = Compmisc.initial_env() in
   try
     let (typedtree, coercion) =
@@ -72,7 +73,7 @@ let implementation ppf sourcefile outputprefix =
       ++ print_if ppf Clflags.dump_parsetree Printast.implementation
       ++ print_if ppf Clflags.dump_source Pprintast.structure
       ++ Timings.(time (Typing sourcefile))
-          (Typemod.type_implementation sourcefile outputprefix modulename env)
+          (Typemod.type_implementation sourcefile outputprefix modname env)
       ++ print_if ppf Clflags.dump_typedtree
         Printtyped.implementation_with_coercion
     in
@@ -83,13 +84,13 @@ let implementation ppf sourcefile outputprefix =
       let bytecode =
         (typedtree, coercion)
         ++ Timings.(time (Transl sourcefile))
-            (Translmod.transl_implementation modulename)
+            (Translmod.transl_implementation uname)
         ++ print_if ppf Clflags.dump_rawlambda Printlambda.lambda
         ++ Timings.(accumulate_time (Generate sourcefile))
             (fun lambda ->
               Simplif.simplify_lambda lambda
               ++ print_if ppf Clflags.dump_lambda Printlambda.lambda
-              ++ Bytegen.compile_implementation modulename
+              ++ Bytegen.compile_implementation modname
               ++ print_if ppf Clflags.dump_instr Printinstr.instrlist)
       in
       let objfile = outputprefix ^ ".cmo" in
@@ -97,7 +98,7 @@ let implementation ppf sourcefile outputprefix =
       try
         bytecode
         ++ Timings.(accumulate_time (Generate sourcefile))
-            (Emitcode.to_file oc modulename objfile);
+            (Emitcode.to_file oc modname objfile);
         Warnings.check_fatal ();
         close_out oc;
         Stypes.dump (Some (outputprefix ^ ".annot"))

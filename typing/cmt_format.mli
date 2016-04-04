@@ -49,7 +49,7 @@ and binary_part =
   | Partial_module_type of module_type
 
 type cmt_infos = {
-  cmt_modname : string;
+  cmt_unit_name : Unit_name.t;
   cmt_annots : binary_annots;
   cmt_value_dependencies :
     (Types.value_description * Types.value_description) list;
@@ -60,7 +60,7 @@ type cmt_infos = {
   cmt_loadpath : string list;
   cmt_source_digest : string option;
   cmt_initial_env : Env.t;
-  cmt_imports : (string * Digest.t option) list;
+  cmt_imports : (Unit_name.t * Digest.t option) list;
   cmt_interface_digest : Digest.t option;
   cmt_use_summaries : bool;
 }
@@ -83,11 +83,11 @@ val read : string -> Cmi_format.cmi_infos option * cmt_infos option
 val read_cmt : string -> cmt_infos
 val read_cmi : string -> Cmi_format.cmi_infos
 
-(** [save_cmt modname filename binary_annots sourcefile initial_env sg]
+(** [save_cmt filename uname binary_annots sourcefile initial_env sg]
     writes a cmt(i) file.  *)
 val save_cmt :
   string ->  (* filename.cmt to generate *)
-  string ->  (* module name *)
+  Unit_name.t ->  (* module name *)
   binary_annots ->
   string option ->  (* source file *)
   Env.t -> (* initial env *)

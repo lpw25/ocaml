@@ -662,7 +662,8 @@ let lam_of_loc kind loc =
   | Loc_FILE -> Lconst (Const_immstring file)
   | Loc_MODULE ->
     let filename = Filename.basename file in
-    let name = Env.get_unit_name () in
+    let uname = Env.get_unit_name () in
+    let name = Unit_name.name uname in
     let module_name = if name = "" then "//"^filename^"//" else name in
     Lconst (Const_immstring module_name)
   | Loc_LOC ->

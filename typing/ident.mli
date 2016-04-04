@@ -15,7 +15,7 @@
 
 (* Identifiers (unique names) *)
 
-type t = { stamp: int; name: string; mutable flags: int }
+type t
 
 include Identifiable.S with type t := t
 (* Notes:
@@ -26,13 +26,14 @@ include Identifiable.S with type t := t
 
 
 val create: string -> t
-val create_persistent: string -> t
-val create_predef_exn: string -> t
+val create_global: string -> t
+val create_unit: Unit_name.t -> t
 val rename: t -> t
 val name: t -> string
 val unique_name: t -> string
 val unique_toplevel_name: t -> string
-val persistent: t -> bool
+val unit: t -> bool
+val unit_name: t -> Unit_name.t
 val same: t -> t -> bool
         (* Compare identifiers by binding location.
            Two identifiers are the same either if they are both
@@ -46,9 +47,7 @@ val hide: t -> t
            When put in a 'a tbl, this identifier can only be looked
            up by name. *)
 
-val make_global: t -> unit
 val global: t -> bool
-val is_predef_exn: t -> bool
 
 val binding_time: t -> int
 val current_time: unit -> int

@@ -39,45 +39,40 @@ let debug_dirs = ref StringSet.empty
 let primitives = ref ([] : string list)
 let force_link = ref false
 
+let rename_ident defining pack objfile units defined id =
+  if not (Ident.unit id) then id
+  else begin
+    let uname = Ident.unit_name id in
+    let unpacked = Unit_name.unpacked uname in
+    if not (Unit_name.Set.mem unpacked units) then id
+    else begin
+      if defining then begin
+        if Unit_name.Set.mem uname defined then
+          raise(Error(Multiple_definition(objfile, id)));
+      end else begin
+        if not (Unit_name.Set.mem unpacked defined) then
+          raise(Error(Forward_reference(objfile, id)))
+      end;
+      let uname' = Unit_name.pack ~pack uname in
+      Ident.create_unit uname'
+    end
+  end
+
 (* Record a relocation.  Update its offset, and rename GETGLOBAL and
    SETGLOBAL relocations that correspond to one of the units being
    consolidated. *)
 
-let rename_relocation packagename objfile mapping defined base (rel, ofs) =
+let rename_relocation packagename objfile units defined base (rel, ofs) =
   let rel' =
     match rel with
-      Reloc_getglobal id ->
-        begin try
-          let id' = List.assoc id mapping in
-          if List.mem id defined
-          then Reloc_getglobal id'
-          else raise(Error(Forward_reference(objfile, id)))
-        with Not_found ->
-          (* PR#5276: unique-ize dotted global names, which appear
-             if one of the units being consolidated is itself a packed
-             module. *)
-          let name = Ident.name id in
-          if String.contains name '.' then
-            Reloc_getglobal (Ident.create_persistent (packagename ^ "." ^ name))
-          else
-            rel
-        end
+    | Reloc_getglobal id ->
+        let id' = rename_ident false packagename objfile units defined id in
+          Reloc_getglobal id'
     | Reloc_setglobal id ->
-        begin try
-          let id' = List.assoc id mapping in
-          if List.mem id defined
-          then raise(Error(Multiple_definition(objfile, id)))
-          else Reloc_setglobal id'
-        with Not_found ->
-          (* PR#5276, as above *)
-          let name = Ident.name id in
-          if String.contains name '.' then
-            Reloc_setglobal (Ident.create_persistent (packagename ^ "." ^ name))
-          else
-            rel
-        end
-    | _ ->
-        rel in
+        let id' = rename_ident true packagename objfile units defined id in
+          Reloc_getglobal id'
+    | _ -> rel
+  in
   relocs := (rel', base + ofs) :: !relocs
 
 (* Record and relocate a debugging event *)
@@ -94,12 +89,13 @@ type pack_member_kind = PM_intf | PM_impl of compilation_unit
 
 type pack_member =
   { pm_file: string;
-    pm_name: string;
+    pm_unit_name: Unit_name.t;
     pm_kind: pack_member_kind }
 
 let read_member_info file = (
   let name =
     String.capitalize_ascii(Filename.basename(chop_extensions file)) in
+  let uname = Unit_name.simple ~name in
   let kind =
     if Filename.check_suffix file ".cmo" then begin
     let ic = open_in_bin file in
@@ -121,7 +117,7 @@ let read_member_info file = (
       raise x
     end else
       PM_intf in
-  { pm_file = file; pm_name = name; pm_kind = kind }
+  { pm_file = file; pm_unit_name = uname; pm_kind = kind }
 )
 
 (* Read the bytecode from a .cmo file.
@@ -173,7 +169,7 @@ let rec rename_append_bytecode_list ppf packagename oc mapping defined ofs
           let size =
             rename_append_bytecode ppf packagename oc mapping defined ofs
                                    prefix subst m.pm_file compunit in
-          let id = Ident.create_persistent m.pm_name in
+          let id = Ident.create_unit m.pm_unit_name in
           let root = Path.Pident (Ident.create_persistent prefix) in
           rename_append_bytecode_list ppf packagename oc mapping (id :: defined)
             (ofs + size) prefix

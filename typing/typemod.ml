@@ -1564,7 +1564,7 @@ let () =
 
 (* Typecheck an implementation file *)
 
-let type_implementation sourcefile outputprefix modulename initial_env ast =
+let type_implementation sourcefile outputprefix uname initial_env ast =
   Cmt_format.clear ();
   try
   Typecore.reset_delayed_checks ();
@@ -1585,20 +1585,21 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
     let sourceintf =
       Misc.chop_extension_if_any sourcefile ^ !Config.interface_suffix in
     if Sys.file_exists sourceintf then begin
+      let modname = Unit_name.name uname in
       let intf_file =
         try
-          find_in_path_uncap !Config.load_path (modulename ^ ".cmi")
+          find_in_path_uncap !Config.load_path (modname ^ ".cmi")
         with Not_found ->
           raise(Error(Location.in_file sourcefile, Env.empty,
                       Interface_not_compiled sourceintf)) in
-      let dclsig = Env.read_signature modulename intf_file in
+      let dclsig = Env.read_signature uname intf_file in
       let coercion =
         Includemod.compunit initial_env sourcefile sg intf_file dclsig in
       Typecore.force_delayed_checks ();
       (* It is important to run these checks after the inclusion test above,
          so that value declarations which are not used internally but exported
          are not reported as being unused. *)
-      Cmt_format.save_cmt (outputprefix ^ ".cmt") modulename
+      Cmt_format.save_cmt (outputprefix ^ ".cmt") uname
         (Cmt_format.Implementation str) (Some sourcefile) initial_env None;
       (str, coercion)
     end else begin
@@ -1616,9 +1617,9 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
         let deprecated = Builtin_attributes.deprecated_of_str ast in
         let sg =
           Env.save_signature ~deprecated
-            simple_sg modulename (outputprefix ^ ".cmi")
+            simple_sg uname (outputprefix ^ ".cmi")
         in
-        Cmt_format.save_cmt  (outputprefix ^ ".cmt") modulename
+        Cmt_format.save_cmt  (outputprefix ^ ".cmt") uname
           (Cmt_format.Implementation str)
           (Some sourcefile) initial_env (Some sg);
       end;
@@ -1626,7 +1627,7 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
     end
     end
   with e ->
-    Cmt_format.save_cmt  (outputprefix ^ ".cmt") modulename
+    Cmt_format.save_cmt  (outputprefix ^ ".cmt") uname
       (Cmt_format.Partial_implementation
          (Array.of_list (Cmt_format.get_saved_types ())))
       (Some sourcefile) initial_env None;
@@ -1649,10 +1650,10 @@ let type_interface env ast =
 
 let rec package_signatures subst = function
     [] -> []
-  | (name, sg) :: rem ->
+  | (uname, sg) :: rem ->
       let sg' = Subst.signature subst sg in
-      let oldid = Ident.create_persistent name
-      and newid = Ident.create name in
+      let oldid = Ident.create_unit uname
+      and newid = Ident.create (Unit_name.name uname) in
       Sig_module(newid, {md_type=Mty_signature sg';
                          md_attributes=[];
                          md_loc=Location.none;
@@ -1660,19 +1661,20 @@ let rec package_signatures subst = function
                  Trec_not) ::
       package_signatures (Subst.add_module oldid (Pident newid) subst) rem
 
-let package_units initial_env objfiles cmifile modulename =
+let package_units initial_env objfiles cmifile uname =
   (* Read the signatures of the units *)
   let units =
     List.map
       (fun f ->
          let pref = chop_extensions f in
          let modname = String.capitalize_ascii(Filename.basename pref) in
-         let sg = Env.read_signature modname (pref ^ ".cmi") in
+         let uname = Unit_name.simple ~name:modname in
+         let sg = Env.read_signature uname (pref ^ ".cmi") in
          if Filename.check_suffix f ".cmi" &&
             not(Mtype.no_code_needed_sig Env.initial_safe_string sg)
          then raise(Error(Location.none, Env.empty,
                           Implementation_is_required f));
-         (modname, Env.read_signature modname (pref ^ ".cmi")))
+         (uname, Env.read_signature uname (pref ^ ".cmi")))
       objfiles in
   (* Compute signature of packaged unit *)
   Ident.reinit();
@@ -1685,8 +1687,8 @@ let package_units initial_env objfiles cmifile modulename =
       raise(Error(Location.in_file mlifile, Env.empty,
                   Interface_not_compiled mlifile))
     end;
-    let dclsig = Env.read_signature modulename cmifile in
-    Cmt_format.save_cmt  (prefix ^ ".cmt") modulename
+    let dclsig = Env.read_signature uname cmifile in
+    Cmt_format.save_cmt  (prefix ^ ".cmt") uname
       (Cmt_format.Packed (sg, objfiles)) None initial_env  None ;
     Includemod.compunit initial_env "(obtained by packing)" sg mlifile dclsig
   end else begin
@@ -1700,10 +1702,10 @@ let package_units initial_env objfiles cmifile modulename =
     if not !Clflags.dont_write_files then begin
       let sg =
         Env.save_signature_with_imports ~deprecated:None
-          sg modulename
+          sg uname
           (prefix ^ ".cmi") imports
       in
-      Cmt_format.save_cmt (prefix ^ ".cmt")  modulename
+      Cmt_format.save_cmt (prefix ^ ".cmt")  uname
         (Cmt_format.Packed (sg, objfiles)) None initial_env (Some sg)
     end;
     Tcoerce_none

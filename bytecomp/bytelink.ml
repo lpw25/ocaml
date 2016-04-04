@@ -24,7 +24,7 @@ type error =
   | Not_an_object_file of string
   | Wrong_object_name of string
   | Symbol_error of string * Symtable.error
-  | Inconsistent_import of string * string * string
+  | Inconsistent_import of Unit_name.t * string * string
   | Custom_runtime
   | File_exists of string
   | Cannot_open_dll of string
@@ -160,10 +160,11 @@ let scan_file obj_name tolink =
 (* Consistency check between interfaces *)
 
 let crc_interfaces = Consistbl.create ()
-let interfaces = ref ([] : string list)
+let interfaces = ref ([] : Unit_name.t list)
 let implementations_defined = ref ([] : (string * string) list)
 
 let check_consistency ppf file_name cu =
+  let uname = Unit_name.simple ~name:cu.cu_name in
   begin try
     List.iter
       (fun (name, crco) ->
@@ -171,12 +172,12 @@ let check_consistency ppf file_name cu =
         match crco with
           None -> ()
         | Some crc ->
-            if name = cu.cu_name
+            if Unit_name.equal name uname
             then Consistbl.set crc_interfaces name crc file_name
             else Consistbl.check crc_interfaces name crc file_name)
       cu.cu_imports
-  with Consistbl.Inconsistency(name, user, auth) ->
-    raise(Error(Inconsistent_import(name, user, auth)))
+  with Consistbl.Inconsistency(uname, user, auth) ->
+    raise(Error(Inconsistent_import(uname, user, auth)))
   end;
   begin try
     let source = List.assoc cu.cu_name !implementations_defined in
@@ -639,10 +640,10 @@ let report_error ppf = function
   | Inconsistent_import(intf, file1, file2) ->
       fprintf ppf
         "@[<hov>Files %a@ and %a@ \
-                 make inconsistent assumptions over interface %s@]"
+                 make inconsistent assumptions over interface %a@]"
         Location.print_filename file1
         Location.print_filename file2
-        intf
+        Unit_name.print intf
   | Custom_runtime ->
       fprintf ppf "Error while building custom runtime system"
   | File_exists file ->

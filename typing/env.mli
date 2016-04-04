@@ -46,7 +46,7 @@ val iter_types:
     t -> iter_cont
 val run_iter_cont: iter_cont list -> (Path.t * iter_cont) list
 val same_types: t -> t -> bool
-val used_persistent: unit -> Concr.t
+val used_persistent: unit -> Unit_name.Set.t
 val find_shadowed_types: Path.t -> t -> Path.t list
 
 (* Lookup by paths *)
@@ -145,7 +145,7 @@ val add_signature: signature -> t -> t
 val open_signature:
     ?loc:Location.t -> ?toplevel:bool -> Asttypes.override_flag -> Path.t ->
       signature -> t -> t
-val open_pers_signature: string -> t -> t
+val open_unit_signature: Unit_name.t -> t -> t
 
 (* Insertion by name *)
 
@@ -168,38 +168,38 @@ val reset_cache: unit -> unit
 val reset_cache_toplevel: unit -> unit
 
 (* Remember the name of the current compilation unit. *)
-val set_unit_name: string -> unit
-val get_unit_name: unit -> string
+val set_unit_name: Unit_name.t -> unit
+val get_unit_name: unit -> Unit_name.t
 
 (* Read, save a signature to/from a file *)
 
-val read_signature: string -> string -> signature
-        (* Arguments: module name, file name. Results: signature. *)
+val read_signature: Unit_name.t -> string -> signature
+        (* Arguments: unit name, file name. Results: signature. *)
 val save_signature:
-  deprecated:string option -> signature -> string -> string -> signature
-        (* Arguments: signature, module name, file name. *)
+  deprecated:string option -> signature -> Unit_name.t -> string -> signature
+        (* Arguments: signature, unit name, file name. *)
 val save_signature_with_imports:
   deprecated:string option ->
-  signature -> string -> string -> (string * Digest.t option) list
+  signature -> Unit_name.t -> string -> (Unit_name.t * Digest.t option) list
   -> signature
-        (* Arguments: signature, module name, file name,
+        (* Arguments: signature, unit name, file name,
            imported units with their CRCs. *)
 
 (* Return the CRC of the interface of the given compilation unit *)
 
-val crc_of_unit: string -> Digest.t
+val crc_of_unit: Unit_name.t -> Digest.t
 
 (* Return the set of compilation units imported, with their CRC *)
 
-val imports: unit -> (string * Digest.t option) list
+val imports: unit -> (Unit_name.t * Digest.t option) list
 
 (* [is_imported_opaque md] returns true if [md] is an opaque imported module  *)
-val is_imported_opaque: string -> bool
+val is_imported_opaque: Unit_name.t -> bool
 
 (* Direct access to the table of imported compilation units with their CRC *)
 
 val crc_units: Consistbl.t
-val add_import: string -> unit
+val add_import: Unit_name.t -> unit
 
 (* Summaries -- compact representation of an environment, to be
    exported in debugging information. *)
@@ -216,9 +216,9 @@ val env_of_only_summary : (summary -> Subst.t -> t) -> t -> t
 (* Error report *)
 
 type error =
-  | Illegal_renaming of string * string * string
-  | Inconsistent_import of string * string * string
-  | Need_recursive_types of string * string
+  | Illegal_renaming of Unit_name.t * Unit_name.t * string
+  | Inconsistent_import of Unit_name.t * string * string
+  | Need_recursive_types of Unit_name.t * Unit_name.t
   | Missing_module of Location.t * Path.t * Path.t
   | Illegal_value_name of Location.t * string
 

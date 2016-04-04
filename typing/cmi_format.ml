@@ -26,9 +26,9 @@ type error =
 exception Error of error
 
 type cmi_infos = {
-    cmi_name : string;
+    cmi_unit_name : Unit_name.t;
     cmi_sign : Types.signature_item list;
-    cmi_crcs : (string * Digest.t option) list;
+    cmi_crcs : (Unit_name.t * Digest.t option) list;
     cmi_flags : pers_flags list;
 }
 
@@ -37,7 +37,7 @@ let input_cmi ic =
   let crcs = input_value ic in
   let flags = input_value ic in
   {
-      cmi_name = name;
+      cmi_unit_name = name;
       cmi_sign = sign;
       cmi_crcs = crcs;
       cmi_flags = flags;
@@ -75,10 +75,10 @@ let read_cmi filename =
 let output_cmi filename oc cmi =
 (* beware: the provided signature must have been substituted for saving *)
   output_string oc Config.cmi_magic_number;
-  output_value oc (cmi.cmi_name, cmi.cmi_sign);
+  output_value oc (cmi.cmi_unit_name, cmi.cmi_sign);
   flush oc;
   let crc = Digest.file filename in
-  let crcs = (cmi.cmi_name, Some crc) :: cmi.cmi_crcs in
+  let crcs = (cmi.cmi_unit_name, Some crc) :: cmi.cmi_crcs in
   output_value oc crcs;
   output_value oc cmi.cmi_flags;
   crc

@@ -48,7 +48,8 @@ let ident ppf id = pp_print_string ppf (ident_name id)
 
 (* Print a path *)
 
-let ident_pervasive = Ident.create_persistent "Pervasives"
+let ident_pervasive =
+  Ident.create_unit (Unit_name.simple ~name:"Pervasives")
 
 let rec tree_of_path = function
   | Pident id ->
@@ -231,7 +232,7 @@ let printing_env = ref Env.empty
 let printing_depth = ref 0
 let printing_cont = ref ([] : Env.iter_cont list)
 let printing_old = ref Env.empty
-let printing_pers = ref Concr.empty
+let printing_pers = ref Unit_name.Set.empty
 module Path2 = struct
   include Path
   let rec compare p1 p2 =
@@ -303,7 +304,8 @@ let rec path_size = function
 
 let same_printing_env env =
   let used_pers = Env.used_persistent () in
-  Env.same_types !printing_old env && Concr.equal !printing_pers used_pers
+  Env.same_types !printing_old env
+  && Unit_name.Set.equal !printing_pers used_pers
 
 let set_printing_env env =
   printing_env := if !Clflags.real_paths then Env.empty else env;

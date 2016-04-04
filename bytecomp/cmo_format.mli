@@ -31,7 +31,8 @@ type compilation_unit =
     cu_codesize: int;                   (* Size of code block *)
     cu_reloc: (reloc_info * int) list;  (* Relocation information *)
     cu_imports:
-      (string * Digest.t option) list; (* Names and CRC of intfs imported *)
+      (Unit_name.t * Digest.t option) list;
+                                        (* Names and CRC of intfs imported *)
     cu_primitives: string list;         (* Primitives declared inside *)
     mutable cu_force_link: bool;        (* Must be linked even if unref'ed *)
     mutable cu_debug: int;              (* Position of debugging info, or 0 *)

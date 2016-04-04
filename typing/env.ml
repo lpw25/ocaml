@@ -57,9 +57,9 @@ let used_constructors :
 let prefixed_sg = Hashtbl.create 113
 
 type error =
-  | Illegal_renaming of string * string * string
-  | Inconsistent_import of string * string * string
-  | Need_recursive_types of string * string
+  | Illegal_renaming of Unit_name.t * Unit_name.t * string
+  | Inconsistent_import of Unit_name.t * string * string
+  | Need_recursive_types of Unit_name.t * Unit_name.t
   | Missing_module of Location.t * Path.t * Path.t
   | Illegal_value_name of Location.t * string
 
@@ -325,42 +325,39 @@ let get_components c =
 (* The name of the compilation unit currently compiled.
    "" if outside a compilation unit. *)
 
-let current_unit = ref ""
+let current_unit = ref Unit_name.dummy
 
 (* Persistent structure descriptions *)
 
 type pers_struct =
-  { ps_name: string;
+  { ps_name: Unit_name.t;
     ps_sig: signature Lazy.t;
     ps_comps: module_components;
-    ps_crcs: (string * Digest.t option) list;
+    ps_crcs: (Unit_name.t * Digest.t option) list;
     ps_filename: string;
     ps_flags: pers_flags list }
 
 let persistent_structures =
-  (Hashtbl.create 17 : (string, pers_struct option) Hashtbl.t)
+  (Unit_name.Tbl.create 17 : pers_struct option Unit_name.Tbl.t)
 
 (* Consistency between persistent structures *)
 
 let crc_units = Consistbl.create()
 
-module StringSet =
-  Set.Make(struct type t = string let compare = String.compare end)
-
-let imported_units = ref StringSet.empty
+let imported_units = ref Unit_name.Set.empty
 
 let add_import s =
-  imported_units := StringSet.add s !imported_units
+  imported_units := Unit_name.Set.add s !imported_units
 
-let imported_opaque_units = ref StringSet.empty
+let imported_opaque_units = ref Unit_name.Set.empty
 
 let add_imported_opaque s =
-  imported_opaque_units := StringSet.add s !imported_opaque_units
+  imported_opaque_units := Unit_name.Set.add s !imported_opaque_units
 
 let clear_imports () =
   Consistbl.clear crc_units;
-  imported_units := StringSet.empty;
-  imported_opaque_units := StringSet.empty
+  imported_units := Unit_name.Set.empty;
+  imported_opaque_units := Unit_name.Set.empty
 
 let check_consistency ps =
   try
@@ -378,120 +375,122 @@ let check_consistency ps =
 (* Reading persistent structures from .cmi files *)
 
 let save_pers_struct crc ps =
-  let modname = ps.ps_name in
-  Hashtbl.add persistent_structures modname (Some ps);
+  let uname = ps.ps_name in
+  Unit_name.Tbl.add persistent_structures uname (Some ps);
   List.iter
     (function
         | Rectypes -> ()
         | Deprecated _ -> ()
-        | Opaque -> add_imported_opaque modname)
+        | Opaque -> add_imported_opaque uname)
     ps.ps_flags;
-  Consistbl.set crc_units modname crc ps.ps_filename;
-  add_import modname
+  Consistbl.set crc_units uname crc ps.ps_filename;
+  add_import uname
 
-let read_pers_struct check modname filename =
-  add_import modname;
+let read_pers_struct check uname filename =
   let cmi = read_cmi filename in
-  let name = cmi.cmi_name in
+  let uname' = cmi.cmi_unit_name in
   let sign = cmi.cmi_sign in
   let crcs = cmi.cmi_crcs in
   let flags = cmi.cmi_flags in
+  add_import uname';
   let deprecated =
     List.fold_left (fun acc -> function Deprecated s -> Some s | _ -> acc) None
       flags
   in
   let comps =
       !components_of_module' ~deprecated empty Subst.identity
-                             (Pident(Ident.create_persistent name))
+                             (Pident(Ident.create_unit uname'))
                              (Mty_signature sign)
   in
-  let ps = { ps_name = name;
+  let ps = { ps_name = uname';
              ps_sig = lazy (Subst.signature Subst.identity sign);
              ps_comps = comps;
              ps_crcs = crcs;
              ps_filename = filename;
              ps_flags = flags;
            } in
-  if ps.ps_name <> modname then
-    error (Illegal_renaming(modname, ps.ps_name, filename));
+  if not (Unit_name.equal uname' uname) then
+    error (Illegal_renaming(uname, uname', filename));
   List.iter
     (function
         | Rectypes ->
             if not !Clflags.recursive_types then
-              error (Need_recursive_types(ps.ps_name, !current_unit))
+              error (Need_recursive_types(uname', !current_unit))
         | Deprecated _ -> ()
-        | Opaque -> add_imported_opaque modname)
+        | Opaque -> add_imported_opaque uname')
     ps.ps_flags;
   if check then check_consistency ps;
-  Hashtbl.add persistent_structures modname (Some ps);
+  Unit_name.Tbl.add persistent_structures uname' (Some ps);
   ps
 
-let find_pers_struct check name =
-  if name = "*predef*" then raise Not_found;
-  match Hashtbl.find persistent_structures name with
+let find_pers_struct check uname =
+  let modname = Unit_name.name uname in
+  if modname = "*predef*" then raise Not_found;
+  match Unit_name.Tbl.find persistent_structures uname with
   | Some ps -> ps
   | None -> raise Not_found
   | exception Not_found ->
       let filename =
         try
-          find_in_path_uncap !load_path (name ^ ".cmi")
+          find_in_path_uncap !load_path (modname ^ ".cmi")
         with Not_found ->
-          Hashtbl.add persistent_structures name None;
+          Unit_name.Tbl.add persistent_structures uname None;
           raise Not_found
       in
-      read_pers_struct check name filename
+      read_pers_struct check uname filename
 
 (* Emits a warning if there is no valid cmi for name *)
-let check_pers_struct name =
+let check_pers_struct uname =
   try
-    ignore (find_pers_struct false name)
+    ignore (find_pers_struct false uname)
   with
   | Not_found ->
-      let warn = Warnings.No_cmi_file(name, None) in
+      let warn = Warnings.No_cmi_file(uname, None) in
         Location.prerr_warning Location.none warn
   | Cmi_format.Error err ->
       let msg = Format.asprintf "%a" Cmi_format.report_error err in
-      let warn = Warnings.No_cmi_file(name, Some msg) in
+      let warn = Warnings.No_cmi_file(uname, Some msg) in
         Location.prerr_warning Location.none warn
   | Error err ->
       let msg =
         match err with
-        | Illegal_renaming(name, ps_name, filename) ->
+        | Illegal_renaming(uname, uname', filename) ->
             Format.asprintf
               " %a@ contains the compiled interface for @ \
-               %s when %s was expected"
-              Location.print_filename filename ps_name name
+               %a when %a was expected"
+              Location.print_filename filename Unit_name.print uname'
+              Unit_name.print uname
         | Inconsistent_import _ -> assert false
-        | Need_recursive_types(name, _) ->
-            Format.sprintf
-              "%s uses recursive types"
-              name
+        | Need_recursive_types(uname, _) ->
+            Format.asprintf
+              "%a uses recursive types"
+              Unit_name.print uname
         | Missing_module _ -> assert false
         | Illegal_value_name _ -> assert false
       in
-      let warn = Warnings.No_cmi_file(name, Some msg) in
+      let warn = Warnings.No_cmi_file(uname, Some msg) in
         Location.prerr_warning Location.none warn
 
-let read_pers_struct modname filename =
-  read_pers_struct true modname filename
+let read_pers_struct uname filename =
+  read_pers_struct true uname filename
 
-let find_pers_struct name =
-  find_pers_struct true name
+let find_pers_struct modname =
+  find_pers_struct true modname
 
-let check_pers_struct name =
-  if not (Hashtbl.mem persistent_structures name) then begin
+let check_pers_struct uname =
+  if not (Unit_name.Tbl.mem persistent_structures uname) then begin
     (* PR#6843: record the weak dependency ([add_import]) regardless of
        whether the check suceeds, to help make builds more
        deterministic. *)
-    add_import name;
-    if (Warnings.is_active (Warnings.No_cmi_file("", None))) then
+    add_import uname;
+    if (Warnings.is_active (Warnings.No_cmi_file(uname, None))) then
       !add_delayed_check_forward
-        (fun () -> check_pers_struct name)
+        (fun () -> check_pers_struct uname)
   end
 
 let reset_cache () =
-  current_unit := "";
-  Hashtbl.clear persistent_structures;
+  current_unit := Unit_name.dummy;
+  Unit_name.Tbl.clear persistent_structures;
   clear_imports ();
   Hashtbl.clear value_declarations;
   Hashtbl.clear type_declarations;
@@ -501,19 +500,19 @@ let reset_cache () =
 let reset_cache_toplevel () =
   (* Delete 'missing cmi' entries from the cache. *)
   let l =
-    Hashtbl.fold
+    Unit_name.Tbl.fold
       (fun name r acc -> if r = None then name :: acc else acc)
       persistent_structures []
   in
-  List.iter (Hashtbl.remove persistent_structures) l;
+  List.iter (Unit_name.Tbl.remove persistent_structures) l;
   Hashtbl.clear value_declarations;
   Hashtbl.clear type_declarations;
   Hashtbl.clear used_constructors;
   Hashtbl.clear prefixed_sg
 
 
-let set_unit_name name =
-  current_unit := name
+let set_unit_name uname =
+  current_unit := uname
 
 let get_unit_name () =
   !current_unit
@@ -527,8 +526,9 @@ let rec find_module_descr path env =
         let (_p, desc) = EnvTbl.find_same id env.components
         in desc
       with Not_found ->
-        if Ident.persistent id && not (Ident.name id = !current_unit)
-        then (find_pers_struct (Ident.name id)).ps_comps
+        if Ident.unit id
+           && not (Unit_name.equal (Ident.unit_name id) !current_unit)
+        then (find_pers_struct (Ident.unit_name id)).ps_comps
         else raise Not_found
       end
   | Pdot(p, s, _pos) ->
@@ -630,8 +630,9 @@ let find_module ~alias path env =
         let (_p, data) = EnvTbl.find_same id env.modules
         in data
       with Not_found ->
-        if Ident.persistent id && not (Ident.name id = !current_unit) then
-          let ps = find_pers_struct (Ident.name id) in
+        if Ident.unit id
+           && not (Unit_name.equal (Ident.unit_name id) !current_unit) then
+          let ps = find_pers_struct (Ident.unit_name id) in
           md (Mty_signature(Lazy.force ps.ps_sig))
         else raise Not_found
       end
@@ -692,7 +693,7 @@ let rec normalize_path lax env path =
       path'
   | _ -> path
   with Not_found when lax
-  || (match path with Pident id -> not (Ident.persistent id) | _ -> true) ->
+  || (match path with Pident id -> not (Ident.unit id) | _ -> true) ->
       path
 
 let normalize_path oloc env path =
@@ -786,9 +787,10 @@ let rec lookup_module_descr_aux ?loc lid env =
       begin try
         EnvTbl.find_name s env.components
       with Not_found ->
-        if s = !current_unit then raise Not_found;
-        let ps = find_pers_struct s in
-        (Pident(Ident.create_persistent s), ps.ps_comps)
+        let uname = Unit_name.simple ~name:s in
+        if Unit_name.equal uname !current_unit then raise Not_found;
+        let ps = find_pers_struct uname in
+        (Pident(Ident.create_unit uname), ps.ps_comps)
       end
   | Ldot(l, s) ->
       let (p, descr) = lookup_module_descr ?loc l env in
@@ -831,11 +833,13 @@ and lookup_module ~load ?loc lid env : Path.t =
           (Builtin_attributes.deprecated_of_attrs md_attributes);
         p
       with Not_found ->
-        if s = !current_unit then raise Not_found;
-        let p = Pident(Ident.create_persistent s) in
-        if !Clflags.transparent_modules && not load then check_pers_struct s
+        let uname = Unit_name.simple ~name:s in
+        if Unit_name.equal uname !current_unit then raise Not_found;
+        let p = Pident(Ident.create_unit uname) in
+        if !Clflags.transparent_modules && not load then
+          check_pers_struct uname
         else begin
-          let ps = find_pers_struct s in
+          let ps = find_pers_struct uname in
           report_deprecated ?loc p ps.ps_comps.deprecated
         end;
         p
@@ -1092,9 +1096,10 @@ let iter_env_cont = ref []
 
 let rec scrape_alias_for_visit env mty =
   match mty with
-  | Mty_alias (Pident id)
-    when Ident.persistent id
-      && not (Hashtbl.mem persistent_structures (Ident.name id)) -> false
+  | Mty_alias (Pident id) when
+      Ident.unit id
+      && not (Unit_name.Tbl.mem persistent_structures (Ident.unit_name id)) ->
+      false
   | Mty_alias path -> (* PR#6600: find_module may raise Not_found *)
       begin try scrape_alias_for_visit env (find_module path env).md_type
       with Not_found -> false
@@ -1123,11 +1128,11 @@ let iter_env proj1 proj2 f env () =
       | Functor_comps _ -> ()
     in iter_env_cont := (path, cont) :: !iter_env_cont
   in
-  Hashtbl.iter
+  Unit_name.Tbl.iter
     (fun s pso ->
       match pso with None -> ()
       | Some ps ->
-          let id = Pident (Ident.create_persistent s) in
+          let id = Pident (Ident.create_unit s) in
           iter_components id id ps.ps_comps)
     persistent_structures;
   Ident.iter
@@ -1147,8 +1152,9 @@ let same_types env1 env2 =
   env1.types == env2.types && env1.components == env2.components
 
 let used_persistent () =
-  let r = ref Concr.empty in
-  Hashtbl.iter (fun s pso -> if pso != None then r := Concr.add s !r)
+  let r = ref Unit_name.Set.empty in
+  Unit_name.Tbl.iter
+    (fun s pso -> if pso != None then r := Unit_name.Set.add s !r)
     persistent_structures;
   !r
 
@@ -1750,9 +1756,9 @@ let open_signature slot root sg env0 =
 
 (* Open a signature from a file *)
 
-let open_pers_signature name env =
-  let ps = find_pers_struct name in
-  open_signature None (Pident(Ident.create_persistent name))
+let open_unit_signature uname env =
+  let ps = find_pers_struct uname in
+  open_signature None (Pident(Ident.create_unit uname))
     (Lazy.force ps.ps_sig) env
 
 let open_signature ?(loc = Location.none) ?(toplevel = false) ovf root sg env =
@@ -1789,17 +1795,17 @@ let open_signature ?(loc = Location.none) ?(toplevel = false) ovf root sg env =
 
 (* Read a signature from a file *)
 
-let read_signature modname filename =
-  let ps = read_pers_struct modname filename in
+let read_signature uname filename =
+  let ps = read_pers_struct uname filename in
   Lazy.force ps.ps_sig
 
 (* Return the CRC of the interface of the given compilation unit *)
 
-let crc_of_unit name =
-  let ps = find_pers_struct name in
+let crc_of_unit uname =
+  let ps = find_pers_struct uname in
   let crco =
     try
-      List.assoc name ps.ps_crcs
+      List.assoc uname ps.ps_crcs
     with Not_found ->
       assert false
   in
@@ -1810,15 +1816,15 @@ let crc_of_unit name =
 (* Return the list of imported interfaces with their CRCs *)
 
 let imports () =
-  Consistbl.extract (StringSet.elements !imported_units) crc_units
+  Consistbl.extract (Unit_name.Set.elements !imported_units) crc_units
 
 (* Returns true if [s] is an opaque imported module  *)
 let is_imported_opaque s =
-  StringSet.mem s !imported_opaque_units
+  Unit_name.Set.mem s !imported_opaque_units
 
 (* Save a signature to a file *)
 
-let save_signature_with_imports ~deprecated sg modname filename imports =
+let save_signature_with_imports ~deprecated sg uname filename imports =
   (*prerr_endline filename;
   List.iter (fun (name, crc) -> prerr_endline name) imports;*)
   Btype.cleanup_abbrev ();
@@ -1834,7 +1840,7 @@ let save_signature_with_imports ~deprecated sg modname filename imports =
   let oc = open_out_bin filename in
   try
     let cmi = {
-      cmi_name = modname;
+      cmi_unit_name = uname;
       cmi_sign = sg;
       cmi_crcs = imports;
       cmi_flags = flags;
@@ -1845,12 +1851,12 @@ let save_signature_with_imports ~deprecated sg modname filename imports =
        will also return its crc *)
     let comps =
       components_of_module ~deprecated empty Subst.identity
-        (Pident(Ident.create_persistent modname)) (Mty_signature sg) in
+        (Pident(Ident.create_unit uname)) (Mty_signature sg) in
     let ps =
-      { ps_name = modname;
+      { ps_name = uname;
         ps_sig = lazy (Subst.signature Subst.identity sg);
         ps_comps = comps;
-        ps_crcs = (cmi.cmi_name, Some crc) :: imports;
+        ps_crcs = (uname, Some crc) :: imports;
         ps_filename = filename;
         ps_flags = cmi.cmi_flags;
       } in
@@ -1861,8 +1867,8 @@ let save_signature_with_imports ~deprecated sg modname filename imports =
     remove_file filename;
     raise exn
 
-let save_signature ~deprecated sg modname filename =
-  save_signature_with_imports ~deprecated sg modname filename (imports())
+let save_signature ~deprecated sg uname filename =
+  save_signature_with_imports ~deprecated sg uname filename (imports())
 
 (* Folding on environments *)
 
@@ -1913,13 +1919,13 @@ let fold_modules f lid env acc =
           env.modules
           acc
       in
-      Hashtbl.fold
-        (fun name ps acc ->
+      Unit_name.Tbl.fold
+        (fun uname ps acc ->
           match ps with
               None -> acc
             | Some ps ->
-              f name (Pident(Ident.create_persistent name))
-                     (md (Mty_signature (Lazy.force ps.ps_sig))) acc)
+              f (Unit_name.name uname) (Pident(Ident.create_unit uname))
+                (md (Mty_signature (Lazy.force ps.ps_sig))) acc)
         persistent_structures
         acc
     | Some l ->
@@ -1995,18 +2001,21 @@ let env_of_only_summary env_from_summary env =
 open Format
 
 let report_error ppf = function
-  | Illegal_renaming(modname, ps_name, filename) -> fprintf ppf
+  | Illegal_renaming(uname, uname', filename) -> fprintf ppf
       "Wrong file naming: %a@ contains the compiled interface for @ \
-       %s when %s was expected"
-      Location.print_filename filename ps_name modname
-  | Inconsistent_import(name, source1, source2) -> fprintf ppf
+       %a when %a was expected"
+      Location.print_filename filename Unit_name.print uname'
+      Unit_name.print uname
+  | Inconsistent_import(uname, source1, source2) -> fprintf ppf
       "@[<hov>The files %a@ and %a@ \
-              make inconsistent assumptions@ over interface %s@]"
-      Location.print_filename source1 Location.print_filename source2 name
+              make inconsistent assumptions@ over interface %a@]"
+      Location.print_filename source1 Location.print_filename source2
+      Unit_name.print uname
   | Need_recursive_types(import, export) ->
       fprintf ppf
-        "@[<hov>Unit %s imports from %s, which uses recursive types.@ %s@]"
-        export import "The compilation flag -rectypes is required"
+        "@[<hov>Unit %a imports from %a, which uses recursive types.@ %s@]"
+        Unit_name.print export Unit_name.print import
+        "The compilation flag -rectypes is required"
   | Missing_module(_, path1, path2) ->
       fprintf ppf "@[@[<hov>";
       if Path.same path1 path2 then

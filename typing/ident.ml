@@ -15,10 +15,9 @@
 
 open Format
 
-type t = { stamp: int; name: string; mutable flags: int }
-
-let global_flag = 1
-let predef_exn_flag = 2
+type t =
+  | Unit of Unit_name.t
+  | Stamped of { stamp: int; name: string; global: bool }
 
 (* A stamp of 0 denotes a persistent identifier *)
 
@@ -26,38 +25,71 @@ let currentstamp = ref 0
 
 let create s =
   incr currentstamp;
-  { name = s; stamp = !currentstamp; flags = 0 }
+  Stamped { name = s; stamp = !currentstamp; global = false }
 
-let create_predef_exn s =
+let create_global s =
   incr currentstamp;
-  { name = s; stamp = !currentstamp; flags = predef_exn_flag }
+  Stamped { name = s; stamp = !currentstamp; global = true }
 
-let create_persistent s =
-  { name = s; stamp = 0; flags = global_flag }
+let create_unit uname =
+  Unit uname
 
 let rename i =
-  incr currentstamp;
-  { i with stamp = !currentstamp }
+  match i with
+  | Stamped r ->
+      incr currentstamp;
+      Stamped { r with stamp = !currentstamp }
+  | Unit _ ->
+      Misc.fatal_error
+        "Ident.rename: unit identifier"
 
-let name i = i.name
+let name = function
+  | Unit uname -> Unit_name.name uname
+  | Stamped { name } -> name
 
-let unique_name i = i.name ^ "_" ^ string_of_int i.stamp
+let stamp = function
+  | Unit _ -> 0
+  | Stamped { stamp } -> stamp
 
-let unique_toplevel_name i = i.name ^ "/" ^ string_of_int i.stamp
+let unique_name = function
+  | Unit uname -> Unit_name.name uname
+  | Stamped { name; stamp } ->
+      name ^ "_" ^ string_of_int stamp
 
-let persistent i = (i.stamp = 0)
+let unique_toplevel_name = function
+  | Unit uname -> Unit_name.name uname
+  | Stamped { name; stamp } ->
+      name ^ "/" ^ string_of_int stamp
 
-let equal i1 i2 = i1.name = i2.name
+let unit = function
+  | Unit _ -> true
+  | Stamped _ -> false
 
-let same i1 i2 = i1 = i2
-  (* Possibly more efficient version (with a real compiler, at least):
-       if i1.stamp <> 0
-       then i1.stamp = i2.stamp
-       else i2.stamp = 0 && i1.name = i2.name *)
+let unit_name = function
+  | Unit uname -> uname
+  | Stamped _ ->
+      Misc.fatal_error "Ident.unit_name: non-unit identifier"
 
-let compare i1 i2 = Pervasives.compare i1 i2
+let equal i1 i2 = (name i1) = (name i2)
 
-let binding_time i = i.stamp
+let same i1 i2 =
+  match i1, i2 with
+  | Unit un1, Unit un2 -> Unit_name.equal un1 un2
+  | Stamped { stamp = stamp1 }, Stamped { stamp = stamp2 } -> stamp1 = stamp2
+  | _, _ -> false
+
+let compare i1 i2 =
+  match i1, i2 with
+  | Unit un1, Unit un2 ->
+      Unit_name.compare un1 un2
+  | Unit _, Stamped _ -> 1
+  | Stamped s1, Stamped s2 ->
+      let c = Pervasives.compare s1.stamp s2.stamp in
+        if c <> 0 then c
+        else Pervasives.compare s1.name s2.name
+  | Stamped _, Unit _ -> -1
+
+let binding_time i = stamp i
 
 let current_time() = !currentstamp
 let set_current_time t = currentstamp := max !currentstamp t
@@ -70,22 +102,22 @@ let reinit () =
   else currentstamp := !reinit_level
 
 let hide i =
-  { i with stamp = -1 }
+  match i with
+  | Stamped r -> Stamped { r with stamp = -1 }
+  | Unit _ ->
+      Misc.fatal_error
+        "Ident.hide: unit identifier"
 
-let make_global i =
-  i.flags <- i.flags lor global_flag
+let global = function
+  | Unit _ -> true
+  | Stamped { global } -> global
 
-let global i =
-  (i.flags land global_flag) <> 0
-
-let is_predef_exn i =
-  (i.flags land predef_exn_flag) <> 0
-
-let print ppf i =
-  match i.stamp with
-  | 0 -> fprintf ppf "%s!" i.name
-  | -1 -> fprintf ppf "%s#" i.name
-  | n -> fprintf ppf "%s/%i%s" i.name n (if global i then "g" else "")
+let print ppf = function
+  | Unit uname -> fprintf ppf "%s!" (Unit_name.name uname)
+  | Stamped { name; stamp; global } ->
+      if stamp = -1 then fprintf ppf "%s#" name
+      else fprintf ppf "%s/%i%s" name stamp
+                   (if global then "g" else "")
 
 type 'a tbl =
     Empty
@@ -137,7 +169,7 @@ let rec add id data = function
     Empty ->
       Node(Empty, {ident = id; data = data; previous = None}, Empty, 1)
   | Node(l, k, r, h) ->
-      let c = compare id.name k.ident.name in
+      let c = String.compare (name id) (name k.ident) in
       if c = 0 then
         Node(l, {ident = id; data = data; previous = Some k}, r, h)
       else if c < 0 then
@@ -149,43 +181,43 @@ let rec find_stamp s = function
     None ->
       raise Not_found
   | Some k ->
-      if k.ident.stamp = s then k.data else find_stamp s k.previous
+      if stamp k.ident = s then k.data else find_stamp s k.previous
 
 let rec find_same id = function
     Empty ->
       raise Not_found
   | Node(l, k, r, _) ->
-      let c = compare id.name k.ident.name in
+      let c = String.compare (name id) (name k.ident) in
       if c = 0 then
-        if id.stamp = k.ident.stamp
+        if stamp id = stamp k.ident
         then k.data
-        else find_stamp id.stamp k.previous
+        else find_stamp (stamp id) k.previous
       else
         find_same id (if c < 0 then l else r)
 
-let rec find_name name = function
+let rec find_name n = function
     Empty ->
       raise Not_found
   | Node(l, k, r, _) ->
-      let c = compare name k.ident.name in
+      let c = String.compare n (name k.ident) in
       if c = 0 then
         k.data
       else
-        find_name name (if c < 0 then l else r)
+        find_name n (if c < 0 then l else r)
 
 let rec get_all = function
   | None -> []
   | Some k -> k.data :: get_all k.previous
 
-let rec find_all name = function
+let rec find_all n = function
     Empty ->
       []
   | Node(l, k, r, _) ->
-      let c = compare name k.ident.name in
+      let c = String.compare n (name k.ident) in
       if c = 0 then
         k.data :: get_all k.previous
       else
-        find_all name (if c < 0 then l else r)
+        find_all n (if c < 0 then l else r)
 
 let rec fold_aux f stack accu = function
     Empty ->
@@ -220,22 +252,16 @@ let key_name = ""
 
 let make_key_generator () =
   let c = ref 1 in
-  fun id ->
-    let stamp = !c in
-    decr c ;
-    { id with name = key_name; stamp = stamp; }
-
-let compare x y =
-  let c = x.stamp - y.stamp in
-  if c <> 0 then c
-  else
-    let c = compare x.name y.name in
-    if c <> 0 then c
-    else
-      compare x.flags y.flags
+  function
+  | Stamped r ->
+      let stamp = !c in
+      decr c ;
+      Stamped { r with name = key_name; stamp = stamp; }
+  | Unit _ ->
+      Misc.fatal_error "Ident.make_key_generator: unit identifier"
 
 let output oc id = output_string oc (unique_name id)
-let hash i = (Char.code i.name.[0]) lxor i.stamp
+let hash i = (Char.code (name i).[0]) lxor (stamp i)
 
 let original_equal = equal
 include Identifiable.Make (struct

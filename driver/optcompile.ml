@@ -66,10 +66,11 @@ let (+++) (x, y) f = (x, f y)
 let implementation ppf sourcefile outputprefix ~backend =
   let source_provenance = Timings.File sourcefile in
   Compmisc.init_path true;
-  let modulename = module_of_filename ppf sourcefile outputprefix in
-  Env.set_unit_name modulename;
+  let modname = module_of_filename ppf sourcefile outputprefix in
+  let uname = Unit_name.simple ~name:modname in
+  Env.set_unit_name modname;
   let env = Compmisc.initial_env() in
-  Compilenv.reset ~source_provenance ?packname:!Clflags.for_package modulename;
+  Compilenv.reset ~source_provenance ?packname:!Clflags.for_package modname;
   let cmxfile = outputprefix ^ ".cmx" in
   let objfile = outputprefix ^ ext_obj in
   let comp ast =
@@ -78,7 +79,7 @@ let implementation ppf sourcefile outputprefix ~backend =
       ++ print_if ppf Clflags.dump_parsetree Printast.implementation
       ++ print_if ppf Clflags.dump_source Pprintast.structure
       ++ Timings.(time (Typing sourcefile))
-          (Typemod.type_implementation sourcefile outputprefix modulename env)
+          (Typemod.type_implementation sourcefile outputprefix modname env)
       ++ print_if ppf Clflags.dump_typedtree
           Printtyped.implementation_with_coercion
     in
@@ -92,7 +93,7 @@ let implementation ppf sourcefile outputprefix ~backend =
         end;
         (typedtree, coercion)
         ++ Timings.(time (Timings.Transl sourcefile)
-            (Translmod.transl_implementation_flambda modulename))
+            (Translmod.transl_implementation_flambda uname))
         +++ print_if ppf Clflags.dump_rawlambda Printlambda.lambda
         ++ Timings.time (Timings.Generate sourcefile) (fun lambda ->
           lambda
@@ -114,7 +115,7 @@ let implementation ppf sourcefile outputprefix ~backend =
         Clflags.use_inlining_arguments_set Clflags.classic_arguments;
         (typedtree, coercion)
         ++ Timings.(time (Transl sourcefile))
-            (Translmod.transl_store_implementation modulename)
+            (Translmod.transl_store_implementation modname)
         ++ print_if ppf Clflags.dump_rawlambda Printlambda.program
         ++ Timings.(time (Generate sourcefile))
             (fun { Lambda.code; main_module_block_size } ->

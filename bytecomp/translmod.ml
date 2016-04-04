@@ -580,20 +580,20 @@ let wrap_globals body =
 
 (* Compile an implementation *)
 
-let transl_implementation_flambda module_name (str, cc) =
+let transl_implementation_flambda uname (str, cc) =
   reset_labels ();
   primitive_declarations := [];
   Hashtbl.clear used_primitives;
-  let module_id = Ident.create_persistent module_name in
+  let module_id = Ident.create_unit uname in
   let body, size =
     Translobj.transl_label_init
       (fun () -> transl_struct [] cc (global_path module_id) str)
   in
   (module_id, size), wrap_globals body
 
-let transl_implementation module_name (str, cc) =
+let transl_implementation uname (str, cc) =
   let (module_id, _size), module_initializer =
-    transl_implementation_flambda module_name (str, cc)
+    transl_implementation_flambda uname (str, cc)
   in
   Lprim (Psetglobal module_id, [module_initializer])
 
@@ -919,11 +919,11 @@ let build_ident_map restr idlist more_ids =
 (* Compile an implementation using transl_store_structure
    (for the native-code compiler). *)
 
-let transl_store_gen module_name ({ str_items = str }, restr) topl =
+let transl_store_gen uname ({ str_items = str }, restr) topl =
   reset_labels ();
   primitive_declarations := [];
   Hashtbl.clear used_primitives;
-  let module_id = Ident.create_persistent module_name in
+  let module_id = Ident.create_unit uname in
   let (map, prims, size) =
     build_ident_map restr (defined_idents str) (more_idents str) in
   let f = function
@@ -934,20 +934,21 @@ let transl_store_gen module_name ({ str_items = str }, restr) topl =
   transl_store_label_init module_id size f str
   (*size, transl_label_init (transl_store_structure module_id map prims str)*)
 
-let transl_store_phrases module_name str =
-  transl_store_gen module_name (str,Tcoerce_none) true
+let transl_store_phrases uname str =
+  transl_store_gen uname (str,Tcoerce_none) true
 
-let transl_store_implementation module_name (str, restr) =
+let transl_store_implementation uname (str, restr) =
   let s = !transl_store_subst in
   transl_store_subst := Ident.empty;
-  let (i, r) = transl_store_gen module_name (str, restr) false in
+  let (i, r) = transl_store_gen uname (str, restr) false in
   transl_store_subst := s;
   { Lambda.main_module_block_size = i;
     code = wrap_globals r; }
 
 (* Compile a toplevel phrase *)
 
-let toploop_ident = Ident.create_persistent "Toploop"
+let toploop_uname = Unit_name.simple ~name:"Toploop"
+let toploop_ident = Ident.create_unit toploop_uname
 let toploop_getvalue_pos = 0 (* position of getvalue in module Toploop *)
 let toploop_setvalue_pos = 1 (* position of setvalue in module Toploop *)
 
@@ -1161,7 +1162,6 @@ let () =
 let reset () =
   primitive_declarations := [];
   transl_store_subst := Ident.empty;
-  toploop_ident.Ident.flags <- 0;
   aliased_idents := Ident.empty;
   Env.reset_required_globals ();
   Hashtbl.clear used_primitives

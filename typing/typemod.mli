@@ -27,7 +27,7 @@ val type_toplevel_phrase:
         Env.t -> Parsetree.structure ->
          Typedtree.structure * Types.signature * Env.t
 val type_implementation:
-  string -> string -> string -> Env.t -> Parsetree.structure ->
+  string -> string -> Unit_name.t -> Env.t -> Parsetree.structure ->
   Typedtree.structure * Typedtree.module_coercion
 val type_interface:
         Env.t -> Parsetree.signature -> Typedtree.signature
@@ -46,11 +46,11 @@ val simplify_signature: signature -> signature
 val path_of_module : Typedtree.module_expr -> Path.t option
 
 val save_signature:
-  string -> Typedtree.signature -> string -> string ->
+  Unit_name.t -> Typedtree.signature -> string -> string ->
   Env.t -> Types.signature_item list -> unit
 
 val package_units:
-  Env.t -> string list -> string -> string -> Typedtree.module_coercion
+  Env.t -> string list -> string -> Unit_name.t -> Typedtree.module_coercion
 
 type error =
     Cannot_apply of module_type

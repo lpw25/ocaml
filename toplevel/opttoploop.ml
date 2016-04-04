@@ -43,7 +43,8 @@ let need_symbol sym =
   try ignore (ndl_loadsym sym); false
   with _ -> true
 
-let dll_run dll entry =
+let dll_run dll uname =
+  let entry = Unit_name.name entry in
   match (try Result (Obj.magic (ndl_run_toplevel dll entry))
          with exn -> Exception exn)
   with
@@ -182,7 +183,7 @@ let toplevel_startup_hook = ref (fun () -> ())
 (* Load in-core and execute a lambda term *)
 
 let phrase_seqid = ref 0
-let phrase_name = ref "TOP"
+let phrase_uname = ref Unit_name.dummy
 
 (* CR-soon trefis for mshinwell: copy/pasted from Optmain. Should it be shared
    or?
@@ -210,9 +211,10 @@ let load_lambda ppf ~module_ident lam size =
   let slam = Simplif.simplify_lambda lam in
   if !Clflags.dump_lambda then fprintf ppf "%a@." Printlambda.lambda slam;
 
+  let phrase_name = Unit_name.name !phrase_uname in
   let dll =
-    if !Clflags.keep_asm_file then !phrase_name ^ ext_dll
-    else Filename.temp_file ("caml" ^ !phrase_name) ext_dll
+    if !Clflags.keep_asm_file then phrase_name ^ ext_dll
+    else Filename.temp_file ("caml" ^ phrase_name) ext_dll
   in
   let fn = Filename.chop_extension dll in
   if not Config.flambda then
@@ -232,7 +234,7 @@ let load_lambda ppf ~module_ident lam size =
     if Filename.is_implicit dll
     then Filename.concat (Sys.getcwd ()) dll
     else dll in
-  let res = dll_run dll !phrase_name in
+  let res = dll_run dll !phrase_uname in
   (try Sys.remove dll with Sys_error _ -> ());
   (* note: under windows, cannot remove a loaded dll
      (should remember the handles, close them in at_exit, and then remove
@@ -275,9 +277,10 @@ let execute_phrase print_outcome ppf phr =
   | Ptop_def sstr ->
       let oldenv = !toplevel_env in
       incr phrase_seqid;
-      phrase_name := Printf.sprintf "TOP%i" !phrase_seqid;
+      let phrase_name = Printf.sprintf "TOP%i" !phrase_seqid in
+      phrase_uname := Unit_name.simple ~name:phrase_name;
       Compilenv.reset ~source_provenance:Timings.Toplevel
-        ?packname:None !phrase_name;
+        ?packname:None !phrase_uname;
       Typecore.reset_delayed_checks ();
       let sstr, rewritten =
         match sstr with
@@ -303,14 +306,14 @@ let execute_phrase print_outcome ppf phr =
       let module_ident, res, size =
         if Config.flambda then
           let ((module_ident, size), res) =
-            Translmod.transl_implementation_flambda !phrase_name
+            Translmod.transl_implementation_flambda !phrase_uname
               (str, Tcoerce_none)
           in
           remember module_ident 0 sg';
           module_ident, close_phrase res, size
         else
-          let size, res = Translmod.transl_store_phrases !phrase_name str in
-          Ident.create_persistent !phrase_name, res, size
+          let size, res = Translmod.transl_store_phrases !phrase_uname str in
+          Ident.create_unit !phrase_uname, res, size
       in
       Warnings.check_fatal ();
       begin try

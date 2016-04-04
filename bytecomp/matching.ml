@@ -1474,11 +1474,12 @@ let matcher_lazy p rem = match p.pat_desc with
 let prim_obj_tag =
   Primitive.simple ~name:"caml_obj_tag" ~arity:1 ~alloc:false
 
-let get_mod_field modname field =
+let get_unit_field uname field =
   lazy (
+    let mod_ident = Ident.create_unit uname in
+    let modname = Unit_name.name uname in
     try
-      let mod_ident = Ident.create_persistent modname in
-      let env = Env.open_pers_signature modname Env.initial_safe_string in
+      let env = Env.open_unit_signature uname Env.initial_safe_string in
       let p = try
         match Env.lookup_value (Longident.Lident field) env with
         | (Path.Pdot(_,_,i), _) -> i
@@ -1491,7 +1492,8 @@ let get_mod_field modname field =
   )
 
 let code_force_lazy_block =
-  get_mod_field "CamlinternalLazy" "force_lazy_block"
+  let internal_lazy = Unit_name.simple ~name:"CamlinternalLazy" in
+  get_unit_field internal_lazy "force_lazy_block"
 ;;
 
 (* inline_lazy_force inlines the beginning of the code of Lazy.force. When

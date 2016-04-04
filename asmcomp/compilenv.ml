@@ -116,7 +116,8 @@ let make_symbol ?(unitname = current_unit.ui_symbol) idopt =
 let current_unit_linkage_name () =
   Linkage_name.create (make_symbol ~unitname:current_unit.ui_symbol None)
 
-let reset ?packname ~source_provenance:file name =
+let reset ?packname ~source_provenance:file uname =
+  let name = Unit_name.name uname in
   Hashtbl.clear global_infos_table;
   Set_of_closures_id.Tbl.clear imported_sets_of_closures_table;
   let symbol = symbolname_for_pack packname name in
@@ -137,7 +138,7 @@ let reset ?packname ~source_provenance:file name =
   Hashtbl.clear export_infos_table;
   let compilation_unit =
     Compilation_unit.create
-      (Ident.create_persistent name)
+      (Ident.create_unit uname)
       (current_unit_linkage_name ())
   in
   Compilation_unit.set_current compilation_unit

@@ -69,7 +69,7 @@ type t =
   | Bad_env_variable of string * string     (* 46 *)
   | Attribute_payload of string * string    (* 47 *)
   | Eliminated_optional_arguments of string list (* 48 *)
-  | No_cmi_file of string * string option   (* 49 *)
+  | No_cmi_file of Unit_name.t * string option   (* 49 *)
   | Bad_docstring of bool                   (* 50 *)
   | Expect_tailcall                         (* 51 *)
   | Fragile_literal_pattern                 (* 52 *)
@@ -419,12 +419,14 @@ let message = function
       Printf.sprintf "implicit elimination of optional argument%s %s"
         (if List.length sl = 1 then "" else "s")
         (String.concat ", " sl)
-  | No_cmi_file(name, None) ->
-      "no cmi file was found in path for module " ^ name
-  | No_cmi_file(name, Some msg) ->
-      Printf.sprintf
-        "no valid cmi file was found in path for module %s. %s"
-        name msg
+  | No_cmi_file(uname, None) ->
+      Format.asprintf
+        "no cmi file was found in path for module %a"
+        Unit_name.print uname
+  | No_cmi_file(uname, Some msg) ->
+      Format.asprintf
+        "no valid cmi file was found in path for module %a. %s"
+        Unit_name.print uname msg
   | Bad_docstring unattached ->
       if unattached then "unattached documentation comment (ignored)"
       else "ambiguous documentation comment"
