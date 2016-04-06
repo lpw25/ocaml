@@ -82,15 +82,14 @@ ocamlprof: $(CSLPROF) profiling.cmo
 	$(CAMLC) $(LINKFLAGS) -o ocamlprof $(CSLPROF_IMPORTS) $(CSLPROF)
 
 ocamlcp: ocamlcp.cmo
-	$(CAMLC) $(LINKFLAGS) -o ocamlcp misc.cmo warnings.cmo config.cmo \
-                 identifiable.cmo numbers.cmo arg_helper.cmo clflags.cmo \
-	         main_args.cmo ocamlcp.cmo
+	$(CAMLC) $(LINKFLAGS) -o ocamlcp misc.cmo unit_name.cmo warnings.cmo \
+                 config.cmo identifiable.cmo numbers.cmo arg_helper.cmo \
+                 clflags.cmo main_args.cmo ocamlcp.cmo
 
 ocamloptp: ocamloptp.cmo
-	$(CAMLC) $(LINKFLAGS) -o ocamloptp misc.cmo warnings.cmo config.cmo \
-                 identifiable.cmo numbers.cmo arg_helper.cmo clflags.cmo \
-	         main_args.cmo \
-	         ocamloptp.cmo
+	$(CAMLC) $(LINKFLAGS) -o ocamloptp misc.cmo unit_name.cmo \
+                 warnings.cmo config.cmo identifiable.cmo numbers.cmo \
+                 arg_helper.cmo clflags.cmo main_args.cmo ocamloptp.cmo
 
 opt:: profiling.cmx
 
