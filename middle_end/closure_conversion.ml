@@ -399,10 +399,6 @@ and close t ?debuginfo env (lam : Lambda.lambda) : Flambda.t =
   | Lprim (Psetfield (_, _, _), [Lprim (Pgetglobal _, []); _]) ->
     Misc.fatal_errorf "[Psetfield (Pgetglobal ...)] is \
         forbidden upon entry to the middle end"
-  | Lprim (Pgetglobal id, []) when Ident.is_predef_exn id ->
-    let symbol = t.symbol_for_global' id in
-    t.imported_symbols <- Symbol.Set.add symbol t.imported_symbols;
-    name_expr (Symbol symbol) ~name:"predef_exn"
   | Lprim (Pgetglobal id, []) ->
     assert (not (Ident.same id t.current_unit_id));
     let symbol = t.symbol_for_global' id in

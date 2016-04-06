@@ -3018,7 +3018,7 @@ let assign_pat opt nraise catch_ids loc pat lam =
     (* pattern idents will be bound in staticcatch (let body), so we
        refresh them here to guarantee binders  uniqueness *)
     let pat_ids = pat_bound_idents pat in
-    let fresh_ids = List.map (fun id -> id, Ident.rename id) pat_ids in
+    let fresh_ids = List.map (fun id -> id, Ident.freshen id) pat_ids in
     (fresh_ids, alpha_pat fresh_ids pat, lam) :: acc
   in
 

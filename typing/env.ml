@@ -409,7 +409,7 @@ let read_pers_struct check uname filename =
              ps_filename = filename;
              ps_flags = flags;
            } in
-  if not (Unit_name.equal uname' uname) then
+  if not (Unit_name.equal uname uname') then
     error (Illegal_renaming(uname, uname', filename));
   List.iter
     (function

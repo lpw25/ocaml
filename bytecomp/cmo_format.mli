@@ -26,7 +26,7 @@ type reloc_info =
 (* Descriptor for compilation units *)
 
 type compilation_unit =
-  { cu_name: string;                    (* Name of compilation unit *)
+  { cu_unit_name: Unit_name.t;          (* Name of compilation unit *)
     mutable cu_pos: int;                (* Absolute position in file *)
     cu_codesize: int;                   (* Size of code block *)
     cu_reloc: (reloc_info * int) list;  (* Relocation information *)

@@ -161,34 +161,33 @@ let scan_file obj_name tolink =
 
 let crc_interfaces = Consistbl.create ()
 let interfaces = ref ([] : Unit_name.t list)
-let implementations_defined = ref ([] : (string * string) list)
+let implementations_defined = ref ([] : (Unit_name.t * string) list)
 
 let check_consistency ppf file_name cu =
-  let uname = Unit_name.simple ~name:cu.cu_name in
   begin try
     List.iter
-      (fun (name, crco) ->
-        interfaces := name :: !interfaces;
+      (fun (uname, crco) ->
+        interfaces := uname :: !interfaces;
         match crco with
           None -> ()
         | Some crc ->
-            if Unit_name.equal name uname
-            then Consistbl.set crc_interfaces name crc file_name
-            else Consistbl.check crc_interfaces name crc file_name)
+            if Unit_name.equal uname cu.cu_unit_name
+            then Consistbl.set crc_interfaces uname crc file_name
+            else Consistbl.check crc_interfaces uname crc file_name)
       cu.cu_imports
   with Consistbl.Inconsistency(uname, user, auth) ->
     raise(Error(Inconsistent_import(uname, user, auth)))
   end;
   begin try
-    let source = List.assoc cu.cu_name !implementations_defined in
+    let source = List.assoc cu.cu_unit_name !implementations_defined in
     Location.print_warning (Location.in_file file_name) ppf
-      (Warnings.Multiple_definition(cu.cu_name,
+      (Warnings.Multiple_definition(cu.cu_unit_name,
                                     Location.show_filename file_name,
                                     Location.show_filename source))
   with Not_found -> ()
   end;
   implementations_defined :=
-    (cu.cu_name, file_name) :: !implementations_defined
+    (cu.cu_unit_name, file_name) :: !implementations_defined
 
 let extract_crc_interfaces () =
   Consistbl.extract !interfaces crc_interfaces
@@ -243,9 +242,10 @@ let link_archive ppf output_fun currpos_fun file_name units_required =
   try
     List.iter
       (fun cu ->
-         let name = file_name ^ "(" ^ cu.cu_name ^ ")" in
+         let name = Unit_name.name cu.cu_unit_name in
+         let file_name = file_name ^ "(" ^ name ^ ")" in
          try
-           link_compunit ppf output_fun currpos_fun inchan name cu
+           link_compunit ppf output_fun currpos_fun inchan file_name cu
          with Symtable.Error msg ->
            raise(Error(Symbol_error(name, msg))))
       units_required;

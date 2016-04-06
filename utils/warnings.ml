@@ -51,7 +51,7 @@ type t =
   | Wildcard_arg_to_constant_constr         (* 28 *)
   | Eol_in_string                           (* 29 *)
   | Duplicate_definitions of string * string * string * string (*30 *)
-  | Multiple_definition of string * string * string (* 31 *)
+  | Multiple_definition of Unit_name.t * string * string (* 31 *)
   | Unused_value_declaration of string      (* 32 *)
   | Unused_open of string                   (* 33 *)
   | Unused_type_declaration of string       (* 34 *)
@@ -351,10 +351,10 @@ let message = function
   | Duplicate_definitions (kind, cname, tc1, tc2) ->
       Printf.sprintf "the %s %s is defined in both types %s and %s."
         kind cname tc1 tc2
-  | Multiple_definition(modname, file1, file2) ->
-      Printf.sprintf
-        "files %s and %s both define a module named %s"
-        file1 file2 modname
+  | Multiple_definition(uname, file1, file2) ->
+      Format.asprintf
+        "files %s and %s both define a module named %a"
+        file1 file2 Unit_name.print uname
   | Unused_value_declaration v -> "unused value " ^ v ^ "."
   | Unused_open s -> "unused open " ^ s ^ "."
   | Unused_type_declaration s -> "unused type " ^ s ^ "."

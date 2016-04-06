@@ -46,7 +46,7 @@ type t =
   | Wildcard_arg_to_constant_constr         (* 28 *)
   | Eol_in_string                           (* 29 *)
   | Duplicate_definitions of string * string * string * string (* 30 *)
-  | Multiple_definition of string * string * string (* 31 *)
+  | Multiple_definition of Unit_name.t * string * string (* 31 *)
   | Unused_value_declaration of string      (* 32 *)
   | Unused_open of string                   (* 33 *)
   | Unused_type_declaration of string       (* 34 *)

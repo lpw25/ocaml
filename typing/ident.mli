@@ -28,7 +28,8 @@ include Identifiable.S with type t := t
 val create: string -> t
 val create_global: string -> t
 val create_unit: Unit_name.t -> t
-val rename: t -> t
+val freshen: t -> t
+val rename: string -> t -> t
 val name: t -> string
 val unique_name: t -> string
 val unique_toplevel_name: t -> string

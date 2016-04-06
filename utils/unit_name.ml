@@ -2,40 +2,33 @@
 type t = {
   root : string option;
   parents : string list;
-  packs : string list;
   name : string;
 }
+
+let root { root } = root
+
+let parents { parents } = parents
+
+let name { name } = name
 
 let simple ~name =
   { root = None;
     parents = [];
-    packs = [];
     name; }
 
 let relative ~parents ~name =
   { root = None;
     parents;
-    packs = [];
     name; }
 
 let absolute ~root ~parents ~name =
-  { root;
+  { root = Some root;
     parents;
-    packs = [];
     name; }
-
-let pack ~pack t =
-  { t with packs = pack :: t.packs }
-
-let unpacked t =
-  match t.packs with
-  | [] -> t
-  | pack :: _ -> { t with packs = []; name = pack }
 
 let dummy =
   { root = None;
     parents = [];
-    packs = [];
     name = "" }
 
 let equal_string_option o1 o2 =
@@ -44,8 +37,8 @@ let equal_string_option o1 o2 =
   | Some s1, Some s2 -> String.equal s1 s2
   | _, _ -> false
 
-let rev equal_string_list l1 l2 =
-  match ps1, ps2 with
+let rec equal_string_list l1 l2 =
+  match l1, l2 with
   | [], [] -> true
   | s1 :: l1, s2 :: l2 ->
       String.equal s1 s2 && equal_string_list l1 l2
@@ -53,9 +46,8 @@ let rev equal_string_list l1 l2 =
 
 let equal t1 t2 =
   String.equal t1.name t2.name
-  && equal_string_list t1.packs t2.packs
   && equal_string_list t1.parents t2.parents
-  && equal_root t1 t2
+  && equal_string_option t1.root t2.root
 
 let compare_string_option o1 o2 =
   match o1, o2 with
@@ -78,33 +70,37 @@ let compare t1 t2 =
   let c = String.compare t1.name t2.name in
   if c <> 0 then c
   else begin
-    let c = compare_string_list t1.packs t2.packs in
+    let c = compare_string_list t1.parents t2.parents in
     if c <> 0 then c
-    else begin
-      let c = compare_string_list t1.parents t2.parents in
-      if c <> 0 then c
-      else compare_string_option t1.root t2.root
-    end
+    else compare_string_option t1.root t2.root
   end
 
 let hash = Hashtbl.hash
 
 let print_root ppf t =
-  match t with
+  match t.root with
   | None -> ()
   | Some r -> Format.fprintf ppf "%s:" r
 
-let rec print_prefixes ppf ps =
-  match ps with
-  | [] -> ()
-  | p :: ps ->
-      Format.fprintf "%a%s." print_prefixes ps p
+let print_parents ppf t =
+  let rec loop ppf = function
+    | [] -> ()
+    | p :: ps ->
+        Format.fprintf ppf "%a%s." loop ps p
+  in
+    loop ppf t.parents
 
 let print ppf t =
-  Format.fprintf ppf "%a%a%a%s"
-    print_root t print_prefixes t.parents
-    print_prefixes t.packs t.name
+  Format.fprintf ppf "%a%a%s"
+    print_root t print_parents t t.name
 
-module Set = Set.Make(struct type nonrec t = t let compare = compare end)
+module Ops = struct
+  type nonrec t = t
+  let equal = equal
+  let compare = compare
+  let hash = hash
+end
 
-module Tbl = Hashtbl.Make(struct type nonrec t = t let hash = hash end)
+module Set = Set.Make(Ops)
+
+module Tbl = Hashtbl.Make(Ops)

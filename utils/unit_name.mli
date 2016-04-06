@@ -15,10 +15,6 @@ val relative : parents:string list -> name:string -> t
 
 val absolute : root:string -> parents:string list -> name:string -> t
 
-val pack : pack:string -> t -> t
-
-val unpacked : t -> t
-
 val equal : t -> t -> bool
 
 val compare : t -> t -> int

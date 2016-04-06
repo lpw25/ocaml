@@ -256,7 +256,7 @@ let simplify_exits lam =
       let ls = List.map simplif ls in
       begin try
         let xs,handler =  Hashtbl.find subst i in
-        let ys = List.map Ident.rename xs in
+        let ys = List.map Ident.freshen xs in
         let env =
           List.fold_right2
             (fun x y t -> Ident.add x (Lvar y) t)
@@ -656,7 +656,7 @@ let split_default_wrapper ?(create_wrapper_body = fun lam -> lam)
           }
         in
         let inner_params = List.map map_param params in
-        let new_ids = List.map Ident.rename inner_params in
+        let new_ids = List.map Ident.freshen inner_params in
         let subst = List.fold_left2
             (fun s id new_id ->
                Ident.add id (Lvar new_id) s)

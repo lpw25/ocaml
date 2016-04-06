@@ -40,7 +40,7 @@ opt.opt: ocamldep.opt read_cmt.opt
 
 CAMLDEP_OBJ=depend.cmo ocamldep.cmo
 CAMLDEP_IMPORTS=timings.cmo misc.cmo config.cmo identifiable.cmo numbers.cmo \
-  arg_helper.cmo clflags.cmo terminfo.cmo \
+  arg_helper.cmo clflags.cmo terminfo.cmo unit_name.cmo \
   warnings.cmo location.cmo longident.cmo docstrings.cmo \
   syntaxerr.cmo ast_helper.cmo parser.cmo lexer.cmo parse.cmo \
   ccomp.cmo ast_mapper.cmo ast_iterator.cmo ast_invariants.cmo pparse.cmo \
@@ -74,7 +74,7 @@ install::
 
 CSLPROF=ocamlprof.cmo
 CSLPROF_IMPORTS=misc.cmo config.cmo identifiable.cmo numbers.cmo \
-  arg_helper.cmo clflags.cmo terminfo.cmo \
+  arg_helper.cmo clflags.cmo terminfo.cmo unit_name.cmo \
   warnings.cmo location.cmo longident.cmo docstrings.cmo \
   syntaxerr.cmo ast_helper.cmo parser.cmo lexer.cmo parse.cmo
 
@@ -249,7 +249,7 @@ DUMPOBJ=opnames.cmo dumpobj.cmo
 dumpobj: $(DUMPOBJ)
 	$(CAMLC) $(LINKFLAGS) -o dumpobj \
 	         misc.cmo identifiable.cmo numbers.cmo \
-                 tbl.cmo config.cmo ident.cmo \
+                 tbl.cmo config.cmo unit_name.cmo ident.cmo \
 	         opcodes.cmo bytesections.cmo $(DUMPOBJ)
 
 clean::

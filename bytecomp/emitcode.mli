@@ -18,7 +18,7 @@
 open Cmo_format
 open Instruct
 
-val to_file: out_channel -> string -> string -> instruction list -> unit
+val to_file: out_channel -> Unit_name.t -> string -> instruction list -> unit
         (* Arguments:
              channel on output file
              name of compilation unit implemented

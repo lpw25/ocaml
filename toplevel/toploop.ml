@@ -56,7 +56,7 @@ let setvalue name v =
 
 let rec eval_path = function
   | Pident id ->
-      if Ident.persistent id || Ident.global id then
+      if Ident.global id then
         Symtable.get_global_value id
       else begin
         let name = Translmod.toplevel_name id in

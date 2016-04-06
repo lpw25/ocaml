@@ -34,11 +34,18 @@ let create_global s =
 let create_unit uname =
   Unit uname
 
-let rename i =
+let freshen i =
   match i with
   | Stamped r ->
       incr currentstamp;
       Stamped { r with stamp = !currentstamp }
+  | Unit _ ->
+      Misc.fatal_error
+        "Ident.freshen: unit identifier"
+
+let rename name = function
+  | Stamped r ->
+      Stamped { r with name }
   | Unit _ ->
       Misc.fatal_error
         "Ident.rename: unit identifier"

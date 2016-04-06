@@ -174,7 +174,7 @@ let rec size_of_lambda = function
 
 let copy_event ev kind info repr =
   { ev_pos = 0;                   (* patched in emitcode *)
-    ev_module = ev.ev_module;
+    ev_unit_name = ev.ev_unit_name;
     ev_loc = ev.ev_loc;
     ev_kind = kind;
     ev_info = info;
@@ -285,7 +285,7 @@ let functions_to_compile  = (Stack.create () : function_to_compile Stack.t)
 
 (* Name of current compilation unit (for debugging events) *)
 
-let compunit_name = ref ""
+let compunit_name = ref Unit_name.dummy
 
 (* Maximal stack size reached during the current function body *)
 
@@ -803,7 +803,7 @@ let rec comp_expr env exp sz cont =
   | Levent(lam, lev) ->
       let event kind info =
         { ev_pos = 0;                   (* patched in emitcode *)
-          ev_module = !compunit_name;
+          ev_unit_name = !compunit_name;
           ev_loc = lev.lev_loc;
           ev_kind = kind;
           ev_info = info;
@@ -945,11 +945,11 @@ let comp_remainder cont =
 
 (**** Compilation of a lambda phrase ****)
 
-let compile_implementation modulename expr =
+let compile_implementation uname expr =
   Stack.clear functions_to_compile;
   label_counter := 0;
   sz_static_raises := [] ;
-  compunit_name := modulename;
+  compunit_name := uname;
   let init_code = comp_block empty_env expr 0 [] in
   if Stack.length functions_to_compile > 0 then begin
     let lbl_init = new_label() in
@@ -968,6 +968,6 @@ let compile_phrase expr =
 let reset () =
   label_counter := 0;
   sz_static_raises := [];
-  compunit_name := "";
+  compunit_name := Unit_name.dummy;
   Stack.clear functions_to_compile;
   max_stack_used := 0

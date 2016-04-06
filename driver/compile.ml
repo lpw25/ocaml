@@ -28,8 +28,9 @@ let tool_name = "ocamlc"
 
 let interface ppf sourcefile outputprefix =
   Compmisc.init_path false;
-  let modulename = module_of_filename ppf sourcefile outputprefix in
-  Env.set_unit_name modulename;
+  let modname = module_of_filename ppf sourcefile outputprefix in
+  let uname = Unit_name.simple ~name:modname in
+  Env.set_unit_name uname;
   let initial_env = Compmisc.initial_env () in
   let ast = Pparse.parse_interface ~tool_name ppf sourcefile in
   if !Clflags.dump_parsetree then fprintf ppf "%a@." Printast.interface ast;
@@ -47,9 +48,9 @@ let interface ppf sourcefile outputprefix =
   if not !Clflags.print_types then begin
     let deprecated = Builtin_attributes.deprecated_of_sig ast in
     let sg =
-      Env.save_signature ~deprecated sg modulename (outputprefix ^ ".cmi")
+      Env.save_signature ~deprecated sg uname (outputprefix ^ ".cmi")
     in
-    Typemod.save_signature modulename tsg outputprefix sourcefile
+    Typemod.save_signature uname tsg outputprefix sourcefile
       initial_env sg ;
   end
 
@@ -73,7 +74,7 @@ let implementation ppf sourcefile outputprefix =
       ++ print_if ppf Clflags.dump_parsetree Printast.implementation
       ++ print_if ppf Clflags.dump_source Pprintast.structure
       ++ Timings.(time (Typing sourcefile))
-          (Typemod.type_implementation sourcefile outputprefix modname env)
+          (Typemod.type_implementation sourcefile outputprefix uname env)
       ++ print_if ppf Clflags.dump_typedtree
         Printtyped.implementation_with_coercion
     in
@@ -90,7 +91,7 @@ let implementation ppf sourcefile outputprefix =
             (fun lambda ->
               Simplif.simplify_lambda lambda
               ++ print_if ppf Clflags.dump_lambda Printlambda.lambda
-              ++ Bytegen.compile_implementation modname
+              ++ Bytegen.compile_implementation uname
               ++ print_if ppf Clflags.dump_instr Printinstr.instrlist)
       in
       let objfile = outputprefix ^ ".cmo" in
@@ -98,7 +99,7 @@ let implementation ppf sourcefile outputprefix =
       try
         bytecode
         ++ Timings.(accumulate_time (Generate sourcefile))
-            (Emitcode.to_file oc modname objfile);
+            (Emitcode.to_file oc uname objfile);
         Warnings.check_fatal ();
         close_out oc;
         Stypes.dump (Some (outputprefix ^ ".annot"))

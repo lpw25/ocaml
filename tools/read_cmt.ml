@@ -34,7 +34,7 @@ let dummy_crc = String.make 32 '-'
 
 let print_info cmt =
   let open Cmt_format in
-      Printf.printf "module name: %s\n" cmt.cmt_modname;
+      Format.printf "unit name: %a\n" Unit_name.print cmt.cmt_unit_name;
       begin match cmt.cmt_annots with
           Packed (_, list) ->
             Printf.printf "pack: %s\n" (String.concat " " list)
@@ -65,13 +65,13 @@ let print_info cmt =
         | Some digest ->
             Printf.printf "interface digest: %s\n" (Digest.to_hex digest);
       end;
-      List.iter (fun (name, crco) ->
+      List.iter (fun (uname, crco) ->
         let crc =
           match crco with
             None -> dummy_crc
           | Some crc -> Digest.to_hex crc
         in
-          Printf.printf "import: %s %s\n" name crc;
+          Format.printf "import: %a %s\n" Unit_name.print uname crc;
       ) (List.sort compare cmt.cmt_imports);
       Printf.printf "%!";
       ()

@@ -935,7 +935,7 @@ let check_recmodule_inclusion env bindings =
       let bindings1 =
         List.map
           (fun (id, _, _mty_decl, _modl, mty_actual, _attrs, _loc) ->
-             (id, Ident.rename id, mty_actual))
+             (id, Ident.freshen id, mty_actual))
           bindings in
       (* Enter the Y_i in the environment with their actual types substituted
          by the input substitution s *)

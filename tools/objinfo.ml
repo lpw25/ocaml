@@ -38,21 +38,21 @@ let input_stringlist ic len =
 
 let dummy_crc = String.make 32 '-'
 
-let print_name_crc (name, crco) =
+let print_uname_crc (uname, crco) =
   let crc =
     match crco with
       None -> dummy_crc
     | Some crc -> Digest.to_hex crc
   in
-    printf "\t%s\t%s\n" crc name
+    Format.printf "\t%s\t%a\n" crc Unit_name.print uname
 
 let print_line name =
   printf "\t%s\n" name
 
 let print_cmo_infos cu =
-  printf "Unit name: %s\n" cu.cu_name;
+  Format.printf "Unit name: %a\n" Unit_name.print cu.cu_unit_name;
   print_string "Interfaces imported:\n";
-  List.iter print_name_crc cu.cu_imports;
+  List.iter print_uname_crc cu.cu_imports;
   printf "Uses unsafe features: ";
   (match cu.cu_primitives with
     | [] -> printf "no\n"
@@ -78,16 +78,16 @@ let print_cma_infos (lib : Cmo_format.library) =
   printf "\n";
   List.iter print_cmo_infos lib.lib_units
 
-let print_cmi_infos name crcs =
-  printf "Unit name: %s\n" name;
+let print_cmi_infos uname crcs =
+  Format.printf "Unit name: %a\n" Unit_name.print uname;
   printf "Interfaces imported:\n";
-  List.iter print_name_crc crcs
+  List.iter print_uname_crc crcs
 
 let print_cmt_infos cmt =
   let open Cmt_format in
-  printf "Cmt unit name: %s\n" cmt.cmt_modname;
+  Format.printf "Cmt unit name: %a\n" Unit_name.print cmt.cmt_unit_name;
   print_string "Cmt interfaces imported:\n";
-  List.iter print_name_crc cmt.cmt_imports;
+  List.iter print_uname_crc cmt.cmt_imports;
   printf "Source file: %s\n"
          (match cmt.cmt_sourcefile with None -> "(none)" | Some f -> f);
   printf "Compilation flags:";
@@ -100,21 +100,21 @@ let print_cmt_infos cmt =
      | None -> ""
      | Some crc -> Digest.to_hex crc)
 
-let print_general_infos name crc defines cmi cmx =
-  printf "Name: %s\n" name;
+let print_general_infos uname crc defines cmi cmx =
+  Format.printf "Name: %a\n" Unit_name.print uname;
   printf "CRC of implementation: %s\n" (Digest.to_hex crc);
   printf "Globals defined:\n";
   List.iter print_line defines;
   printf "Interfaces imported:\n";
-  List.iter print_name_crc cmi;
+  List.iter print_uname_crc cmi;
   printf "Implementations imported:\n";
-  List.iter print_name_crc cmx
+  List.iter print_uname_crc cmx
 
 open Cmx_format
 
 let print_cmx_infos (ui, crc) =
   print_general_infos
-    ui.ui_name crc ui.ui_defines ui.ui_imports_cmi ui.ui_imports_cmx;
+    ui.ui_unit_name crc ui.ui_defines ui.ui_imports_cmi ui.ui_imports_cmx;
   begin match ui.ui_export_info with
   | Clambda approx ->
     printf "Approximation:\n";
@@ -122,7 +122,7 @@ let print_cmx_infos (ui, crc) =
   | Flambda export ->
     printf "Flambda export information:\n";
     let cu =
-      Compilation_unit.create (Ident.create_persistent ui.ui_name)
+      Compilation_unit.create (Ident.create_unit ui.ui_unit_name)
         (Linkage_name.create "__dummy__")
     in
     Compilation_unit.set_current cu;
@@ -147,7 +147,7 @@ let print_cmxs_infos header =
   List.iter
     (fun ui ->
        print_general_infos
-         ui.dynu_name
+         ui.dynu_unit_name
          ui.dynu_crc
          ui.dynu_defines
          ui.dynu_imports_cmi
@@ -160,7 +160,7 @@ let p_section title = function
   | [] -> ()
   | l ->
       p_title title;
-      List.iter print_name_crc l
+      List.iter print_uname_crc l
 
 let p_list title print = function
   | [] -> ()
@@ -180,7 +180,7 @@ let dump_byte ic =
            | "CRCS" ->
                p_section
                  "Imported units"
-                 (input_value ic : (string * Digest.t option) list)
+                 (input_value ic : (Unit_name.t * Digest.t option) list)
            | "DLLS" ->
                p_list
                  "Used DLLs"
@@ -246,7 +246,7 @@ let dump_obj filename =
     begin match cmi with
      | None -> ()
      | Some cmi ->
-         print_cmi_infos cmi.Cmi_format.cmi_name cmi.Cmi_format.cmi_crcs
+         print_cmi_infos cmi.Cmi_format.cmi_unit_name cmi.Cmi_format.cmi_crcs
     end;
     begin match cmt with
      | None -> ()

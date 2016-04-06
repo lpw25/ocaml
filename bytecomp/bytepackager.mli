@@ -22,7 +22,7 @@ type error =
     Forward_reference of string * Ident.t
   | Multiple_definition of string * Ident.t
   | Not_an_object_file of string
-  | Illegal_renaming of string * string * string
+  | Illegal_renaming of Unit_name.t * Unit_name.t * string
   | File_not_found of string
 
 exception Error of error

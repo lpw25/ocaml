@@ -346,21 +346,21 @@ let extension_constructor s ext =
 let rec rename_bound_idents s idents = function
     [] -> (List.rev idents, s)
   | Sig_type(id, _, _) :: sg ->
-      let id' = Ident.rename id in
+      let id' = Ident.freshen id in
       rename_bound_idents (add_type id (Pident id') s) (id' :: idents) sg
   | Sig_module(id, _, _) :: sg ->
-      let id' = Ident.rename id in
+      let id' = Ident.freshen id in
       rename_bound_idents (add_module id (Pident id') s) (id' :: idents) sg
   | Sig_modtype(id, _) :: sg ->
-      let id' = Ident.rename id in
+      let id' = Ident.freshen id in
       rename_bound_idents (add_modtype id (Mty_ident(Pident id')) s)
                           (id' :: idents) sg
   | (Sig_class(id, _, _) | Sig_class_type(id, _, _)) :: sg ->
       (* cheat and pretend they are types cf. PR#6650 *)
-      let id' = Ident.rename id in
+      let id' = Ident.freshen id in
       rename_bound_idents (add_type id (Pident id') s) (id' :: idents) sg
   | (Sig_value(id, _) | Sig_typext(id, _, _)) :: sg ->
-      let id' = Ident.rename id in
+      let id' = Ident.freshen id in
       rename_bound_idents s (id' :: idents) sg
 
 let rec modtype s = function
@@ -376,7 +376,7 @@ let rec modtype s = function
   | Mty_signature sg ->
       Mty_signature(signature s sg)
   | Mty_functor(id, arg, res) ->
-      let id' = Ident.rename id in
+      let id' = Ident.freshen id in
       Mty_functor(id', may_map (modtype s) arg,
                        modtype (add_module id (Pident id') s) res)
   | Mty_alias p ->
