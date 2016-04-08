@@ -114,10 +114,10 @@ let check_consistency ppf filename cu =
        | Some crc->
            Consistbl.check Env.crc_units name crc filename)
       cu.cu_imports
-  with Consistbl.Inconsistency(name, user, auth) ->
+  with Consistbl.Inconsistency(uname, user, auth) ->
     fprintf ppf "@[<hv 0>The files %s@ and %s@ \
-                 disagree over interface %s@]@."
-            user auth name;
+                 disagree over interface %a@]@."
+            user auth Unit_name.print uname;
     raise Load_failed
 
 let load_compunit ic filename ppf compunit =
@@ -506,7 +506,7 @@ let show_prim to_sig ppf lid =
           fprintf ppf "Invalid path %a@." Printtyp.longident lid;
           raise Exit
     in
-    let id = Ident.create_persistent s in
+    let id = Ident.create s in
     let sg = to_sig env loc id lid in
     Printtyp.wrap_printing_env env
       (fun () -> fprintf ppf "@[%a@]@." Printtyp.signature sg)

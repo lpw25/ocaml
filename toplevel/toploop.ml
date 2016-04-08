@@ -469,8 +469,8 @@ let _ =
   let crc_intfs = Symtable.init_toplevel() in
   Compmisc.init_path false;
   List.iter
-    (fun (name, crco) ->
-      Env.add_import name;
+    (fun (uname, crco) ->
+      Env.add_import uname;
       match crco with
         None -> ()
       | Some crc->
