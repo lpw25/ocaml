@@ -105,12 +105,8 @@
   merge the free variable lists (heaps actually) from the incorporated
   fragments.
 
-This file was based on trx.ml from the original MetaOCaml, but it is
-completely re-written from scratch and has many comments. The
-traversal algorithm, the way of compiling Parsetree builders, dealing
-    with CSP and many other algorithms are all different.
-
 *)
+
 
 open Parsetree
 open Asttypes
@@ -324,24 +320,6 @@ Perhaps that's a hint which unqualified identifiers will be persistent
 
 let ident_can_be_quoted = is_external
 
-(* ------------------------------------------------------------------------ *)
-(* Building Texp nodes *)
-(* initial_env is used for all look-ups. Unqualified identifiers
-   must be found there. For qualified identifiers, Env.lookup
-   functions look things up in the persistent structures, loading them
-   up as needed.
-*)
-
-let mk_texp : ?env:Env.t -> ?attrs:Parsetree.attributes ->
-              ?loc:Location.t ->
-              Typedtree.expression_desc -> type_expr ->
-  Typedtree.expression =
-  fun ?(env=initial_env) ?(attrs=[]) ?(loc=Location.none) desc ty ->
-  { exp_desc = desc; exp_type = ty;
-    exp_loc  = loc; exp_extra = [];
-    exp_attributes = attrs;
-    exp_env  = env }
-
 let texp_int : int -> Typedtree.expression = fun n ->
   mk_texp ~env:Env.initial_safe_string (Texp_constant (Const_int n))
     (Ctype.instance_def Predef.type_int)
@@ -491,6 +469,7 @@ let texp_code : ?node_id:string ->
   let ast = Ast_helper.Exp.mk ~loc desc in
     texp_apply (texp_ident "Trx.open_expr")
                [texp_csp (Obj.repr ast)]
+
 
 (* ------------------------------------------------------------------------ *)
 (* Dealing with CSP *)

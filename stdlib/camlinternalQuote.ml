@@ -3,56 +3,6 @@
 
 (* Stack marks, a simple form of dynamic binding *)
 
-(* In the earlier version, our stackmarks could be ordered.
-   Alas, it is hard to dynamically replace the implementation
-   below with the one adjusted for delimcc. The implementation below
-   does not work when partial continuations can be captured and reinstated.
-   Mainly, when delimited continuations are used, the order is
-   not stable. Delimited control operators can reshuffle the order
-   arbitrarily. Therefore, the fact that there is order among valid stackmarks
-   is not helpful anyway.
-
-module type STACKMARK = sig
-  type t
-  val is_valid : t -> bool
-  (* compare is supposed to be called on stack marks that are
-     checked to be valid
-   *)
-  val compare : t -> t -> int
-  val with_stack_mark : (t -> 'w) -> 'w
-end
-
-(* Simple implementation with shallow dynamic binding *)
-module StackMark : STACKMARK = struct
-  type t = int ref
-
-  (* The global counter of the nesting depth of with_stack_mark *)
-  let stack_mark_cnt = ref 0
-
-  (* A stack mark is ref n where n is the depth of the corresponding
-     with_stack_mark form.
-     The stack mark is invalid if the counter is 0
-   *)
-  let with_stack_mark body =
-    incr stack_mark_cnt;
-    let mark = ref !stack_mark_cnt in
-    let finalize () =
-      mark := 0;                         (* invalidate the mark *)
-      assert (!stack_mark_cnt > 0);
-      decr stack_mark_cnt
-    in
-    try
-      let r = body mark in finalize (); r
-    with e -> finalize (); raise e
-
-  let is_valid mark = !mark > 0
-  let compare m1 m2 =
-    assert (!m1 >0 && !m2 > 0);
-    compare !m1 !m2
-end
-
-*)
-
 (* A robust and truly minimalistic implementation of stack-marks.
    A stack-mark is created by 'with_stack_mark' function. Since
    the only operation on a stackmark is to test if it is valid,
@@ -131,7 +81,7 @@ let rec remove : prio -> 'v heap -> 'v heap = fun p -> function
    set of free identifiers, annotated with the marks
    of the corresponding with_binding_region forms
 *)
-type code_repr = Code of string loc heap * Parsetree.expression
+type code_repr = string loc heap * Parsetree.expression
 
 (* The closed code is AST *)
 type closed_code_repr = Parsetree.expression
@@ -144,8 +94,8 @@ type closed_code_repr = Parsetree.expression
 *)
 let close_code_delay_check : code_repr -> closed_code_repr * (unit -> unit) =
  function
-  | Code (Nil,ast) -> (ast,fun () -> ())
-  | Code (HNode (_,_,var,_,_),ast) ->
+  | (Nil,ast) -> (ast,fun () -> ())
+  | (HNode (_,_,var,_,_),ast) ->
     (ast, fun () ->
       Format.fprintf Format.str_formatter
       "The code built at %a is not closed: identifier %s bound at %a is free"
@@ -157,7 +107,7 @@ let close_code_repr : code_repr -> closed_code_repr = fun cde ->
   check (); ast
 
 let open_code : closed_code_repr -> code_repr = fun ast ->
-  Code (Nil,ast)
+  (Nil, ast)
 
 (* Bindings in the future stage *)
 (* Recall, all bindings at the future stage are introduced by
@@ -177,13 +127,25 @@ let genident : string loc -> string loc = fun name ->
   {name with txt = gensym name.txt}
 
 (* left-to-right accumulating map *)
-let rec map_accum : ('accum -> 'a -> 'b * 'accum) -> 'accum -> 'a list ->
-  'b list * 'accum = fun f acc -> function
-    | []   -> ([],acc)
-    | h::t ->
-        let (h,acc) = f acc h in
-        let (t,acc) = map_accum f acc t in
-        (h::t, acc)
+let rec map_accum : ('accum -> 'a -> 'accum * 'b) -> 'accum -> 'a list ->
+  'accum * 'b list =
+  fun f acc l ->
+    match l with
+    | []   -> (acc, [])
+    | hd :: tl ->
+        let (acc, hd) = f acc hd in
+        let (acc, tl) = map_accum f acc tl in
+          (acc, hd :: tl)
+
+let map_merge : Location.t -> (Location.t -> 'a -> string loc heap * 'b) ->
+                'a list -> string loc heap * 'b list =
+  fun f loc xl ->
+    map_accum
+      (fun acc x ->
+         let vars, y = f loc x in
+         let acc = merge vars acc in
+           acc, y)
+      Nil xl
 
 (* This is a run-time error, rather than a translation-time error *)
 let scope_extrusion_error :
@@ -214,8 +176,8 @@ let scope_extrusion_error :
 *)
 let validate_vars : Location.t -> code_repr -> code_repr =
   fun l -> function
-  | Code (Nil,_) as cde -> cde
-  | Code (h, ast) as cde -> begin
+  | (Nil,_) as cde -> cde
+  | (h, ast) as cde -> begin
       let rec check = function
         | Nil -> ()
         | HNode (_,sm,var,h1,h2) ->
@@ -225,23 +187,27 @@ let validate_vars : Location.t -> code_repr -> code_repr =
   end
 
 let validate_vars_option : Location.t -> code_repr option ->
-  Parsetree.expression option * string loc heap =
-  fun l -> function
-  | None -> (None,Nil)
-  | Some e -> let Code (vars, e) = validate_vars l e in (Some e, vars)
-
-let validate_vars_map : Location.t ->
-  (Location.t -> 'a -> 'b * string loc heap) -> 'a list ->
-  'b list * string loc heap = fun loc f xs ->
-  map_accum (fun acc x ->
-      let (y,vars) = f loc x in
-      (y, merge vars acc))
-    Nil xs
+  string loc heap * Parsetree.expression option =
+  fun loc co ->
+    match co with
+    | None -> (Nil, None)
+    | Some c ->
+        let (vars, c) = validate_vars loc c in
+          (vars, Some c)
 
 let validate_vars_list : Location.t -> code_repr list ->
-  Parsetree.expression list * string loc heap = fun l cs ->
-  validate_vars_map l
-      (fun l c -> let Code (vars,e) = validate_vars l c in (e,vars)) cs
+  string loc heap * Parsetree.expression list =
+  fun loc cs ->
+    map_merge validate_vars loc cs
+
+let validate_vars_alist : Location.t -> ('a * code_repr) list ->
+  string loc heap * ('a * Parsetree.expression) list =
+  fun loc cs ->
+    map_merge
+      (fun loc (a, c) ->
+         let (vars, c) = validate_vars loc c in
+           (vars, (a, c)))
+      loc cs
 
 (* Generate a fresh name off the given name, enter a new binding region
    and evaluate a function passing it the generated name as code_repr.
@@ -269,10 +235,30 @@ let with_binding_region :
      incr prio_counter;
      let prio = !prio_counter in
      let var_code = (* code that corresponds to the bound variable *)
-       Code (HNode (prio,mark,new_name,Nil,Nil),
+       (HNode (prio,mark,new_name,Nil,Nil),
           Ast_helper.Exp.mk ~loc:name.loc   (* the loc of the binder *)
            (Pexp_ident (mkloc (Longident.Lident new_name.txt) new_name.loc))) in
-     let Code (vars,e) = validate_vars l (f var_code) in
+     let (vars,e) = validate_vars l (f var_code) in
+     (remove prio vars, e)) in
+  (new_name, vars, e)
+
+let with_binding_regions :
+  Location.t -> string loc -> (code_repr -> code_repr) ->
+  string loc * string loc heap * Parsetree.expression = fun l names f ->
+  let new_names = List.map genident names in
+  let (vars,e) =
+   !with_stack_mark.stackmark_region_fn (fun mark ->
+     incr prio_counter;
+     let prio = !prio_counter in
+     let vars_code = (* code that corresponds to the bound variable *)
+       List.map
+         (fun new_name ->
+          (HNode (prio,mark,new_name,Nil,Nil),
+           Ast_helper.Exp.mk ~loc:name.loc   (* the loc of the binder *)
+             (Pexp_ident (mkloc (Longident.Lident new_name.txt) new_name.loc))))
+         new_names
+     in
+     let (vars,e) = validate_vars l (f vars_code) in
      (remove prio vars, e)) in
   (new_name, vars, e)
 
@@ -281,7 +267,7 @@ let with_binding_region :
  *)
 let with_binding_region_gen :
   Location.t -> string loc list ->
-  (Location.t -> 'a -> 'b * string loc heap) -> (code_repr array -> 'a array) ->
+  (Location.t -> 'a -> 'b * string loc heap) -> (code_repr list -> 'a list) ->
   string loc list * string loc heap * 'b list
   = fun l names tr f ->
   let new_names = List.map genident names in
@@ -289,17 +275,15 @@ let with_binding_region_gen :
    !with_stack_mark.stackmark_region_fn (fun mark ->
      incr prio_counter;
      let prio = !prio_counter in
-     let vars_code = Array.of_list (List.map (fun new_name ->
+     let vars_code = (List.map (fun new_name ->
                       (* code that corresponds to a bound variable *)
-       Code (HNode (prio,mark,new_name,Nil,Nil),
+       (HNode (prio,mark,new_name,Nil,Nil),
           Ast_helper.Exp.mk ~loc:new_name.loc    (* the loc of the binder *)
             (Pexp_ident (mkloc (Longident.Lident new_name.txt) new_name.loc))))
        new_names) in
-     let cs = Array.to_list (f vars_code) in
-     let (es,vars) = map_accum (fun vars c ->
-                      let (e,var) = tr l c in
-                      (e,merge var vars)) Nil cs in
-     (remove prio vars, es)) in
+     let cs = f vars_code in
+     let (vars,es) = merge_map l tr cs in
+       (remove prio vars, es)) in
   (new_names, vars, es)
 
 (* ------------------------------------------------------------------------ *)
@@ -325,254 +309,30 @@ let sample_name : string loc = mknoloc "*sample*"
 let sample_pat_list : Parsetree.pattern list = []
 let sample_pats_names : Parsetree.pattern list * string loc list = ([],[])
 
+(* Location builders *)
+module Loc = struct
 
-(* Handle timestamp for builders of the type
-      Parsetree.expression -> Parsetree.expression
-*)
-let code_wrapper :
-    (Location.t -> Parsetree.expression -> Parsetree.expression) ->
-    (Location.t -> code_repr -> code_repr) =
-fun f l e ->
-  let Code (vars,e) = validate_vars l e in
-  Code (vars, f l e)
+  let unmarshal str : location = Marshal.from_string str
 
-(* building a typical Parsetree node: Pexp_assert of expression*)
-let build_assert : Location.t -> code_repr -> code_repr =
-  code_wrapper
-  (fun loc e -> Ast_helper.Exp.assert_ ~loc e)
+end
 
-(* When we translate the typed-tree, we have to manually compile
-   the above code
-First, to see the AST for the phrase, invoke the top-level with the flag
--dparsetree. Then
-   {pexp_loc  = l; pexp_desc = Pexp_assert e}
+module Constant = struct
 
-gives the parsetree:
-let build_assert_ast : Location.t -> Parsetree.expression -> Parsetree.expression =
-{pexp_loc = l1;
- pexp_desc =
-  Pexp_record
-        ([(Location.mknoloc (Longident.parse "Parsetree.pexp_loc"),
-           Pexp_ident "l");
-         (Location.mknoloc (Longident.parse "Parsetree.pexp_desc"),
-           {pexp_loc  = Location.none;
-            pexp_desc = Pexp_construct
-                          ((Location.mknoloc (Longident.parse
-                                                "Parsetree.Pexp_assert")),
-              Some {pexp_loc = Location.none;
-                    pexp_desc = Pexp_ident "e"},
-              false)})
-        ],
-        None)}
-type_expression
+  let unmarshal str : constant = Marshal.from_string str
 
-If building the parsetree on our own, beware! For example, labels in
-Texp_record must be sorted, in their declared order!
-*)
+end
 
+(* Pattern builders *)
+module Pat = struct
 
-(* Other similar builders *)
-let build_lazy : Location.t -> code_repr -> code_repr =
-  code_wrapper @@
-    fun loc e -> Ast_helper.Exp.lazy_ ~loc e
-let build_quote : Location.t -> code_repr -> code_repr =
-  code_wrapper @@
-    fun loc e -> Ast_helper.Exp.quote ~loc e
-let build_escape : Location.t -> code_repr -> code_repr =
-  code_wrapper @@
-    fun loc e -> Ast_helper.Exp.escape ~loc e
+  let mk loc d =
+    {ppat_desc = d; ppat_loc = loc; ppat_attributes = []}
 
-let build_sequence : Location.t -> code_repr -> code_repr -> code_repr =
-  fun loc e1 e2 ->
-    let Code (vars1,e1) = validate_vars loc e1 in
-    let Code (vars2,e2) = validate_vars loc e2 in
-    Code (merge vars1 vars2,
-          Ast_helper.Exp.sequence ~loc e1 e2)
-let build_while : Location.t -> code_repr -> code_repr -> code_repr =
-  fun loc e1 e2 ->
-    let Code (vars1,e1) = validate_vars loc e1 in
-    let Code (vars2,e2) = validate_vars loc e2 in
-    Code (merge vars1 vars2,
-          Ast_helper.Exp.while_ ~loc e1 e2)
+  let var loc a = mk loc (Ppat_var a)
 
-(* Build the application. The first element in the array is the
-   function. The others are arguments. *)
-let build_apply : Location.t -> (label * code_repr) array -> code_repr =
-  fun loc ea ->
-    assert (Array.length ea > 1);
-    match map_accum (fun vars (lbl,e) ->
-                   let Code (var,e) = validate_vars loc e in
-                   ((lbl,e),merge var vars))
-          Nil (Array.to_list ea) with
-    | (("",eh)::elt,vars) ->
-       Code (vars,
-             Ast_helper.Exp.apply ~loc eh elt)
-    | _ -> assert false
+  let unmarshal str : pattern = Marshal.from_string str
 
-
-let build_tuple : Location.t -> code_repr array -> code_repr =
- fun loc ea ->
-  let (els,vars) = validate_vars_list loc (Array.to_list ea) in
-  Code (vars,
-        Ast_helper.Exp.tuple ~loc els)
-
-let build_array : Location.t -> code_repr array -> code_repr =
- fun loc ea ->
-  let (els,vars) = validate_vars_list loc (Array.to_list ea) in
-  Code (vars,
-        Ast_helper.Exp.array ~loc els)
-
-let build_ifthenelse :
- Location.t -> code_repr -> code_repr -> code_repr option -> code_repr =
- fun loc e1 e2 eo ->
-    let Code (vars1,e1) = validate_vars loc e1 in
-    let Code (vars2,e2) = validate_vars loc e2 in
-    let (eo,varso)      = validate_vars_option loc eo in
-    Code (merge vars1 (merge vars2 varso),
-          Ast_helper.Exp.ifthenelse ~loc e1 e2 eo)
-
-let build_construct :
- Location.t -> Longident.t loc -> code_repr array -> code_repr =
- fun loc lid args ->
-  let (args,vars) = validate_vars_list loc (Array.to_list args) in
-  Code (vars,
-        Ast_helper.Exp.construct ~loc lid
-          begin
-            match args with
-            | []  -> None
-            | [x] -> Some x
-            | xl  -> Some (Ast_helper.Exp.tuple ~loc xl)
-          end)
-
-let build_record : Location.t -> (Longident.t loc * code_repr) array ->
- code_repr option -> code_repr =
- fun loc lel eo ->
-   let (lel,vars) = map_accum (fun vars (lbl,e) ->
-                       let Code (var,e) = validate_vars loc e in
-                       ((lbl,e),merge var vars))
-        Nil (Array.to_list lel) in
-   let (eo,varo) = validate_vars_option loc eo in
-   Code (merge vars varo,
-         Ast_helper.Exp.record ~loc lel eo)
-
-let build_field : Location.t -> code_repr -> Longident.t loc -> code_repr =
- fun loc e lid ->
-  let Code (vars,e) = validate_vars loc e in
-  Code (vars,
-        Ast_helper.Exp.field ~loc e lid)
-
-let build_setfield :
- Location.t -> code_repr -> Longident.t loc -> code_repr -> code_repr =
- fun loc e1 lid e2 ->
-  let Code (vars1,e1) = validate_vars loc e1 in
-  let Code (vars2,e2) = validate_vars loc e2 in
-  Code (merge vars1 vars2,
-        Ast_helper.Exp.setfield ~loc e1 lid e2)
-
-let build_variant : Location.t -> string -> code_repr option -> code_repr =
- fun loc l eo ->
-  let (eo,vars) = validate_vars_option loc eo in
-  Code (vars,
-        Ast_helper.Exp.variant ~loc l eo)
-
-let build_send : Location.t -> code_repr -> string -> code_repr =
- fun loc e l ->
-  let Code (vars,e) = validate_vars loc e in
-  Code (vars,
-        Ast_helper.Exp.send ~loc e l)
-
-let build_open :
- Location.t -> Longident.t loc -> override_flag -> code_repr -> code_repr =
- fun loc l ovf e ->
-  let Code (vars,e) = validate_vars loc e in
-  Code (vars,
-        Ast_helper.Exp.open_ ~loc ovf l e)
-
-(* Build a function with a non-binding pattern, such as fun () -> ... *)
-let build_fun_nonbinding :
-  Location.t -> string -> Parsetree.pattern list ->
-  (code_repr option * code_repr) array -> code_repr =
-  fun loc label pats gbodies ->
-  let (egbodies,vars) =
-    validate_vars_map loc
-      (fun loc (eo,e) ->
-        let (eo,vo)        = validate_vars_option loc eo in
-        let Code (vars,e)  = validate_vars loc e in
-        ((eo,e),merge vo vars))
-      (Array.to_list gbodies) in
-  Code (vars,
-        match (egbodies,pats) with
-        | ([(None,e)],[p]) ->
-            Ast_helper.Exp.fun_ ~loc label None p e
-        | _ when label="" ->
-          Ast_helper.Exp.function_ ~loc
-            (List.map2 (fun p (eo,e) -> {pc_lhs=p;pc_guard=eo;pc_rhs=e})
-              pats egbodies)
-        | _ -> assert false)
-
-(* Build a Parsetree for a future-stage identifier
-   It is always in scope of with_binding_region:
-   Bound variables are always in scope of their binders;
-   A well-typed code has no unbound variables.
-let build_ident : Location.t -> string loc -> code_repr =
- fun loc l ->
-  not_supported loc "vars not supported"
-  Code (add_timestamp (Some l)
-   {pexp_loc  = loc;
-    pexp_desc = Pexp_ident (mkloc (Longident.Lident l.txt) l.loc)}
-*)
-
-(* Build a simple one-arg function, as described in the the title comments *)
-(* 'name' is the name of the variable from Ppat_var of the fun x -> ...
-   form. It is the real name with the location within the function pattern.
-   Use name.loc to identify the binder in the source code.
-*)
-let build_fun_simple :
-  Location.t -> string -> string loc -> (code_repr -> code_repr) -> code_repr =
-  fun loc label old_name fbody ->
-  let (name, vars, ebody) = with_binding_region loc old_name fbody in
-  let pat = Ast_helper.Pat.var ~loc:name.loc name in
-  Code (vars,
-        Ast_helper.Exp.fun_ ~loc label None pat ebody)
-
-let build_for :
-  Location.t -> string loc -> code_repr -> code_repr ->
-  bool -> (code_repr -> code_repr) -> code_repr =
-  fun loc old_name elo ehi dir fbody ->
-  let (name, varsb, ebody) = with_binding_region loc old_name fbody in
-  let Code (varsl,elo) = validate_vars loc elo in
-  let Code (varsh,ehi) = validate_vars loc ehi in
-  Code (merge varsb (merge varsl varsh),
-        Ast_helper.Exp.for_ ~loc
-          (Ast_helper.Pat.var ~loc:name.loc name) elo ehi
-            (if dir then Upto else Downto) ebody)
-
-
-let build_let_simple_nonrec :
-  Location.t -> string loc -> code_repr -> (code_repr -> code_repr) ->
-    code_repr = fun loc old_name e fbody ->
-  let (name, varsb, ebody) = with_binding_region loc old_name fbody in
-  let pat = Ast_helper.Pat.var ~loc:name.loc name in
-  let Code (varse,e) = validate_vars loc e in
-  Code (merge varsb varse,
-        Ast_helper.Exp.let_ ~loc Nonrecursive
-           [Ast_helper.Vb.mk ~loc pat e] ebody)
-
-(*
-let build_letrec :
-  Location.t -> string loc array ->
-    (code_repr array -> code_repr array) -> code_repr =
-  fun l old_names fbodies ->
-  let (names,vars,ebodies) =
-    with_binding_region_gen l (Array.to_list old_names) fbodies in
-  let (ebody,es) =
-    match ebodies with body::es -> (body,es) | _ -> assert false in
-  let pel = List.map2 (fun name e ->
-     ({ppat_loc  = name.loc; ppat_desc = Ppat_var name},e)) names es in
-  Code (vars,
-  {pexp_loc = l;
-   pexp_desc = Pexp_let (Recursive, pel, ebody)})
-*)
+end
 
 (* Substitute the names of bound variables in the pattern.
    The new names are given in the string loc list. We
@@ -592,7 +352,7 @@ let build_letrec :
    same pattern traversal order as trx_pattern.
  *)
 
-         (* two strings are the same up to (and including) n *)
+(* two strings are the same up to (and including) n *)
 let rec same_upto s1 s2 n =
   n < 0 || (s1.[n] = s2.[n] && same_upto s1 s2 (n-1))
 
@@ -663,15 +423,10 @@ let rec pattern_subst : ?by_name:bool ->
  in
  ({pat with ppat_desc = desc}, acc)
 
-
 let pattern_subst_list :
     string loc list -> Parsetree.pattern list ->
      Parsetree.pattern list * string loc list = fun acc pl ->
  map_accum (pattern_subst ~by_name:false) acc pl
-
-
-
-(* Build the general fun Parsetree *)
 
 (* Build the fresh variable name for cases and build the Parsetree
    case list
@@ -695,7 +450,7 @@ let pattern_subst_list :
    for processing letrec.
 *)
 let prepare_cases : Location.t ->
-  string loc heap ->     (* extra free variables used in kontinuation *)
+  string loc heap ->     (* extra free variables used in continuation *)
   (* The following argument is a pair: a pattern list for the clauses
      of the function, and the list of names of bound variables, in order.
   *)
@@ -703,7 +458,7 @@ let prepare_cases : Location.t ->
   (* The following function returns the list of pairs of guards and bodies,
      for each clause of the function
    *)
-  (code_repr array -> (code_repr option * code_repr) array) ->
+  (code_repr list -> (code_repr option * code_repr) list) ->
   (* The continuation *)
   (Parsetree.case list -> Parsetree.expression) -> code_repr =
   fun loc evars (pats,old_names) fgbodies k ->
@@ -722,18 +477,146 @@ let prepare_cases : Location.t ->
          k @@ List.map2 (fun p (eo,e) -> {pc_lhs=p;pc_guard=eo;pc_rhs=e})
               pats egbodies)
 
-let build_fun :
-  Location.t -> string ->
-  (Parsetree.pattern list * string loc list) ->
-  (code_repr array -> (code_repr option * code_repr) array) -> code_repr =
-  fun loc label pon fgbodies ->
-  prepare_cases loc Nil pon fgbodies @@ function
-    | [{pc_lhs=p; pc_guard=None; pc_rhs=e}] ->
-        Ast_helper.Exp.fun_ ~loc label None p e
-    | cases when label="" ->
-        Ast_helper.Exp.function_ ~loc cases
-    | _ -> assert false
+module Vb = struct
+  let mk loc p e =
+    {pvb_pat = p;pvb_expr = e;pvb_loc = loc;pvb_attributes = [];}
+end
 
+(* Exression builders *)
+module Expr = struct
+
+  let mk loc d =
+    {pexp_desc = d; pexp_loc = loc; pexp_attributes = []}
+
+  let let_ ?loc ?attrs a b c = mk ?loc ?attrs (Pexp_let (a, b, c))
+
+
+  let let_simple loc name e fbody = mk ?loc ?attrs (Pexp_let (a, b, c))
+    let (name, vars1, ebody) = with_binding_region loc old_name fbody in
+    let (vars2, e) = validate_vars loc e in
+    let pat = Pat.var name.loc name in
+    let vb = Vb.mk loc pat e in
+    (merge vars1 vars2, mk loc Pexp_let (Nonrecursive, [vb], ebody))
+
+  let fun_nonbinding loc label pat body =
+    let (vars, c) = validate_vars loc c in
+    (vars, mk loc (Pexp_fun (label, None, pat, body))
+
+  let fun_simple loc label name fbody =
+    let (name, vars, ebody) = with_binding_region loc name fbody in
+    let pat = Pat.var name.loc name in
+    (vars, mk loc (Pexp_fun (label, None, pat, ebody))
+
+  let fun_ loc label pat names fbody =
+    let (names, vars, ebody) = with_binding_regions loc names fbody in
+    let pat, _ = pattern_subst names pat in
+    (vars, (Pexp_function(label, None, pat, ebody)))
+
+  let function_nonbinding loc pats exps =
+    let cases = List.combine pats exps in
+    let (vars, cases) =
+      map_merge
+        (fun loc (p, (eo, e)) ->
+           let (vars1, eo) = validate_vars_option loc eo in
+           let (vars2, e)  = validate_vars loc e in
+             (merge vars1 vars2, {pc_lhs=p;pc_guard=eo;pc_rhs=e})
+        loc a
+    in
+    (vars, mk loc (Pexp_function a))
+
+  let function_ loc label pon fgbodies =
+    prepare_cases loc Nil pon fgbodies
+    @@ fun cases -> mk loc (Pexp_function cases)
+
+  let apply loc a b =
+    let (vars1, a) = validate_vars loc a in
+    let (vars2, b) = validate_vars_list loc b in
+      (merge vars1 vars2, mk loc (Pexp_apply (a, b)))
+
+  let match_ ?loc ?attrs a b = mk ?loc ?attrs (Pexp_match (a, b))
+  let try_ ?loc ?attrs a b = mk ?loc ?attrs (Pexp_try (a, b))
+
+  let tuple loc a =
+    let (vars, a) = validate_vars_list loc a in
+    (vars, mk loc (Pexp_tuple a))
+
+  let construct loc a b =
+    let (vars, b) = validate_vars_option loc b in
+    (vars, mk loc (Pexp_construct (a, b)))
+
+  let variant loc a b =
+    let (vars, b) = validate_vars_option loc b in
+    (vars, mk loc (Pexp_variant (a, b)))
+
+  let record loc a b =
+    let (vars1, a) = validate_vars_alist loc a in
+    let (vars2, b) = validate_vars_option loc eo in
+    (merge vars1 vars2, mk loc (Pexp_record (a, b)))
+
+  let field loc a b =
+    let (vars, a) = validate_vars loc a in
+    (vars, (Pexp_field (a, b)))
+
+  let setfield loc a b c =
+    let (vars1, a) = validate_vars loc a in
+    let (vars2, c) = validate_vars loc c in
+    Code (merge vars1 vars2, (Pexp_setfield (a, b, c)))
+
+  let array loc a =
+    let (vars, a) = validate_vars_list loc a in
+    (vars, mk loc (Pexp_array a))
+
+  let ifthenelse loc a b c =
+    let (vars1, a) = validate_vars loc a in
+    let (vars2, b) = validate_vars loc b in
+    let (vars3, c) = validate_vars_option loc c in
+    (merge vars1 (merge vars2 vars3), mk loc (Pexp_ifthenelse (a, b, c))
+
+  let sequence loc a b =
+    let (vars1, a) = validate_vars loc a in
+    let (vars2, b) = validate_vars loc b in
+    (merge vars1 vars2, mk loc Pexp_sequence(a, b))
+
+  let for_nonbinding loc a b c d e =
+    let (vars1, b) = validate_vars loc b in
+    let (vars2, c) = validate_vars loc c in
+    let (vars3, e) = validate_vars loc e in
+    (merge vars1 (merge vars2 vars3),
+     mk loc (Pexp_for (a, b, c, d, e))
+
+  let for_simple loc name elo ehi dir fbody =
+    let (vars1, elo) = validate_vars loc elo in
+    let (vars2, ehi) = validate_vars loc ehi in
+    let (name, vars3, ebody) = with_binding_region loc old_name fbody in
+    let pat = Pat.var name.loc name in
+    (merge vars1 (merge vars2 vars3),
+     mk loc (Pexp_for (pat, elo, ehi, dir, ebody))
+
+  let send loc a b =
+    let (vars, a) = validate_vars loc a in
+    (vars, (Pexp_send (a, b)))
+
+  let assert_ loc a =
+    let (vars, a) = validate_vars l a in
+    (vars, mk loc (Pexp_assert a))
+
+  let lazy_ loc a =
+    let (vars, a) = validate_vars l a in
+    (vars, mk loc (Pexp_lazy a))
+
+  let open_ loc a b c = mk ?loc ?attrs
+    let (vars, c) = validate_vars loc c in
+    (vars, mk loc (Pexp_open (a, b, c)))
+
+  let quote loc a =
+    let (vars, a) = validate_vars l a in
+    (vars, mk loc (Pexp_quote a))
+
+  let escape loc a =
+    let (vars, a) = validate_vars l a in
+    (vars, mk loc (Pexp_escape a))
+
+end
 
 (* Build the general let-Parsetree (like the fun-Parsetree) *)
 let build_let :
