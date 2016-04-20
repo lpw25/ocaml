@@ -2,38 +2,39 @@
 (* ------------------------------------------------------------------------ *)
 
 (* Stack marks, a simple form of dynamic binding *)
+module Stackmark : sig
 
-(* A robust and truly minimalistic implementation of stack-marks.
-   A stack-mark is created by 'with_stack_mark' function. Since
-   the only operation on a stackmark is to test if it is valid,
-   the stackmark is realized as a thunk unit -> bool.
-*)
-type stackmark = unit -> bool           (* true if valid *)
+  type t
 
-(* The type of the with_stack_mark operation *)
-type stackmark_region_fn =
-    {stackmark_region_fn : 'w. (stackmark -> 'w) -> 'w}
+  val check : t -> bool
 
-(* The simple implementation of stackmark_region_fn, appropriate
-   when no delimited control is used.
-   The mark is a ref bool cell, containing true within
-   stackmark_region_fn's dynamic region.
-*)
-let with_stack_mark_simple : stackmark_region_fn =
-  {stackmark_region_fn = fun body ->
+  val region : (t -> 'a) -> 'a
+
+end = struct
+
+  (* A robust and truly minimalistic implementation of stack-marks.
+     A stack-mark is created by 'with_stack_mark' function. Since
+     the only operation on a stackmark is to test if it is valid,
+     the stackmark is realized as a thunk unit -> bool.
+  *)
+  type stackmark = unit -> bool           (* true if valid *)
+
+  let check t = t ()
+
+  (* The simple implementation of stackmark_region_fn, appropriate
+     when no delimited control is used.
+     The mark is a ref bool cell, containing true within
+     stackmark_region_fn's dynamic region.
+  *)
+  let region body =
     let mark = ref true in
-    try
-      let r = body (fun () -> !mark) in
-      mark := false;                      (* invalidate the mark *)
-      r
-    with e -> mark := false; raise e
- }
+      try
+        let r = body (fun () -> !mark) in
+        mark := false;                      (* invalidate the mark *)
+        r
+      with e -> mark := false; raise e
 
-let with_stack_mark : stackmark_region_fn ref = ref with_stack_mark_simple
-
-(* Replace a with_stack_mark implementation, e.g., when delimcc is used *)
-let set_with_stack_mark : stackmark_region_fn -> unit =
-  fun smf -> with_stack_mark := smf
+end
 
 (* ------------------------------------------------------------------------ *)
 (* Simple heap *)
@@ -48,43 +49,102 @@ let set_with_stack_mark : stackmark_region_fn -> unit =
    the children can be arbitrary.
 *)
 
-type prio = int
-type 'v heap = Nil | HNode of prio * stackmark * 'v * 'v heap * 'v heap
-let empty = Nil
+module Heap : sig
 
-let rec merge : 'v heap -> 'v heap -> 'v heap = fun h1 h2 ->
-  match (h1,h2) with
-  | (Nil,h) | (h,Nil)-> h
-  | (HNode (p1,k1,v1,l1,r1), HNode (p2,k2,v2,l2,r2)) ->
-      begin
-        match p1 - p2 with
-        | 0 -> HNode (p1,k1,v1, merge l1 l2, merge r1 r2) (* same keys *)
-        | n when n < 0 -> HNode (p2,k2,v2, merge h1 l2, r2)
-        | _ -> HNode (p1,k1,v1,l1,merge h2 r1)
-      end
+  type prio
 
-(* Remove the node with a given priority *)
-let rec remove : prio -> 'v heap -> 'v heap = fun p -> function
-  | Nil -> Nil
-  | HNode (pn,k,v,h1,h2) as h ->
-      begin
+  val fresh : unit -> prio
+
+  type 'a t
+
+  val empty : 'a t
+
+  val singleton : 'a t -> prio -> 'a -> 'a t
+
+  val remove : 'a t -> prio -> 'a t
+
+  val merge : 'a t -> 'a t -> 'a t
+
+end = struct
+
+  type prio = int
+
+  let prio_counter = ref 0
+
+  let fresh () =
+    incr prio_counter;
+    !prio_counter
+
+  type 'a t =
+    | Nil
+    | HNode of prio * 'a * 'a heap * 'a heap
+
+  let empty = Nil
+
+  let singleton h prio v =
+    HNode (p, v, Nil, Nil)
+
+  let rec remove h p =
+    match h with
+    | Nil -> Nil
+    | HNode (pn, v, h1, h2) -> begin
         match p - pn with
         | 0 -> merge h1 h2              (* p cannot occur in h1 or h2 *)
         | n when n > 0 -> h             (* entire tree has the lower prio *)
-        | _ -> HNode (pn,k,v, remove p h1, remove p h2)
+        | _ -> HNode (pn, v, remove p h1, remove p h2)
       end
+
+  let rec merge h1 h2 =
+    match h1, h2 with
+    | Nil, h | h, Nil-> h
+    | HNode (p1, v1, l1, r1), HNode (p2, v2, l2, r2) -> begin
+        match p1 - p2 with
+        | 0 -> HNode (p1, v1, merge l1 l2, merge r1 r2) (* same keys *)
+        | n when n < 0 -> HNode (p2, v2, merge h1 l2, r2)
+        | _ -> HNode (p1, v1, l1, merge h2 r1)
+      end
+
+  let choose = function
+    | Nil -> None
+    | HNode (_, v, _, _) -> Some v
+
+  let rec for_all f = function
+    | Nil -> true
+    | HNode (_, v, h1, h2) ->
+        f v && for_all f h1 && for_all f check h2
+
+end
+
 
 (* ------------------------------------------------------------------------ *)
 
+(* Bindings in the future stage *)
+(* Recall, all bindings at the future stage are introduced by
+   patterns, and hence are simple names, without any module qualifications.
+*)
+type var_repr = {
+  name : string loc;
+  sym : int;
+  priority : prio;
+}
+
+let gensym_count = ref 0
+
+(* Make a simple identifier unique *)
+let gensym (var : string loc) : var_repr =
+  incr gensym_count;
+  let sym = !gensym_count in
+  let name = name.txt ^ "_" ^ sym in
+  {var with txt = name}, sym
 
 (* The representation of the possibly open code: AST plus the
    set of free identifiers, annotated with the marks
    of the corresponding with_binding_region forms
 *)
-type code_repr = string loc heap * Parsetree.expression
+type expr_repr = string loc heap * Parsetree.expression
 
 (* The closed code is AST *)
-type closed_code_repr = Parsetree.expression
+type closed_expr_repr = Parsetree.expression
 
 (* Check that the code is closed and return the closed code *)
 
@@ -92,7 +152,7 @@ type closed_code_repr = Parsetree.expression
    rather than performing it.
    This is useful for debugging and for showing the code
 *)
-let close_code_delay_check : code_repr -> closed_code_repr * (unit -> unit) =
+let close_code_delay_check : expr_repr -> closed_expr_repr * (unit -> unit) =
  function
   | (Nil,ast) -> (ast,fun () -> ())
   | (HNode (_,_,var,_,_),ast) ->
@@ -102,29 +162,12 @@ let close_code_delay_check : code_repr -> closed_code_repr * (unit -> unit) =
       Location.print ast.pexp_loc var.txt Location.print var.loc;
       failwith (Format.flush_str_formatter ()))
 
-let close_code_repr : code_repr -> closed_code_repr = fun cde ->
+let close_expr_repr : expr_repr -> closed_expr_repr = fun cde ->
   let (ast, check) = close_code_delay_check cde in
   check (); ast
 
-let open_code : closed_code_repr -> code_repr = fun ast ->
+let open_code : closed_expr_repr -> expr_repr = fun ast ->
   (Nil, ast)
-
-(* Bindings in the future stage *)
-(* Recall, all bindings at the future stage are introduced by
-   patterns, and hence are simple names, without any module qualifications.
-*)
-let gensym_count = ref 0
-
-(* Generate a fresh name with a given base name *)
-let gensym : string -> string = fun s ->
-  incr gensym_count;
-  s ^ "_" ^ string_of_int !gensym_count
-
-let reset_gensym_counter () = gensym_count := 0
-
-(* Make a simple identifier unique *)
-let genident : string loc -> string loc = fun name ->
-  {name with txt = gensym name.txt}
 
 (* left-to-right accumulating map *)
 let rec map_accum : ('accum -> 'a -> 'accum * 'b) -> 'accum -> 'a list ->
@@ -174,7 +217,7 @@ let scope_extrusion_error :
   .r <<2>>
   Here, y1 and y2 are valid but x1 and x2 are not.
 *)
-let validate_vars : Location.t -> code_repr -> code_repr =
+let validate_vars : Location.t -> expr_repr -> expr_repr =
   fun l -> function
   | (Nil,_) as cde -> cde
   | (h, ast) as cde -> begin
@@ -186,7 +229,7 @@ let validate_vars : Location.t -> code_repr -> code_repr =
       in check h; cde
   end
 
-let validate_vars_option : Location.t -> code_repr option ->
+let validate_vars_option : Location.t -> expr_repr option ->
   string loc heap * Parsetree.expression option =
   fun loc co ->
     match co with
@@ -195,12 +238,12 @@ let validate_vars_option : Location.t -> code_repr option ->
         let (vars, c) = validate_vars loc c in
           (vars, Some c)
 
-let validate_vars_list : Location.t -> code_repr list ->
+let validate_vars_list : Location.t -> expr_repr list ->
   string loc heap * Parsetree.expression list =
   fun loc cs ->
     map_merge validate_vars loc cs
 
-let validate_vars_alist : Location.t -> ('a * code_repr) list ->
+let validate_vars_alist : Location.t -> ('a * expr_repr) list ->
   string loc heap * ('a * Parsetree.expression) list =
   fun loc cs ->
     map_merge
@@ -210,7 +253,7 @@ let validate_vars_alist : Location.t -> ('a * code_repr) list ->
       loc cs
 
 (* Generate a fresh name off the given name, enter a new binding region
-   and evaluate a function passing it the generated name as code_repr.
+   and evaluate a function passing it the generated name as expr_repr.
    Remove the generated name from the annotation on the resulting code_expr.
    Return that result and the generated name.
    This function embodies the translation of simple functions, for-loops,
@@ -224,10 +267,8 @@ let validate_vars_alist : Location.t -> ('a * code_repr) list ->
          has the highest priority and it will be at the top of the heap,
          the easiest to remove.
        *)
-let prio_counter = ref 0
-
 let with_binding_region :
-  Location.t -> string loc -> (code_repr -> code_repr) ->
+  Location.t -> string loc -> (expr_repr -> expr_repr) ->
   string loc * string loc heap * Parsetree.expression = fun l name f ->
   let new_name = genident name in
   let (vars,e) =
@@ -243,7 +284,7 @@ let with_binding_region :
   (new_name, vars, e)
 
 let with_binding_regions :
-  Location.t -> string loc -> (code_repr -> code_repr) ->
+  Location.t -> string loc -> (expr_repr -> expr_repr) ->
   string loc * string loc heap * Parsetree.expression = fun l names f ->
   let new_names = List.map genident names in
   let (vars,e) =
@@ -267,7 +308,7 @@ let with_binding_regions :
  *)
 let with_binding_region_gen :
   Location.t -> string loc list ->
-  (Location.t -> 'a -> 'b * string loc heap) -> (code_repr list -> 'a list) ->
+  (Location.t -> 'a -> 'b * string loc heap) -> (expr_repr list -> 'a list) ->
   string loc list * string loc heap * 'b list
   = fun l names tr f ->
   let new_names = List.map genident names in
@@ -328,9 +369,25 @@ module Pat = struct
   let mk loc d =
     {ppat_desc = d; ppat_loc = loc; ppat_attributes = []}
 
-  let var loc a = mk loc (Ppat_var a)
+  let any loc =
+    mk loc Ppat_any
 
-  let unmarshal str : pattern = Marshal.from_string str
+
+  | Ppat_alias of pattern * string loc
+  | Ppat_constant of constant
+  | Ppat_interval of constant * constant
+  | Ppat_tuple of pattern list
+  | Ppat_construct of Longident.t loc * pattern option
+  | Ppat_variant of label * pattern option
+  | Ppat_record of (Longident.t loc * pattern) list * closed_flag
+  | Ppat_array of pattern list
+  | Ppat_or of pattern * pattern
+  | Ppat_constraint of pattern * core_type
+  | Ppat_type of Longident.t loc
+  | Ppat_lazy of pattern
+  | Ppat_unpack of string loc
+  | Ppat_exception of pattern
+  | Ppat_extension of extension
 
 end
 
@@ -458,9 +515,9 @@ let prepare_cases : Location.t ->
   (* The following function returns the list of pairs of guards and bodies,
      for each clause of the function
    *)
-  (code_repr list -> (code_repr option * code_repr) list) ->
+  (expr_repr list -> (expr_repr option * expr_repr) list) ->
   (* The continuation *)
-  (Parsetree.case list -> Parsetree.expression) -> code_repr =
+  (Parsetree.case list -> Parsetree.expression) -> expr_repr =
   fun loc evars (pats,old_names) fgbodies k ->
     let tr loc (eo,e) =
         let (eo,vo)        = validate_vars_option loc eo in
@@ -622,7 +679,7 @@ end
 let build_let :
   Location.t -> bool ->
   (Parsetree.pattern list * string loc list) ->
-  (code_repr array -> (code_repr option * code_repr) array) -> code_repr =
+  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr =
   fun loc recf pon fgbodies ->
   prepare_cases loc Nil pon fgbodies @@ function
     | [] | [_] -> assert false
@@ -639,9 +696,9 @@ let build_let :
 
 (* build match and try: both are very similar and similar to build_fun *)
 let build_match :
-  Location.t -> (Parsetree.pattern list * string loc list) -> code_repr ->
+  Location.t -> (Parsetree.pattern list * string loc list) -> expr_repr ->
   int ->
-  (code_repr array -> (code_repr option * code_repr) array) -> code_repr =
+  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr =
   fun loc pon ec nregular fgbodies ->
     let Code (evars,exp) = validate_vars loc ec in
     let split : int -> 'a list -> 'a list * 'a list = fun n lst ->
@@ -664,8 +721,8 @@ let build_match :
    TODO: implement the same check on the timestamp of the expression to try
 *)
 let build_try :
-  Location.t -> (Parsetree.pattern list * string loc list) -> code_repr ->
-  (code_repr array -> (code_repr option * code_repr) array) -> code_repr =
+  Location.t -> (Parsetree.pattern list * string loc list) -> expr_repr ->
+  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr =
   fun loc pon ec fgbodies ->
     let Code (evars,exp) = validate_vars loc ec in
     prepare_cases loc evars pon fgbodies @@ fun cases ->
