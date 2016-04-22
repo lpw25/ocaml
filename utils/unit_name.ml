@@ -1,98 +1,104 @@
 
+type path =
+  | Simple of string
+  | Project of path * string
+  | ProjectOrSimple of path * string
+
 type t = {
   root : string option;
-  parents : string list;
-  name : string;
+  path : path;
 }
 
 let root { root } = root
 
-let parents { parents } = parents
-
-let name { name } = name
+let name { path } =
+  match path with
+  | Simple name -> name
+  | Project(_, name) -> name
+  | ProjectOrSimple(_, name) -> name
 
 let simple ~name =
   { root = None;
-    parents = [];
-    name; }
+    path = Simple name; }
 
-let relative ~parents ~name =
-  { root = None;
-    parents;
-    name; }
-
-let absolute ~root ~parents ~name =
+let base ~root ~name =
   { root = Some root;
-    parents;
-    name; }
+    path = Simple name; }
+
+let project ~parent ~name =
+  { root = parent.root;
+    path = Project(parent.path, name); }
+
+let project_or_simple ~parent ~name =
+  { root = parent.root;
+    path = ProjectOrSimple(parent.path, name); }
 
 let dummy =
   { root = None;
-    parents = [];
-    name = "" }
+    path = Simple "" }
 
-let equal_string_option o1 o2 =
-  match o1, o2 with
+let equal_root r1 r2 =
+  match r1, r2 with
   | None, None -> true
   | Some s1, Some s2 -> String.equal s1 s2
   | _, _ -> false
 
-let rec equal_string_list l1 l2 =
-  match l1, l2 with
-  | [], [] -> true
-  | s1 :: l1, s2 :: l2 ->
-      String.equal s1 s2 && equal_string_list l1 l2
+let rec equal_path p1 p2 =
+  match p1, p2 with
+  | Simple s1, Simple s2 -> String.equal s1 s2
+  | Project(p1, s1), Project(p2, s2) ->
+      String.equal s1 s2 && equal_path p1 p2
+  | ProjectOrSimple(p1, s1), ProjectOrSimple(p2, s2) ->
+      String.equal s1 s2 && equal_path p1 p2
   | _, _ -> false
 
 let equal t1 t2 =
-  String.equal t1.name t2.name
-  && equal_string_list t1.parents t2.parents
-  && equal_string_option t1.root t2.root
+  equal_path t1.path t2.path
+  && equal_root t1.root t2.root
 
-let compare_string_option o1 o2 =
-  match o1, o2 with
+let compare_root r1 r2 =
+  match r1, r2 with
   | None, None -> 0
   | None, Some _ -> 1
   | Some s1, Some s2 -> String.compare s1 s2
   | Some _, None -> -1
 
-let rec compare_string_list l1 l2 =
-  match l1, l2 with
-  | [], [] -> 0
-  | [], _ :: _ -> 1
-  | s1 :: l1, s2 :: l2 ->
+let rec compare_path p1 p2 =
+  match p1, p2 with
+  | Simple s1, Simple s2 -> String.compare s1 s2
+  | Simple _, (Project _ | ProjectOrSimple _) -> 1
+  | (Project _ | ProjectOrSimple _) , Simple _ -> -1
+  | Project(p1, s1), Project(p2, s2) ->
       let c = String.compare s1 s2 in
       if c <> 0 then c
-      else compare_string_list l1 l2
-  | _ :: _ , [] -> -1
+      else compare_path p1 p2
+  | Project _, ProjectOrSimple _ -> 1
+  | ProjectOrSimple _, Project _ -> -1
+  | ProjectOrSimple(p1, s1), ProjectOrSimple(p2, s2) ->
+      let c = String.compare s1 s2 in
+      if c <> 0 then c
+      else compare_path p1 p2
 
 let compare t1 t2 =
-  let c = String.compare t1.name t2.name in
+  let c = compare_path t1.path t2.path in
   if c <> 0 then c
-  else begin
-    let c = compare_string_list t1.parents t2.parents in
-    if c <> 0 then c
-    else compare_string_option t1.root t2.root
-  end
+  else compare_root t1.root t2.root
 
 let hash = Hashtbl.hash
 
-let print_root ppf t =
-  match t.root with
+let print_root ppf = function
   | None -> ()
   | Some r -> Format.fprintf ppf "%s:" r
 
-let print_parents ppf t =
-  let rec loop ppf = function
-    | [] -> ()
-    | p :: ps ->
-        Format.fprintf ppf "%a%s." loop ps p
-  in
-    loop ppf t.parents
+let rec print_path ppf = function
+  | Simple s ->
+      Format.fprintf ppf "%s" s
+  | Project(p, s) | ProjectOrSimple(p, s) ->
+      Format.fprintf ppf "%a.%s" print_path p s
 
 let print ppf t =
-  Format.fprintf ppf "%a%a%s"
-    print_root t print_parents t t.name
+  Format.fprintf ppf "%a%a"
+    print_root t.root print_path t.path
 
 module Ops = struct
   type nonrec t = t

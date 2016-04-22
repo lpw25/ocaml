@@ -46,9 +46,7 @@ let subunit_uname pkgname uname =
 
 (* Test whether a unit name is the subunit of a package *)
 let is_subunit_uname uname =
-  Unit_name.root uname = None
-  && Unit_name.parents uname = []
-  && String.contains (Unit_name.name uname) '.'
+  String.contains (Unit_name.name uname) '.'
 
 (* Record a relocation.  Update its offset, and rename GETGLOBAL and
    SETGLOBAL relocations that correspond to one of the units being

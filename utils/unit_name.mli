@@ -3,17 +3,17 @@ type t
 
 val root : t -> string option
 
-val parents : t -> string list
-
 val name : t -> string
 
 val dummy : t
 
 val simple : name:string -> t
 
-val relative : parents:string list -> name:string -> t
+val base : root:string -> name:string -> t
 
-val absolute : root:string -> parents:string list -> name:string -> t
+val project : parent:t -> name:string -> t
+
+val project_or_simple : parent:t -> name:string -> t
 
 val equal : t -> t -> bool
 
