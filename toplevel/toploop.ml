@@ -474,7 +474,7 @@ let _ =
       match crco with
         None -> ()
       | Some crc->
-          Consistbl.set Env.crc_units name crc Sys.executable_name)
+          Consistbl.set Env.crc_units uname crc Sys.executable_name)
     crc_intfs
 
 let load_ocamlinit ppf =
