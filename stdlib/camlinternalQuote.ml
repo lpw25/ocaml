@@ -49,21 +49,11 @@ end
    the children can be arbitrary.
 *)
 
-module Heap : sig
+module Priority : sig
 
-  type prio
+  type t
 
   val fresh : unit -> prio
-
-  type 'a t
-
-  val empty : 'a t
-
-  val singleton : 'a t -> prio -> 'a -> 'a t
-
-  val remove : 'a t -> prio -> 'a t
-
-  val merge : 'a t -> 'a t -> 'a t
 
 end = struct
 
@@ -75,9 +65,25 @@ end = struct
     incr prio_counter;
     !prio_counter
 
+end
+
+module Heap : sig
+
+  type 'a t
+
+  val empty : 'a t
+
+  val singleton : 'a t -> Priority.t -> 'a -> 'a t
+
+  val remove : 'a t -> Priority.t -> 'a t
+
+  val merge : 'a t -> 'a t -> 'a t
+
+end = struct
+
   type 'a t =
     | Nil
-    | HNode of prio * 'a * 'a heap * 'a heap
+    | HNode of Priority.t * 'a * 'a heap * 'a heap
 
   let empty = Nil
 
@@ -88,7 +94,7 @@ end = struct
     match h with
     | Nil -> Nil
     | HNode (pn, v, h1, h2) -> begin
-        match p - pn with
+        match compare p pn with
         | 0 -> merge h1 h2              (* p cannot occur in h1 or h2 *)
         | n when n > 0 -> h             (* entire tree has the lower prio *)
         | _ -> HNode (pn, v, remove p h1, remove p h2)
@@ -98,7 +104,7 @@ end = struct
     match h1, h2 with
     | Nil, h | h, Nil-> h
     | HNode (p1, v1, l1, r1), HNode (p2, v2, l2, r2) -> begin
-        match p1 - p2 with
+        match compare p1 p2 with
         | 0 -> HNode (p1, v1, merge l1 l2, merge r1 r2) (* same keys *)
         | n when n < 0 -> HNode (p2, v2, merge h1 l2, r2)
         | _ -> HNode (p1, v1, l1, merge h2 r1)
@@ -113,6 +119,30 @@ end = struct
     | HNode (_, v, h1, h2) ->
         f v && for_all f h1 && for_all f check h2
 
+  let same h1 h2 =
+    let rec insert h hs =
+      match h, hs with
+      | Nil, hs -> hs
+      | h, Nil :: rest -> insert h rest
+      | HNode(p1, _, _, _), HNode(p2, _, _, _) as h' :: rest ->
+          if p1 >= p2 then h :: hs
+          else h' :: (insert h rest)
+    in
+    let rec same hs1 hs2 =
+      match h1, h2 with
+      | [], [] -> true
+      | Nil :: hs1, hs2 -> same hs1 hs2
+      | hs1, Nil :: hs2 -> same hs1 hs2
+      | HNode(p1, _, h11, h12) :: hs1, HNode(p2, _, h21, h22) :: hs2 ->
+          if p1 <> p2 then false
+          else begin
+            let hs1 = insert h11 (insert h12 hs1) in
+            let hs2 = insert h21 (insert h22 hs2) in
+            same hs1 hs2
+          end
+    in
+      same [h1] [h2]
+
 end
 
 
@@ -124,8 +154,9 @@ end
 *)
 type var_repr = {
   name : string loc;
-  sym : int;
-  priority : prio;
+  stackmark : Stackmark.t
+  pattern_prio : Priority.t;
+  expression_prio : Priority.t;
 }
 
 let gensym_count = ref 0
@@ -133,9 +164,8 @@ let gensym_count = ref 0
 (* Make a simple identifier unique *)
 let gensym (var : string loc) : var_repr =
   incr gensym_count;
-  let sym = !gensym_count in
-  let name = name.txt ^ "_" ^ sym in
-  {var with txt = name}, sym
+  let name = name.txt ^ "_" ^ !gensym_count in
+  {var with txt = name}
 
 (* The representation of the possibly open code: AST plus the
    set of free identifiers, annotated with the marks
