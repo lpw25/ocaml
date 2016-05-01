@@ -53,17 +53,24 @@ module Priority : sig
 
   type t
 
-  val fresh : unit -> prio
+  val fresh : unit -> t
 
 end = struct
 
-  type prio = int
+  type t = int
 
-  let prio_counter = ref 0
+  let counter = ref 0
 
+  (* Keep in mind the invariant that variables of the same priority
+     comes from the same binding location. So, we must keep the
+     priorities unique to binders. Giving binders monotonically
+     increasing priorities is helpful: the innermost binding
+     has the highest priority and it will be at the top of the heap,
+     the easiest to remove.
+       *)
   let fresh () =
-    incr prio_counter;
-    !prio_counter
+    incr counter;
+    !counter
 
 end
 
@@ -75,9 +82,15 @@ module Heap : sig
 
   val singleton : 'a t -> Priority.t -> 'a -> 'a t
 
+  val merge : 'a t -> 'a t -> 'a t
+
+  val merge_alist : ('a t * 'b) list -> 'a t * 'b list
+
   val remove : 'a t -> Priority.t -> 'a t
 
-  val merge : 'a t -> 'a t -> 'a t
+  val choose : 'a t -> 'a option
+
+  val iter : ('a -> unit) -> 'a t -> unit
 
 end = struct
 
@@ -90,16 +103,6 @@ end = struct
   let singleton h prio v =
     HNode (p, v, Nil, Nil)
 
-  let rec remove h p =
-    match h with
-    | Nil -> Nil
-    | HNode (pn, v, h1, h2) -> begin
-        match compare p pn with
-        | 0 -> merge h1 h2              (* p cannot occur in h1 or h2 *)
-        | n when n > 0 -> h             (* entire tree has the lower prio *)
-        | _ -> HNode (pn, v, remove p h1, remove p h2)
-      end
-
   let rec merge h1 h2 =
     match h1, h2 with
     | Nil, h | h, Nil-> h
@@ -110,41 +113,147 @@ end = struct
         | _ -> HNode (p1, v1, l1, merge h2 r1)
       end
 
+  let rec remove h p =
+    match h with
+    | Nil -> Nil
+    | HNode (pn, v, h1, h2) -> begin
+        match compare p pn with
+        | 0 -> merge h1 h2              (* p cannot occur in h1 or h2 *)
+        | n when n > 0 -> h             (* entire tree has the lower priority *)
+        | _ -> HNode (pn, v, remove p h1, remove p h2)
+      end
+
   let choose = function
     | Nil -> None
     | HNode (_, v, _, _) -> Some v
 
-  let rec for_all f = function
-    | Nil -> true
-    | HNode (_, v, h1, h2) ->
-        f v && for_all f h1 && for_all f check h2
-
-  let same h1 h2 =
-    let rec insert h hs =
-      match h, hs with
-      | Nil, hs -> hs
-      | h, Nil :: rest -> insert h rest
-      | HNode(p1, _, _, _), HNode(p2, _, _, _) as h' :: rest ->
-          if p1 >= p2 then h :: hs
-          else h' :: (insert h rest)
-    in
-    let rec same hs1 hs2 =
-      match h1, h2 with
-      | [], [] -> true
-      | Nil :: hs1, hs2 -> same hs1 hs2
-      | hs1, Nil :: hs2 -> same hs1 hs2
-      | HNode(p1, _, h11, h12) :: hs1, HNode(p2, _, h21, h22) :: hs2 ->
-          if p1 <> p2 then false
-          else begin
-            let hs1 = insert h11 (insert h12 hs1) in
-            let hs2 = insert h21 (insert h22 hs2) in
-            same hs1 hs2
-          end
-    in
-      same [h1] [h2]
+  let rec iter f = function
+    | Nil -> ()
+    | HNode (_, v, h1, h2) -> begin
+        f v;
+        iter f h1;
+        iter f h2
+      end
 
 end
 
+(* ------------------------------------------------------------------------ *)
+(* Simple map *)
+
+module Symbol : sig
+
+  type t
+
+  val fresh : unit -> t
+
+  val to_string : t -> string
+
+  val compare : t -> t -> int
+
+end = struct
+
+  type t = int
+
+  let counter = ref 0
+
+  let fresh () =
+    incr counter;
+    !counter
+
+  let to_string = int_to_string
+
+  let compare (x : t) (y : t) = compare x y
+
+end
+
+module Map : sig
+
+  type 'a t
+
+  val empty : 'a t
+
+  val singleton : 'a t -> Symbol.t -> 'a -> 'a t
+
+  val add : Symbol.t -> 'a -> 'a t -> 'a t
+
+  val find : Symbol.t -> 'a t -> 'a
+
+  val find_list : Symbol.t -> 'a t list -> 'a
+
+  val find_alist : Symbol.t -> ('a t * 'b) list -> 'a
+
+  val iter : ('a -> unit) -> 'a t -> unit
+
+  val merge : ('a -> 'a -> unit) -> 'a t -> 'a t -> 'a t
+
+  val merge_alist : ('a t * 'b) list -> 'a t * 'b list
+
+  val choose : 'a t -> 'a option
+
+  val same : ('a -> unit) -> 'a t -> ('b -> unit) -> 'b t -> unit
+
+end = struct
+
+  module SymbolMap = Map.Make(Symbol)
+
+  type 'a t = 'a SymbolMap.t
+
+  let empty = SymbolMap.empty
+
+  let singleton = SymbolMap.singleton
+
+  let add = SymbolMap.add
+
+  let find = SymbolMap.find
+
+  let rec find_list sym = function
+    | [] -> raise Not_found
+    | heap :: rest ->
+        match find sym heap with
+        | exception Not_found -> find_list sym rest
+        | v -> v
+
+  let rec find_alist sym = function
+    | [] -> raise Not_found
+    | (heap, _) :: rest ->
+        match find sym heap with
+        | exception Not_found -> find_alist sym rest
+        | v -> v
+
+  let iter f t =
+    SymbolMap.iter (fun _ v -> f v) t
+
+  let merge intersection t1 t2 =
+    SymbolMap.merge
+      (fun x v1 v2 ->
+        match v1, v2 with
+        | None, None -> None
+        | Some v, None -> Some v
+        | None, Some v -> Some v
+        | Some v1, Some v2  -> intersection v1 v2; None
+      t1 t2
+
+  let merge_alist xl =
+    map_accum
+      (fun acc (h, x) ->
+         let acc = merge h acc in
+           acc, x)
+      SymbolMap.empty xl
+
+  let choose = SymbolMap.choose
+
+  let same left t1 right t2 =
+    ignore
+      (SymbolMap.merge
+         (fun x v1 v2 ->
+           match v1, v2 with
+           | None, None -> None
+           | Some v, None -> left v; None
+           | None, Some v -> right v; None
+           | Some v, Some _  -> None)
+         t1 t2)
+
+end
 
 (* ------------------------------------------------------------------------ *)
 
@@ -152,244 +261,349 @@ end
 (* Recall, all bindings at the future stage are introduced by
    patterns, and hence are simple names, without any module qualifications.
 *)
-type var_repr = {
-  name : string loc;
-  stackmark : Stackmark.t
-  pattern_prio : Priority.t;
-  expression_prio : Priority.t;
-}
+module Var : sig
 
-let gensym_count = ref 0
+  type t
 
-(* Make a simple identifier unique *)
-let gensym (var : string loc) : var_repr =
-  incr gensym_count;
-  let name = name.txt ^ "_" ^ !gensym_count in
-  {var with txt = name}
+  val txt : t -> string
 
-(* The representation of the possibly open code: AST plus the
-   set of free identifiers, annotated with the marks
-   of the corresponding with_binding_region forms
-*)
-type expr_repr = string loc heap * Parsetree.expression
+  val loc : t -> Location.t
 
-(* The closed code is AST *)
-type closed_expr_repr = Parsetree.expression
+  module Exp : sig
 
-(* Check that the code is closed and return the closed code *)
+    val use : t -> t Heap.t * string loc
 
-(* The same as close_code but return the closedness check as a thunk
-   rather than performing it.
-   This is useful for debugging and for showing the code
-*)
-let close_code_delay_check : expr_repr -> closed_expr_repr * (unit -> unit) =
- function
-  | (Nil,ast) -> (ast,fun () -> ())
-  | (HNode (_,_,var,_,_),ast) ->
-    (ast, fun () ->
-      Format.fprintf Format.str_formatter
-      "The code built at %a is not closed: identifier %s bound at %a is free"
-      Location.print ast.pexp_loc var.txt Location.print var.loc;
-      failwith (Format.flush_str_formatter ()))
+    (* Check an expression's free variables are in scope. *)
+    val validate :
+      Location.t -> (t Heap.t * Parsetree.expression) -> unit
 
-let close_expr_repr : expr_repr -> closed_expr_repr = fun cde ->
-  let (ast, check) = close_code_delay_check cde in
-  check (); ast
+    (* Combine the free variables of two expressions. *)
+    val merge :
+      Location.t -> t Heap.t -> (t Heap.t * Parsetree.expression) ->
+      t Heap.t * Parsetree.expression
 
-let open_code : closed_expr_repr -> expr_repr = fun ast ->
-  (Nil, ast)
-
-(* left-to-right accumulating map *)
-let rec map_accum : ('accum -> 'a -> 'accum * 'b) -> 'accum -> 'a list ->
-  'accum * 'b list =
-  fun f acc l ->
-    match l with
-    | []   -> (acc, [])
-    | hd :: tl ->
-        let (acc, hd) = f acc hd in
-        let (acc, tl) = map_accum f acc tl in
-          (acc, hd :: tl)
-
-let map_merge : Location.t -> (Location.t -> 'a -> string loc heap * 'b) ->
-                'a list -> string loc heap * 'b list =
-  fun f loc xl ->
-    map_accum
-      (fun acc x ->
-         let vars, y = f loc x in
-         let acc = merge vars acc in
-           acc, y)
-      Nil xl
-
-(* This is a run-time error, rather than a translation-time error *)
-let scope_extrusion_error :
-  detected:Location.t -> occurred:Location.t -> string loc -> 'a =
-  fun ~detected ~occurred var ->
-  Format.fprintf Format.str_formatter
-    "Scope extrusion detected at %a for code built at %a for the identifier %s bound at %a"
-    Location.print detected Location.print occurred
-    var.txt Location.print var.loc;
-  failwith (Format.flush_str_formatter ())
-
-(* Check to make sure that free variables in the potentially open
-   code fragment are valid.
-   If it weren't for delimited control, the order of stack marks is
-   stable; therefore, if the maximal mark is valid then all
-   smaller marks are valid as well.
-   Delimited control spoils all that.
-   When we capture some of the inner-bindings
-   in a continuation and then reinstall that continuation at the
-   top level, the `latest' free variable is valid but earlier are
-   no longer valid:
-
-  let r = ref ... in
-  <<fun x1 x2 -> $(reset <<fun y1 y2 ->
-                              $(shift k (r := k; k <<0>>))>>)>>
-  .r <<2>>
-  Here, y1 and y2 are valid but x1 and x2 are not.
-*)
-let validate_vars : Location.t -> expr_repr -> expr_repr =
-  fun l -> function
-  | (Nil,_) as cde -> cde
-  | (h, ast) as cde -> begin
-      let rec check = function
-        | Nil -> ()
-        | HNode (_,sm,var,h1,h2) ->
-            if sm () then (check h1; check h2)
-            else scope_extrusion_error ~detected:l ~occurred:ast.pexp_loc var
-      in check h; cde
   end
 
-let validate_vars_option : Location.t -> expr_repr option ->
-  string loc heap * Parsetree.expression option =
-  fun loc co ->
-    match co with
-    | None -> (Nil, None)
-    | Some c ->
-        let (vars, c) = validate_vars loc c in
-          (vars, Some c)
+  module Pat : sig
 
-let validate_vars_list : Location.t -> expr_repr list ->
-  string loc heap * Parsetree.expression list =
-  fun loc cs ->
-    map_merge validate_vars loc cs
+    val use : t -> t Map.t * string loc
 
-let validate_vars_alist : Location.t -> ('a * expr_repr) list ->
-  string loc heap * ('a * Parsetree.expression) list =
-  fun loc cs ->
-    map_merge
-      (fun loc (a, c) ->
-         let (vars, c) = validate_vars loc c in
-           (vars, (a, c)))
-      loc cs
+    (* Check a pattern's binding variables are in scope. *)
+    val validate :
+      Location.t -> (t Map.t * Parsetree.pattern) -> unit
 
-(* Generate a fresh name off the given name, enter a new binding region
-   and evaluate a function passing it the generated name as expr_repr.
-   Remove the generated name from the annotation on the resulting code_expr.
-   Return that result and the generated name.
-   This function embodies the translation of simple functions, for-loops,
-   simple let-expressions, etc.
-*)
-      (* Counter for assigning priorities to vars heap nodes. *)
-      (* Keep in mind the invariant that variables of the same priority
-         comes from the same binding location. So, we must keep the
-         priorities unique to binders. Giving binders monotonically
-         increasing priorities is helpful: the innermost binding
-         has the highest priority and it will be at the top of the heap,
-         the easiest to remove.
-       *)
-let with_binding_region :
-  Location.t -> string loc -> (expr_repr -> expr_repr) ->
-  string loc * string loc heap * Parsetree.expression = fun l name f ->
-  let new_name = genident name in
-  let (vars,e) =
-   !with_stack_mark.stackmark_region_fn (fun mark ->
-     incr prio_counter;
-     let prio = !prio_counter in
-     let var_code = (* code that corresponds to the bound variable *)
-       (HNode (prio,mark,new_name,Nil,Nil),
-          Ast_helper.Exp.mk ~loc:name.loc   (* the loc of the binder *)
-           (Pexp_ident (mkloc (Longident.Lident new_name.txt) new_name.loc))) in
-     let (vars,e) = validate_vars l (f var_code) in
-     (remove prio vars, e)) in
-  (new_name, vars, e)
+    (* Check a pattern binds no variables. *)
+    val nonbinding :
+      Location.t -> t Map.t -> Parsetree.pattern -> unit
 
-let with_binding_regions :
-  Location.t -> string loc -> (expr_repr -> expr_repr) ->
-  string loc * string loc heap * Parsetree.expression = fun l names f ->
-  let new_names = List.map genident names in
-  let (vars,e) =
-   !with_stack_mark.stackmark_region_fn (fun mark ->
-     incr prio_counter;
-     let prio = !prio_counter in
-     let vars_code = (* code that corresponds to the bound variable *)
-       List.map
-         (fun new_name ->
-          (HNode (prio,mark,new_name,Nil,Nil),
-           Ast_helper.Exp.mk ~loc:name.loc   (* the loc of the binder *)
-             (Pexp_ident (mkloc (Longident.Lident new_name.txt) new_name.loc))))
-         new_names
-     in
-     let (vars,e) = validate_vars l (f vars_code) in
-     (remove prio vars, e)) in
-  (new_name, vars, e)
+    (* Combine the binding variables of two patterns, checking that they
+       are disjoint (used for sub-patterns). *)
+    val merge :
+      Location.t -> t Map.t -> (t Map.t * Parsetree.pattern) ->
+      t Map.t * Parsetree.pattern
 
-(* The most general version with several bindings and several expressions
-   that use the bindings
- *)
-let with_binding_region_gen :
-  Location.t -> string loc list ->
-  (Location.t -> 'a -> 'b * string loc heap) -> (expr_repr list -> 'a list) ->
-  string loc list * string loc heap * 'b list
-  = fun l names tr f ->
-  let new_names = List.map genident names in
-  let (vars,es) =
-   !with_stack_mark.stackmark_region_fn (fun mark ->
-     incr prio_counter;
-     let prio = !prio_counter in
-     let vars_code = (List.map (fun new_name ->
-                      (* code that corresponds to a bound variable *)
-       (HNode (prio,mark,new_name,Nil,Nil),
-          Ast_helper.Exp.mk ~loc:new_name.loc    (* the loc of the binder *)
-            (Pexp_ident (mkloc (Longident.Lident new_name.txt) new_name.loc))))
-       new_names) in
-     let cs = f vars_code in
-     let (vars,es) = merge_map l tr cs in
-       (remove prio vars, es)) in
-  (new_names, vars, es)
+    (* Combine the binding variables of two patterns, checking that they
+       are equivalent (used for or-patterns). *)
+    val join :
+      Location.t -> (t Map.t * Parsetree.pattern) ->
+      (t Map.t * Parsetree.pattern) -> t Map.t * Parsetree.pattern
+
+  end
+
+  val with_simple_binding :
+    Location.t -> string loc -> (t -> t Heap.t * Parsetree.expression) ->
+    Parsetree.pattern * t Heap.t * Parsetree.expression
+
+  val with_simple_bindings :
+    Location.t -> string loc list ->
+    (t list -> t Heap.t * Parsetree.expression) ->
+    Parsetree.pattern list * t Heap.t * Parsetree.expression
+
+  val with_simple_rec_bindings :
+    Location.t -> string loc list ->
+    (t list -> (t Heap.t * Parsetree.expression) list
+               * (t Heap.t * Parsetree.expression)) ->
+    t Heap.t * (Parsetree.pattern * Parsetree.expression) list
+    * Parsetree.expression
+
+  val with_bindings :
+    Location.t -> string loc list ->
+    (t list -> (t Map.t * Parsetree.pattern)
+               * (t Heap.t * Parsetree.expression)) ->
+    Parsetree.pattern * t Heap.t * Parsetree.expression
+
+end = struct
+
+  type t = {
+    name : string loc;
+    stackmark : Stackmark.t;
+    symbol : Symbol.t;
+    priority : Priority.t;
+  }
+
+  let txt { name } = name.txt
+
+  let loc { name } = name.loc
+
+  module Exp = struct
+
+    let use t = (Heap.singleton t t.priority, t.name)
+
+    (* This is a run-time error, rather than a translation-time error *)
+    let scope_extrusion_error loc exp name =
+      Format.fprintf Format.str_formatter
+        "Scope extrusion detected at %a for expression built at %a \
+         for the identifier %s bound at %a"
+        Location.print loc Location.print exp.pexp_loc
+        name.txt Location.print name.loc;
+      failwith (Format.flush_str_formatter ())
+
+    (* Check to make sure that free variables in the potentially open
+       code fragment are valid.
+       If it weren't for delimited control, the order of stack marks is
+       stable; therefore, if the maximal mark is valid then all
+       smaller marks are valid as well.
+       Delimited control spoils all that.
+       When we capture some of the inner-bindings
+       in a continuation and then reinstall that continuation at the
+       top level, the `latest' free variable is valid but earlier are
+       no longer valid:
+
+      let r = ref ... in
+      <<fun x1 x2 -> $(reset <<fun y1 y2 ->
+                                  $(shift k (r := k; k <<0>>))>>)>>
+      .r <<2>>
+      Here, y1 and y2 are valid but x1 and x2 are not.
+    *)
+    let validate loc (heap, exp) =
+      Heap.iter
+        (fun var ->
+          if not (var.stackmark ()) then
+            scope_extrusion_error loc exp var.name)
+        heap
+
+    let merge _loc heap1 (heap2, exp2) =
+      Heap.merge heap1 heap2, exp2
+
+  end
+
+  module Pat = struct
+
+    let use t = (Map.singleton t t.symbol, t.name)
+
+    (* This is a run-time error, rather than a translation-time error *)
+    let scope_extrusion_error loc pat name =
+      Format.fprintf Format.str_formatter
+        "Scope extrusion detected at %a for pattern built at %a \
+         for the identifier %s"
+        Location.print loc Location.print pat.ppat_loc name.txt;
+      failwith (Format.flush_str_formatter ())
+
+    let validate loc (map, pat) =
+      Map.iter
+        (fun var ->
+          if not (var.stackmark ()) then
+            scope_extrusion_error loc pat var.name)
+        map
+
+    let duplicate_binding_error loc pat var =
+      Format.fprintf Format.str_formatter
+         "Duplicate bindings detected at %a for pattern built at %a \
+          for the identifier %s already bound at %a"
+        Location.print loc Location.print pat.ppat_loc
+        var.txt Location.print var.loc;
+      failwith (Format.flush_str_formatter ())
+
+    let merge loc acc (map, pat) =
+      let duplicate var _ = duplicate_binding_error loc pat var in
+        Map.merge duplicate acc map, pat
+
+    let mismatch_binding_error loc pat1 pat2 var =
+      Format.fprintf Format.str_formatter
+         "Mismatched bindings detected at %a for patterns built at %a and %a \
+          for the identifier %s"
+        Location.print loc Location.print pat1.ppat_loc
+        Location.print pat2.ppat_loc var.txt;
+      failwith (Format.flush_str_formatter ())
+
+    let join loc (map1, pat1) (map2, pat2) =
+      let diff var = mismatch_binding_error loc pat1 pat2 var in
+      Map.same diff map1 diff map2;
+      map1, pat1, pat2
+
+    let unbound_var_error loc pat var =
+      Format.fprintf Format.str_formatter
+        "Pattern for binding at %a built at %a does not bind the identifier %s"
+        Location.print loc Location.print pat.ppat_loc
+        Location.print occurred var.txt;
+      failwith (Format.flush_str_formatter ())
+
+    let additional_var_error loc pat var =
+      Format.fprintf Format.str_formatter
+        "Pattern for binding at %a built at %a binds additional identifier %s"
+        Location.print loc Location.print pat.ppat_loc
+        Location.print occurred var.txt;
+      failwith (Format.flush_str_formatter ())
+
+    let nonbinding loc map pat =
+      match Map.choose map with
+      | None -> ()
+      | Some var -> additional_var_error loc pat var
+
+    let check_bindings loc vars map pat =
+      let full_map =
+        List.fold_left
+          (fun acc var -> Map.add var.symbol var acc)
+          Map.empty vars
+      in
+      let unbound var = unbound_var_error loc pat var in
+      let additional var = additional_var_error loc pat var in
+        Map.same unbound full_map additional map
+
+    let var t =
+      let (map, s) = use t in
+      let pat =
+        { ppat_loc=s.loc; ppat_desc=Ppat_var s; ppat_attributes = [] }
+      in
+        (map, pat)
+
+  end
+
+  let gensym stackmark priority name =
+    let symbol = Symbol.fresh () in
+    let txt = var.txt ^ "_" ^ (Symbol.to_string symbol) in
+    let name = {name with txt} in
+      { name; stackmark; symbol; priority }
+
+  (* Generate a fresh name off the given name, enter a new binding region
+     and evaluate a function passing it the generated name as exp_repr.
+     Remove the generated name from the annotation on the resulting code_exp.
+     Return that result and the generated name.
+     This function embodies the translation of simple functions, for-loops,
+     simple let-expressions, etc.
+  *)
+  let with_simple_binding loc name f =
+    Stackmark.region
+      (fun mark ->
+        let prio = Priority.fresh () in
+        let var = gensym mark prio name in
+        let (heap, exp) = f var in
+        Exp.validate loc heap exp;
+        let pat = Pat.var var in
+        (pat, Heap.remove prio heap, exp))
+
+  let with_simple_bindings loc names f =
+    Stackmark.region
+      (fun mark ->
+        let prio = Priority.fresh () in
+        let vars = List.map (gensym mark prio) names in
+        let (heap, exp) = f vars in
+        Exp.validate loc heap exp;
+        let pats = List.map Pat.var vars in
+        (pats, Heap.remove prio heap, exp))
+
+  let pair_binding_error loc npats nexps =
+    Format.fprintf Format.str_formatter
+      "Binding at %a has %d patterns but %d expressions"
+      Location.print loc npats nexps;
+    failwith (Format.flush_str_formatter ())
+
+  let pair_bindings loc pats exps =
+    let npats = List.length pats in
+    let nexps = List.length exps in
+    if npats <> nexps then pair_binding_error loc npats nexps;
+    List.combine pats exps
+
+  let with_simple_rec_bindings loc names f =
+    Stackmark.region
+      (fun mark ->
+        let prio = Priority.fresh () in
+        let vars = List.map (gensym mark prio) names in
+        let hexps, (bheap, bexp) = f vars in
+        List.iter (fun (heap, exp) -> Exp.validate loc heap exp) hexps;
+        Exp.validate loc bheap bexp;
+        let heap, exps = Heap.merge_alist hexps in
+        let heap = Heap.merge heap bheap in
+        let pats = List.map pat vars in
+        let pairs = pair_bindings loc pats exps in
+        (Heap.remove prio heap, pairs, bexp))
+
+  let with_bindings loc names f =
+    Stackmark.region
+      (fun mark ->
+        let prio = Priority.fresh () in
+        let vars = List.map (gensym mark prio) names in
+        let ((map, pat), (heap, exp)) = f vars in
+        Exp.validate loc heap exp;
+        Pat.validate loc map pat;
+        Pat.check_bindings loc vars map pat;
+        (pat, Heap.remove prio heap, exp))
+
+end
+
+(* ------------------------------------------------------------------------ *)
+(* Iterations over common structures *)
+
+let iter_opt loc f o =
+  match o with
+  | None -> ()
+  | Some x -> f loc x
+
+let rec iter_list loc f l =
+  match l with
+  | [] -> ()
+  | x :: rest -> f loc x; iter_list loc f rest
+
+let rec iter_alist loc f l =
+  match l with
+  | [] -> ()
+  | (_, x) :: rest -> f loc x; iter_list loc f rest
+
+(* ------------------------------------------------------------------------ *)
+(* Accumulating maps over common structures *)
+
+let accum_opt loc f acc o =
+  match o with
+  | None -> (acc, None)
+  | Some x ->
+      let (acc, x) = f loc acc x in
+        (acc, Some x)
+
+let rec accum_list loc f acc l =
+  match l with
+  | [] -> (acc, [])
+  | x :: rest ->
+      let (acc, x) = f loc acc x in
+      let (acc, rest) = accum_list loc f acc rest in
+        (acc, x :: rest)
+
+let rec accum_alist loc f acc l =
+  match l with
+  | [] -> (acc, [])
+  | (k, x) :: rest ->
+      let (acc, x) = f loc acc x in
+      let (acc, rest) = accum_alist f acc rest in
+        (acc, (k, x) :: rest)
+
 
 (* ------------------------------------------------------------------------ *)
 (* Building Parsetree nodes *)
 
-(* Templates for building Parsetree/Typedtree components *)
-
-(* Local reference: trx.cmi is available but location.cmi is not
-   necessarily is in the current path.
-*)
-let loc_none = Location.none
-
-let dummy_lid : string -> Longident.t loc = fun name ->
-  Location.mknoloc (Longident.Lident name)
-
-(* Exported. Used as a template for constructing lid expressions *)
-let sample_lid = dummy_lid "*sample*"
-
-(* Exported. Used as a template for constructing name expression *)
-let sample_name : string loc = mknoloc "*sample*"
-
-(* Exported. Used as a template for constructing pattern lists expressions *)
-let sample_pat_list : Parsetree.pattern list = []
-let sample_pats_names : Parsetree.pattern list * string loc list = ([],[])
-
-(* Location builders *)
 module Loc = struct
 
-  let unmarshal str : location = Marshal.from_string str
+  type t = Location.t
+
+  let none = Location.none
+
+  let unmarshal (s : string) : t = Marshal.from_string s
 
 end
 
 module Constant = struct
 
-  let unmarshal str : constant = Marshal.from_string str
+  type t = constant
+
+  let unmarshal str : t = Marshal.from_string str
 
 end
 
@@ -400,207 +614,198 @@ module Pat = struct
     {ppat_desc = d; ppat_loc = loc; ppat_attributes = []}
 
   let any loc =
-    mk loc Ppat_any
+    (Map.empty, mk loc Ppat_any)
 
+  let var loc var =
+    let var = Var.Pat.use var in
+      (fst var, mk loc (Ppat_var (snd var)))
 
-  | Ppat_alias of pattern * string loc
-  | Ppat_constant of constant
-  | Ppat_interval of constant * constant
-  | Ppat_tuple of pattern list
-  | Ppat_construct of Longident.t loc * pattern option
-  | Ppat_variant of label * pattern option
-  | Ppat_record of (Longident.t loc * pattern) list * closed_flag
-  | Ppat_array of pattern list
-  | Ppat_or of pattern * pattern
-  | Ppat_constraint of pattern * core_type
-  | Ppat_type of Longident.t loc
-  | Ppat_lazy of pattern
-  | Ppat_unpack of string loc
-  | Ppat_exception of pattern
-  | Ppat_extension of extension
+  let alias loc pat var =
+    Var.Pat.validate loc pat;
+    let var = Var.Pat.use var in
+    let map = Var.Pat.merge loc (fst var) pat in
+    let pat = mk loc (Ppat_alias(snd pat, snd var)) in
+      (map, pat)
+
+  let constant loc const =
+    let map = Map.empty in
+    let pat = mk loc (Ppat_constant const) in
+      (map, pat)
+
+  let interval loc const1 const2 =
+    let map = Map.empty in
+    let pat = mk loc (Ppat_interval(const1, const2)) in
+      (map, pat)
+
+  let tuple loc patl =
+    iter_list loc Var.Pat.validate patl;
+    let map, patl = accum_list loc Var.Pat.merge Map.empty patl in
+    let pat = mk loc (Ppat_tuple patl) in
+      (map, pat)
+
+  let construct loc lid pato =
+    iter_opt loc Var.Pat.validate pato;
+    let map, pato = accum_opt loc Var.Pat.merge_option Map.empty pato in
+    let pat = mk loc Ppat_construct(lid, pato) in
+      (map, pat)
+
+  let variant loc label pato =
+    iter_opt loc Var.Pat.validate_option pato;
+    let map, pato = accum_opt loc Var.Pat.merge_option Map.empty pato in
+    let pat = mk loc (Ppat_variant(label, pato)) in
+      (map, pat)
+
+  let record loc patl closed =
+    iter_alist loc Var.Pat.validate patl;
+    let map, patl = accum_alist loc Var.Pat.merge_alist Map.empty patl in
+    let pat = mk loc (Ppat_record(patl, closed)) in
+      (map, pat)
+
+  let array loc patl =
+    iter_list loc Var.Pat.validate patl;
+    let map, patl = accum_list loc Var.Pat.merge_list Map.empty patl in
+    let pat = mk loc (Ppat_array patl) in
+      (map, pat)
+
+  let or_ loc pat1 pat2 =
+    Var.Pat.validate loc pat1;
+    Var.Pat.validate loc pat2;
+    let map, pat1, pat2 = Var.Pat.join loc pat1 pat2 in
+    let pat = mk loc (Ppat_or(pat1, pat2)) in
+      (map, pat)
+
+  let type_ loc lid =
+    let map = Map.empty in
+    let pat = mk loc (Ppat_type lid) in
+      (map, pat)
+
+  let lazy_ loc (map, pat) =
+    Var.Pat.validate loc map pat;
+    let pat = mk loc (Ppat_lazy pat) in
+      (map, pat)
+
+  let exception_ loc (map, pat) =
+    Var.Pat.validate loc map pat;
+    let pat = mk loc (Ppat_exception pat) in
+      (map, pat)
 
 end
-
-(* Substitute the names of bound variables in the pattern.
-   The new names are given in the string loc list. We
-   take advantage of the fact that patterns are linear and
-   the list of new names is ordered, in the order the bound
-   variables occur in the pattern. Therefore, we substitute based
-   on position.
-   OR-patterns bring complexity however: both branches of an OR
-   pattern bind exactly the same variables (but the order of
-   variable occurrence within branches may be different).
-   So for OR patterns we substitute by name, taking advantage
-   of the fact the new names differ from the old ones in _nnn
-   suffix. OR patterns are uncommon, so the complication of their processing
-   is not that bad.
-
-   This function is closely related to trx_pattern; It relies on the
-   same pattern traversal order as trx_pattern.
- *)
-
-(* two strings are the same up to (and including) n *)
-let rec same_upto s1 s2 n =
-  n < 0 || (s1.[n] = s2.[n] && same_upto s1 s2 (n-1))
-
-let rec pattern_subst : ?by_name:bool ->
-    string loc list -> Parsetree.pattern ->
-     Parsetree.pattern * string loc list = fun ?(by_name=false) acc pat ->
- if acc = [] then (pat,acc) else           (* no more variables to subst *)
- let subst old_name acc =
-   if by_name then begin
-     let new_name =
-       try List.find (fun n ->
-         same_upto old_name.txt n.txt (String.rindex n.txt '_' - 1)) acc
-       with _ ->
-         begin
-           Format.fprintf Format.str_formatter "old_name %s %a\n"
-             old_name.txt Location.print old_name.loc;
-           List.iter (fun n -> Format.fprintf Format.str_formatter
-               "new name %s %a\n" n.txt Location.print n.loc) acc;
-           failwith (Format.flush_str_formatter ())
-         end
-     in
-     (new_name, acc)                       (* don't bother removing from acc*)
-   end
-   else match acc with
-   | h::t -> (h,t)
-   | _    -> assert false
- in
- let (desc,acc) = match pat.ppat_desc with
-  | Ppat_any as x -> (x,acc)
-  | Ppat_var old_name ->
-      let (new_name,acc) = subst old_name acc in (Ppat_var new_name,acc)
-  | Ppat_alias (p,old_name) ->
-     let (p,acc) = pattern_subst ~by_name acc p in
-     let (new_name,acc) = subst old_name acc in
-     (Ppat_alias (p,new_name),acc)
-  | Ppat_constant _ as x -> (x,acc)
-  | Ppat_tuple pl ->
-      let (pl,acc) = map_accum (pattern_subst ~by_name) acc pl in
-      (Ppat_tuple pl,acc)
-  | Ppat_construct (_,None) as x -> (x,acc)
-  | Ppat_construct (lid,Some p) ->
-     let (p,acc) = pattern_subst ~by_name acc p in
-     (Ppat_construct (lid,Some p),acc)
-  | Ppat_variant (_,None) as x -> (x,acc)
-  | Ppat_variant (l,Some p) ->
-     let (p,acc) = pattern_subst ~by_name acc p in
-     (Ppat_variant (l,Some p),acc)
-  | Ppat_record (pl,cf) ->
-      let (pl,acc) = map_accum (fun acc (l,p) ->
-          let (p,acc) = pattern_subst ~by_name acc p in ((l,p),acc)) acc pl in
-      (Ppat_record (pl,cf),acc)
-  | Ppat_array pl ->
-      let (pl,acc) = map_accum (pattern_subst ~by_name) acc pl in
-      (Ppat_array pl,acc)
-  | Ppat_or (p1,p2) ->
-     let (p1,acc') = pattern_subst ~by_name acc p1 in
-     let (p2,_)   = pattern_subst ~by_name:true acc p2 in
-     (Ppat_or (p1,p2), acc')
-  | Ppat_constraint (p,cty) ->
-     let (p,acc) = pattern_subst ~by_name acc p in
-     (Ppat_constraint (p,cty), acc)
-  | Ppat_type _ as x -> (x,acc)
-  | Ppat_lazy p ->
-     let (p,acc) = pattern_subst ~by_name acc p in
-     (Ppat_lazy p, acc)
-  | Ppat_unpack _ as x -> (x,acc)
-  | _ -> assert false (* we do not create other forms of Ppat *)
- in
- ({pat with ppat_desc = desc}, acc)
-
-let pattern_subst_list :
-    string loc list -> Parsetree.pattern list ->
-     Parsetree.pattern list * string loc list = fun acc pl ->
- map_accum (pattern_subst ~by_name:false) acc pl
-
-(* Build the fresh variable name for cases and build the Parsetree
-   case list
-   We implicitly assume that all variables bound by patterns in any clause
-   scopes over all clauses. That seems like a wild assumption: for example,
-   in
-     function | x -> e1 | y -> e2
-   the variable x should scope only over e1 rather than also over e2.
-   However, this wild scoping is no problem: recall that we process
-   the Typedtree, and the type checker already determined the scoping.
-   In the type-checked example
-     let x = 1 in
-     function | x -> e1 | y -> x + 2
-   the variables are represented not just by their names but by their Path,
-   which contains the unique timestamp. Therefore, we are actually dealing with
-     let x/1 = 1 in
-     function | x/2 -> e1 | y/3 -> x/1 + 2
-   Therefore, if we make x/2 also scope over the second clause, that is
-   harmless.
-   Because of such scoping rules, prepare_cases is also useful
-   for processing letrec.
-*)
-let prepare_cases : Location.t ->
-  string loc heap ->     (* extra free variables used in continuation *)
-  (* The following argument is a pair: a pattern list for the clauses
-     of the function, and the list of names of bound variables, in order.
-  *)
-  (Parsetree.pattern list * string loc list) ->
-  (* The following function returns the list of pairs of guards and bodies,
-     for each clause of the function
-   *)
-  (expr_repr list -> (expr_repr option * expr_repr) list) ->
-  (* The continuation *)
-  (Parsetree.case list -> Parsetree.expression) -> expr_repr =
-  fun loc evars (pats,old_names) fgbodies k ->
-    let tr loc (eo,e) =
-        let (eo,vo)        = validate_vars_option loc eo in
-        let Code (vars,e)  = validate_vars loc e in
-        ((eo,e),merge vo vars) in
-    let (names,vars,egbodies) =
-         with_binding_region_gen loc old_names tr fgbodies in
-    let pats =
-      if names = [] then pats else
-      let (pats,acc) = pattern_subst_list names pats in
-      assert (acc = []); pats
-    in
-    Code(merge evars vars,
-         k @@ List.map2 (fun p (eo,e) -> {pc_lhs=p;pc_guard=eo;pc_rhs=e})
-              pats egbodies)
 
 module Vb = struct
   let mk loc p e =
     {pvb_pat = p;pvb_expr = e;pvb_loc = loc;pvb_attributes = [];}
 end
 
-(* Exression builders *)
 module Expr = struct
 
-  let mk loc d =
-    {pexp_desc = d; pexp_loc = loc; pexp_attributes = []}
+  (* The representation of the possibly open code: AST plus the
+     set of free identifiers, annotated with the related marks
+  *)
+  type t = Var.t Heap.t * Parsetree.expression
 
-  let let_ ?loc ?attrs a b c = mk ?loc ?attrs (Pexp_let (a, b, c))
+  (* Check that the code is closed and return the closed code *)
+  module Closed = struct
 
+    (* The closed code is AST *)
+    type t = Parsetree.expression
 
-  let let_simple loc name e fbody = mk ?loc ?attrs (Pexp_let (a, b, c))
-    let (name, vars1, ebody) = with_binding_region loc old_name fbody in
-    let (vars2, e) = validate_vars loc e in
-    let pat = Pat.var name.loc name in
-    let vb = Vb.mk loc pat e in
-    (merge vars1 vars2, mk loc Pexp_let (Nonrecursive, [vb], ebody))
+    (* The same as close_code but return the closedness check as a thunk
+       rather than performing it.
+       This is useful for debugging and for showing the code
+    *)
+    let close_delay_check (heap, exp) =
+        match Heap.choose heap with
+        | None -> (exp, fun () -> ())
+        | Some var ->
+          (exp, fun () ->
+            let txt = Var.txt var in
+            let loc = Var.loc var in
+            Format.fprintf Format.str_formatter
+            "The code built at %a is not closed: \
+             identifier %s bound at %a is free"
+            Location.print ast.pexp_loc txt Location.print loc;
+            failwith (Format.flush_str_formatter ()))
 
-  let fun_nonbinding loc label pat body =
-    let (vars, c) = validate_vars loc c in
-    (vars, mk loc (Pexp_fun (label, None, pat, body))
+    let close expr =
+      let (t, check) = close_delay_check expr in
+      check (); ast
 
-  let fun_simple loc label name fbody =
-    let (name, vars, ebody) = with_binding_region loc name fbody in
-    let pat = Pat.var name.loc name in
-    (vars, mk loc (Pexp_fun (label, None, pat, ebody))
+    let open_ t =
+      (Heap.empty, t)
 
-  let fun_ loc label pat names fbody =
-    let (names, vars, ebody) = with_binding_regions loc names fbody in
-    let pat, _ = pattern_subst names pat in
-    (vars, (Pexp_function(label, None, pat, ebody)))
+  end
 
-  let function_nonbinding loc pats exps =
-    let cases = List.combine pats exps in
+  let mk loc desc =
+    { pexp_loc = loc; pexp_desc = desc; pexp_attributes = [] }
+
+  let var loc var =
+    let (heap, var) = Var.Exp.use var in
+    let lid = { var with txt = Longident.Lident var.txt } in
+    let exp = mk loc (Pexp_ident lid) in
+      (heap, exp)
+
+  let ident loc lid =
+    let heap = Heap.empty in
+    let exp = mk loc (Pexp_ident lid) in
+      (heap, exp)
+
+  let constant loc const =
+    let heap = Heap.empty in
+    let exp = mk loc (Pexp_constant const) in
+      (heap, exp)
+
+  let let_simple loc name (heap1, exp1) f2 =
+    Var.Exp.validate loc heap1 exp1;
+    let (pat, heap2, exp2) = Var.with_simple_binding loc name f2 in
+    let heap = Var.Exp.merge heap1 exp1 heap2 exp2 in
+    let vb1 = Vb.mk loc pat exp1 in
+    let exp = mk loc (Pexp_let(Nonrecursive, [vb1], exp2)) in
+      (heap, exp)
+
+  let let_rec_simple loc name f =
+    Var.Exp.validate loc heap1 exp1;
+    let (heap, pat_exp, body) = Var.with_simple_rec_bindings loc name f2 in
+    let vbs = List.map (fun (pat, exp) -> Vb.mk loc pat exp) in
+    let exp = mk loc (Pexp_let(Recursive, vbs, body)) in
+      (heap, exp)
+
+  let let_ loc names (heap1, exp1) f2 =
+    Var.Exp.validate loc heap1 exp1;
+    let (pat, heap2, exp2) = Var.with_bindings loc names f2 in
+    let heap = Var.Exp.merge heap1 exp1 heap2 exp2 in
+    let vb1 = Vb.mk loc pat exp1 in
+    let exp = mk loc (Pexp_let(Nonrecursive, [vb1], exp2)) in
+      (heap, exp)
+
+  let fun_nonbinding loc label (map, pat) (heap, exp) =
+    Var.Pat.nonbinding loc map1 pat;
+    Var.Exp.validate loc heap exp;
+    let exp = mk loc (Pexp_fun (label, None, pat, exp) in
+    (heap, exp)
+
+  let fun_simple loc name label f =
+    let (pat, heap, exp) = Var.with_simple_binding loc name f in
+    (heap, mk loc (Pexp_fun (label, None, pat, exp))
+
+  let fun_ loc names label expo1 f2 =
+    Var.Exp.validate_option loc expo1;
+    let (heap1, expo1) = Var.Exp.merge_option loc expo1 in
+    let (pat, heap2, exp2) = Var.with_bindings loc names f2 in
+    let heap = Heap.merge heap1 heap2 in
+    (heap, (Pexp_fun(label, expo1, pat, exp2)))
+
+  let function_nonbinding loc cases =
+    let cases =
+      List.map
+        (fun ((map, pat), expo, (heap, exp)) ->
+          Var.Pat.nonbinding loc map pat;
+          Var.Exp.validate_option loc expo;
+          Var.Exp.validate loc heap exp;
+          
+                 
+        )
+      cases
+    in
     let (vars, cases) =
       map_merge
         (fun loc (p, (eo, e)) ->
@@ -704,59 +909,3 @@ module Expr = struct
     (vars, mk loc (Pexp_escape a))
 
 end
-
-(* Build the general let-Parsetree (like the fun-Parsetree) *)
-let build_let :
-  Location.t -> bool ->
-  (Parsetree.pattern list * string loc list) ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr =
-  fun loc recf pon fgbodies ->
-  prepare_cases loc Nil pon fgbodies @@ function
-    | [] | [_] -> assert false
-      (* The first case is the pseudo-case for the let body *)
-    | {pc_guard=None; pc_rhs=ebody} :: cases ->
-        Ast_helper.Exp.let_ ~loc (if recf then Recursive else Nonrecursive)
-          (List.map (function
-            | {pc_lhs;pc_guard=None;pc_rhs} ->
-                Ast_helper.Vb.mk ~loc:pc_lhs.ppat_loc pc_lhs pc_rhs
-            | _ -> assert false)
-           cases)
-         ebody
-    | _ -> assert false
-
-(* build match and try: both are very similar and similar to build_fun *)
-let build_match :
-  Location.t -> (Parsetree.pattern list * string loc list) -> expr_repr ->
-  int ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr =
-  fun loc pon ec nregular fgbodies ->
-    let Code (evars,exp) = validate_vars loc ec in
-    let split : int -> 'a list -> 'a list * 'a list = fun n lst ->
-      let rec loop n acc lst = match (n,lst) with
-      | (0,lst)  -> (List.rev acc,lst)
-      | (n,h::t) -> loop (n-1) (h::acc) t
-      | _        -> assert false
-      in loop n [] lst
-    in
-    prepare_cases loc evars pon fgbodies @@ fun cases ->
-      Ast_helper.Exp.match_ ~loc exp
-      (let (rc,ec) = split nregular cases in
-       rc @ List.map
-          (fun c ->
-            let pat = {c.pc_lhs with ppat_desc = Ppat_exception c.pc_lhs}
-            in {c with pc_lhs = pat}) ec)
-
-
-(* Essentially the same as build_match.
-   TODO: implement the same check on the timestamp of the expression to try
-*)
-let build_try :
-  Location.t -> (Parsetree.pattern list * string loc list) -> expr_repr ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr =
-  fun loc pon ec fgbodies ->
-    let Code (evars,exp) = validate_vars loc ec in
-    prepare_cases loc evars pon fgbodies @@ fun cases ->
-      Ast_helper.Exp.try_ ~loc exp cases
-
-
-let dyn_fail _ = failwith "CSP on local identifier"
