@@ -509,7 +509,7 @@ end = struct
 end
 
 (* ------------------------------------------------------------------------ *)
-(* Representation of patterns *)
+(* Representation of cases *)
 
 module CaseRepr : sig
 
@@ -598,16 +598,6 @@ end = struct
         let pat = bind var in
         (Heap.remove prio heap, pat, exp))
 
-  let multiple loc names f =
-    Stackmark.region
-      (fun mark ->
-        let prio = Priority.fresh () in
-        let vars = List.map (gensym mark prio) names in
-        let exp = f vars in
-        let heap, exp = ExpRepr.merge loc Heap.empty expr;
-        let pats = List.map bind vars in
-        (Heap.remove prio heap, pats, exp))
-
   let pair_binding_error loc npats nexps =
     Format.fprintf Format.str_formatter
       "Binding at %a has %d patterns but %d expressions"
@@ -672,7 +662,25 @@ module Constant = struct
 
   type t = constant
 
-  let unmarshal str : t = Marshal.from_string str
+  let unmarshal (s : string) : t = Marshal.from_string s
+
+end
+
+module Ident = struct
+
+  type t = Longident.t
+
+  let unmarshal (s : string) : t = Marshal.from_string s
+
+end
+
+module Label = struct
+
+  type t = string
+
+  let none = ""
+
+  let of_string (s : string) : t = s
 
 end
 
@@ -718,6 +726,7 @@ module Pat = struct
       mk loc map (Ppat_variant(label, pato))
 
   let record loc patl closed =
+    let closed = if closed then Asttypes.Closed else Asttype.Open in
     let map, patl = accum_alist merge loc Map.empty patl in
       mk loc map (Ppat_record(patl, closed))
 
@@ -822,8 +831,8 @@ module Exp = struct
     let vb = mk_vb loc pat def in
       mk loc heap (Pexp_let(Nonrecursive, [vb], body))
 
-  let let_rec_simple loc name f =
-    let heap, defs, body = Binding.recursive loc name f in
+  let let_rec_simple loc names f =
+    let heap, defs, body = Binding.recursive loc names f in
     let vbs = List.map (fun (pat, exp) -> Vb.mk loc pat exp) defs in
       mk loc heap (Pexp_let(Recursive, vbs, body))
 
@@ -909,6 +918,7 @@ module Exp = struct
       mk loc heap (Pexp_sequence(exp1.exp, exp2))
 
   let for_nonbinding loc pat low high dir body =
+    let dir = if dir then Asttypes.Upto else Asttype.Downto in
     let pat = PatRepr.nonbinding loc pat in
     let heap, low = merge loc Heap.empty low in
     let heap, high = merge loc heap high in
@@ -916,6 +926,7 @@ module Exp = struct
       mk loc heap (Pexp_for (pat, low.exp, high, dir, body))
 
   let for_simple loc name low high dir f =
+    let dir = if dir then Asttypes.Upto else Asttype.Downto in
     let heap, pat, body = Binding.simple loc name f in
     let heap, low = merge loc heap low in
     let heap, high = merge loc heap, high in
@@ -934,14 +945,15 @@ module Exp = struct
       mk loc heap (Pexp_lazy exp)
 
   let open_ loc ovr lid exp =
+    let ovr = if ovr then Asttypes.Override else Asttype.Fresh in
     let heap, exp = merge loc Heap.empty exp in
       mk loc heap (Pexp_open(ovr, lid, exp))
 
-  let quote loc a =
+  let quote loc exp =
     let heap, exp = merge loc Heap.empty exp in
       mk loc heap (Pexp_quote exp)
 
-  let escape loc a =
+  let escape loc exp =
     let heap, exp = merge loc Heap.empty exp in
       mk loc heap (Pexp_escape exp)
 

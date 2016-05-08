@@ -1,99 +1,173 @@
 
-(* The representation of possibly open expressions *)
-type expr_repr
+module Var : sig
 
-(* The representation of closed expressions *)
-type closed_expr_repr
+  type t
 
-val open_expr : closed_expr_repr -> expr_repr
+  val name : t -> string loc
 
-val loc_none : Location.t
+  val txt : t -> string
 
-val sample_lid  : Longident.t Location.loc
+  val loc : t -> Location.t
 
-val sample_name : string Location.loc
+end
 
-val sample_pat_list : Parsetree.pattern list
+module Loc : sig
 
-val sample_pats_names : Parsetree.pattern list * string Location.loc list
+  type t
 
-val assert_   : Location.t -> expr_repr -> expr_repr
+  val none : t
 
-val lazy_     : Location.t -> expr_repr -> expr_repr
+  val unmarshal : string -> t
 
-val quote    : Location.t -> expr_repr -> expr_repr
+end
 
-val escape   : Location.t -> expr_repr -> expr_repr
+module Constant : sig
 
-val sequence : Location.t -> expr_repr -> expr_repr -> expr_repr
+  type t
 
-val while_    : Location.t -> expr_repr -> expr_repr -> expr_repr
+  val unmarshal : string -> t
 
-val apply : Location.t -> (Asttypes.label * expr_repr) array -> expr_repr
+end
 
-val tuple : Location.t -> expr_repr array -> expr_repr
+module Ident : sig
 
-val array : Location.t -> expr_repr array -> expr_repr
+  type t
 
-val if_ :
-  Location.t -> expr_repr -> expr_repr -> expr_repr option -> expr_repr
+  val unmarshal : string -> t
 
-val construct  :
-  Location.t -> Longident.t Location.loc -> expr_repr array -> expr_repr
+end
 
-val record :
-  Location.t -> (Longident.t Location.loc * expr_repr) array ->
-  expr_repr option -> expr_repr
+module Label : sig
 
-val field :
-  Location.t -> expr_repr -> Longident.t Location.loc -> expr_repr
+  type t
 
-val setfield :
-  Location.t -> expr_repr -> Longident.t Location.loc -> expr_repr -> expr_repr
+  val none : t
 
-val variant  : Location.t -> string -> expr_repr option -> expr_repr
+  val of_string : string -> t
 
-val send     : Location.t -> expr_repr -> string -> expr_repr
+end
 
-val open_ :
-  Location.t -> Longident.t Location.loc -> Asttypes.override_flag ->
-  expr_repr -> expr_repr
+module Pat : sig
 
-val fun_nonbinding :
-  Location.t -> string -> Parsetree.pattern list ->
-  (expr_repr option * expr_repr) array -> expr_repr
+  type t
 
-val fun_simple :
-  Location.t -> string -> string Location.loc ->
-  (expr_repr -> expr_repr) -> expr_repr
+  val any : Loc.t -> t
 
-val for_ :
-  Location.t -> string Location.loc -> expr_repr -> expr_repr ->
-  bool -> (expr_repr -> expr_repr) -> expr_repr
+  val var : Loc.t -> Var.t -> t
 
-val let_simple_nonrec :
-  Location.t -> string Location.loc -> expr_repr ->
-    (expr_repr -> expr_repr) -> expr_repr
+  val alias : Loc.t -> t -> Var.r -> t
 
-val fun_ :
-  Location.t -> string ->
-  (Parsetree.pattern list * string Location.loc list) ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr
+  val constant : Loc.t -> Constant.t -> t
 
-val let_ :
-  Location.t -> bool ->
-  (Parsetree.pattern list * string Location.loc list) ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr
+  val interval : Loc.t -> Constant.t -> Constant.t -> t
 
-val match_ :
-  Location.t -> (Parsetree.pattern list * string Location.loc list) ->
-  expr_repr -> int ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr
+  val tuple : Loc.t -> t list -> t
 
-val try_ :
-  Location.t -> (Parsetree.pattern list * string Location.loc list) ->
-  expr_repr ->
-  (expr_repr array -> (expr_repr option * expr_repr) array) -> expr_repr
+  val construct : Loc.t -> Ident.t -> t option -> t
 
-(* TODO: remove this when no longer needed. *)
-val dyn_fail  : unit -> 'a
+  val variant : Loc.t -> Label.t -> t optiont -> t
+
+  val record : Loc.t -> t list -> bool -> t
+
+  val array : Loc.t -> t list -> t
+
+  val or_ : Loc.t -> t -> t -> t
+
+  val type_ : Loc.t -> Ident.t -> t
+
+  val lazy_ : Loc.t -> t -> t
+
+  val exception_ : Loc.t -> t -> t
+
+end
+
+module rec Case : sig
+
+  type t
+
+  val nonbinding : Loc.t -> Pat.t -> Exp.t option -> Exp.t -> t
+
+  val binding :
+    Loc.t -> string list -> (Var.t list -> Pat.t * Exp.t option * Exp.t) -> t
+
+end
+
+and module Exp : sig
+
+  type t
+
+  module Closed : sig
+
+    type t
+
+    val close_delay_check exp
+
+    val close exp
+
+    val open_ exp
+
+  end
+
+  val var : Loc.t -> Var.t -> t
+
+  val ident : Loc.t -> Ident.t -> t
+
+  val constant : Loc.t -> Constant.t -> t
+
+  val let_simple : Loc.t -> string -> t -> (Var.t -> t) -> t
+
+  val let_rec_simple : Loc.t -> string list -> (Var.t list -> t list * t) -> t
+
+  val let_ : Loc.t -> string -> t -> (Var.t -> Pat.t * t) -> t
+
+  val fun_nonbinding : Loc.t -> Label.t -> Pat.t -> t -> t
+
+  val fun_simple : Loc.t -> string -> Label.t -> t option -> (Var.t -> t) -> t
+
+  val fun_ :
+    Loc.t -> string list -> Label.t -> t option ->
+    (Var.t list -> Pat.t -> t) -> t
+
+  val function_ : Loc.t -> Case.t list -> t
+
+  val apply : Loc.t -> t -> t list -> t
+
+  val match_ : Loc.t -> t -> Case.t list -> t
+
+  val try_ : Loc.t -> t -> Case.t list -> t
+
+  val tuple : Loc.t -> t list -> t
+
+  val construct : Loc.t -> Ident.t -> t option -> t
+
+  val variant : Loc.t -> Label.t -> t option -> t
+
+  val record : Loc.t -> (Ident.t * t) list -> t -> t
+
+  val field : Loc.t -> t -> Ident.t -> t
+
+  val setfield : Loc.t -> t -> Ident.t -> t -> t
+
+  val array : Loc.t -> t list -> t
+
+  val ifthenelse : Loc.t -> t -> t -> t -> t
+
+  val sequence : Loc.t -> t -> t -> t
+
+  val for_nonbinding : Loc.t -> Pat.t -> t -> t -> bool -> t -> t
+
+  val for_simple : Loc.t -> string -> t -> t -> bool -> (Var.t -> t) -> t
+
+  val send : Loc.t -> t -> Label.t -> t
+
+  val assert_ : Loc.t -> t -> t
+
+  val lazy_ : Loc.t -> t -> t
+
+  val open_ : Loc.t -> bool -> Ident.t -> t -> t
+
+  val quote : Loc.t -> t -> t
+
+  val escape : Loc.t -> t -> t
+
+end
