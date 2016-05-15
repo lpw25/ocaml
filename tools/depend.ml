@@ -194,6 +194,8 @@ let rec add_expr bv exp =
   | Pexp_newtype (_, e) -> add_expr bv e
   | Pexp_pack m -> add_module bv m
   | Pexp_open (_ovf, m, e) -> open_module bv m.txt; add_expr bv e
+  | Pexp_quote e -> add_expr bv e
+  | Pexp_escape e -> add_expr bv e
   | Pexp_extension _ -> ()
 
 and add_cases bv cases =

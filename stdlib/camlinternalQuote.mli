@@ -1,16 +1,4 @@
 
-module Var : sig
-
-  type t
-
-  val name : t -> string loc
-
-  val txt : t -> string
-
-  val loc : t -> Location.t
-
-end
-
 module Loc : sig
 
   type t
@@ -18,6 +6,24 @@ module Loc : sig
   val none : t
 
   val unmarshal : string -> t
+
+end
+
+module Name : sig
+
+  type t
+
+  val mk : string -> Loc.t -> t
+
+  val unmarshal : string -> t
+
+end
+
+module Var : sig
+
+  type t
+
+  val name : t -> Name.t
 
 end
 
@@ -55,7 +61,7 @@ module Pat : sig
 
   val var : Loc.t -> Var.t -> t
 
-  val alias : Loc.t -> t -> Var.r -> t
+  val alias : Loc.t -> t -> Var.t -> t
 
   val constant : Loc.t -> Constant.t -> t
 
@@ -65,9 +71,9 @@ module Pat : sig
 
   val construct : Loc.t -> Ident.t -> t option -> t
 
-  val variant : Loc.t -> Label.t -> t optiont -> t
+  val variant : Loc.t -> Label.t -> t option -> t
 
-  val record : Loc.t -> t list -> bool -> t
+  val record : Loc.t -> (Ident.t * t) list -> bool -> t
 
   val array : Loc.t -> t list -> t
 
@@ -88,25 +94,13 @@ module rec Case : sig
   val nonbinding : Loc.t -> Pat.t -> Exp.t option -> Exp.t -> t
 
   val binding :
-    Loc.t -> string list -> (Var.t list -> Pat.t * Exp.t option * Exp.t) -> t
+    Loc.t -> Name.t list -> (Var.t list -> Pat.t * Exp.t option * Exp.t) -> t
 
 end
 
-and module Exp : sig
+and Exp : sig
 
   type t
-
-  module Closed : sig
-
-    type t
-
-    val close_delay_check exp
-
-    val close exp
-
-    val open_ exp
-
-  end
 
   val var : Loc.t -> Var.t -> t
 
@@ -114,23 +108,23 @@ and module Exp : sig
 
   val constant : Loc.t -> Constant.t -> t
 
-  val let_simple : Loc.t -> string -> t -> (Var.t -> t) -> t
+  val let_simple : Loc.t -> Name.t -> t -> (Var.t -> t) -> t
 
-  val let_rec_simple : Loc.t -> string list -> (Var.t list -> t list * t) -> t
+  val let_rec_simple : Loc.t -> Name.t list -> (Var.t list -> t list * t) -> t
 
-  val let_ : Loc.t -> string -> t -> (Var.t -> Pat.t * t) -> t
+  val let_ : Loc.t -> Name.t list -> t -> (Var.t list -> Pat.t * t) -> t
 
   val fun_nonbinding : Loc.t -> Label.t -> Pat.t -> t -> t
 
-  val fun_simple : Loc.t -> string -> Label.t -> t option -> (Var.t -> t) -> t
+  val fun_simple : Loc.t -> Name.t -> Label.t -> t option -> (Var.t -> t) -> t
 
   val fun_ :
-    Loc.t -> string list -> Label.t -> t option ->
-    (Var.t list -> Pat.t -> t) -> t
+    Loc.t -> Name.t list -> Label.t -> t option ->
+    (Var.t list -> Pat.t * t) -> t
 
   val function_ : Loc.t -> Case.t list -> t
 
-  val apply : Loc.t -> t -> t list -> t
+  val apply : Loc.t -> t -> (Label.t * t) list -> t
 
   val match_ : Loc.t -> t -> Case.t list -> t
 
@@ -142,7 +136,7 @@ and module Exp : sig
 
   val variant : Loc.t -> Label.t -> t option -> t
 
-  val record : Loc.t -> (Ident.t * t) list -> t -> t
+  val record : Loc.t -> (Ident.t * t) list -> t option -> t
 
   val field : Loc.t -> t -> Ident.t -> t
 
@@ -150,13 +144,13 @@ and module Exp : sig
 
   val array : Loc.t -> t list -> t
 
-  val ifthenelse : Loc.t -> t -> t -> t -> t
+  val ifthenelse : Loc.t -> t -> t -> t option -> t
 
   val sequence : Loc.t -> t -> t -> t
 
   val for_nonbinding : Loc.t -> Pat.t -> t -> t -> bool -> t -> t
 
-  val for_simple : Loc.t -> string -> t -> t -> bool -> (Var.t -> t) -> t
+  val for_simple : Loc.t -> Name.t -> t -> t -> bool -> (Var.t -> t) -> t
 
   val send : Loc.t -> t -> Label.t -> t
 
@@ -169,5 +163,17 @@ and module Exp : sig
   val quote : Loc.t -> t -> t
 
   val escape : Loc.t -> t -> t
+
+  module Closed : sig
+
+    type exp = t
+
+    type t
+
+    val close : exp -> t
+
+    val open_ : t -> exp
+
+  end
 
 end

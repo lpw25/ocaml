@@ -323,7 +323,7 @@ and expression_desc =
   | Pexp_extension of extension
         (* [%id] *)
 
-and case =   (* (P -> E) or (P when E0 -> E) *)
+and case = (* (P -> E) or (P when E0 -> E) *)
     {
      pc_lhs: pattern;
      pc_guard: expression option;

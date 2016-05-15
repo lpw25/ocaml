@@ -1,7 +1,48 @@
+open CamlinternalAST
+
+(* ------------------------------------------------------------------------ *)
+(* Monomorphic versions of the types from CamlinernalAST, using abstract
+   types for the type parameters. *)
+
+type abstract_attribute
+type abstract_core_type
+type abstract_module_expr
+type abstract_class_structure
+
+type expression =
+  (abstract_attribute,
+   abstract_core_type,
+   abstract_module_expr,
+   abstract_class_structure) CamlinternalAST.expression
+
+type expression_desc =
+  (abstract_attribute,
+   abstract_core_type,
+   abstract_module_expr,
+   abstract_class_structure) CamlinternalAST.expression_desc
+
+type pattern =
+  (abstract_attribute,
+   abstract_core_type,
+   abstract_module_expr,
+   abstract_class_structure) CamlinternalAST.pattern
+
+type pattern_desc =
+  (abstract_attribute,
+   abstract_core_type,
+   abstract_module_expr,
+   abstract_class_structure) CamlinternalAST.pattern_desc
+
+type case =
+  (abstract_attribute,
+   abstract_core_type,
+   abstract_module_expr,
+   abstract_class_structure) CamlinternalAST.case
+
 (* ------------------------------------------------------------------------ *)
 (* Accumulating maps over common structures *)
 
-let accum_opt f loc acc o =
+let accum_option f loc acc o =
   match o with
   | None -> (acc, None)
   | Some x ->
@@ -13,7 +54,7 @@ let rec accum_list f loc acc l =
   | [] -> (acc, [])
   | x :: rest ->
       let acc, x = f loc acc x in
-      let acc, rest = accum_list loc f acc rest in
+      let acc, rest = accum_list f loc acc rest in
         (acc, x :: rest)
 
 let rec accum_alist f loc acc l =
@@ -21,7 +62,7 @@ let rec accum_alist f loc acc l =
   | [] -> (acc, [])
   | (k, x) :: rest ->
       let acc, x = f loc acc x in
-      let acc, rest = accum_alist loc f acc rest in
+      let acc, rest = accum_alist f loc acc rest in
         (acc, (k, x) :: rest)
 
 (* ------------------------------------------------------------------------ *)
@@ -272,6 +313,56 @@ end = struct
 end
 
 (* ------------------------------------------------------------------------ *)
+(* Representation of locations *)
+
+module Loc = struct
+
+  type t = location
+
+  let none =
+    let loc =
+      { Lexing.pos_fname = "_none_";
+        pos_lnum = 1;
+        pos_bol = 0;
+        pos_cnum = -1; }
+    in
+      { loc_start = loc; loc_end = loc; loc_ghost = true }
+
+  let unmarshal (s : string) : t =
+    Marshal.from_string s (String.length s)
+
+  let print ppf { loc_start; loc_end } =
+    let open Lexing in
+    if loc_start.pos_fname = "//toplevel//" then begin
+      Format.fprintf ppf "Characters %i-%i"
+        loc_start.pos_cnum loc_end.pos_cnum
+    end else begin
+      let startchar = loc_start.pos_cnum - loc_start.pos_bol in
+      let endchar = loc_end.pos_cnum - loc_start.pos_cnum + startchar in
+      Format.fprintf ppf "File \"%s\", line %i"
+        loc_start.pos_fname loc_start.pos_lnum;
+      if startchar >= 0 then
+        Format.fprintf ppf ", characters %i-%i"
+          startchar endchar
+    end
+
+end
+
+(* ------------------------------------------------------------------------ *)
+(* Representation of names *)
+
+module Name = struct
+
+  type t = string loc
+
+  let mk txt loc = { txt; loc }
+
+  let unmarshal s : t =
+    Marshal.from_string s (String.length s)
+
+end
+
+(* ------------------------------------------------------------------------ *)
 (* Representation of bound variables *)
 
 module Var : sig
@@ -280,28 +371,26 @@ module Var : sig
 
   val generate : Stackmark.t -> Priority.t -> string loc -> t
 
-  val relocate : t -> Location.t -> t
+  val relocate : t -> Loc.t -> t
 
   val name : t -> string loc
 
   val txt : t -> string
 
-  val loc : t -> Location.t
+  val loc : t -> Loc.t
+
+  val symbol : t -> Symbol.t
 
   val heap : t -> t Heap.t
 
   val map : t -> t Map.t
 
-  val expression_desc : t -> Parsetree.expression_desc
-
-  val pattern_desc : t -> Parsetree.pattern
-
-  val alias_pattern_desc : Parsetree.pattern -> t -> Parsetree.pattern
+  val valid : t -> bool
 
 end = struct
 
   type t = {
-    name : string Location.loc;
+    name : string loc;
     stackmark : Stackmark.t;
     symbol : Symbol.t;
     priority : Priority.t;
@@ -309,7 +398,7 @@ end = struct
 
   let generate stackmark priority name =
     let symbol = Symbol.fresh () in
-    let txt = var.txt ^ "_" ^ (Symbol.to_string symbol) in
+    let txt = name.txt ^ "_" ^ (Symbol.to_string symbol) in
     let name = {name with txt} in
       { name; stackmark; symbol; priority }
 
@@ -323,9 +412,13 @@ end = struct
 
   let loc t = t.name.loc
 
-  let heap t = Heap.singleton t t.priority
+  let symbol t = t.symbol
 
-  let map t = Map.singleton t t.symbol
+  let heap t = Heap.singleton t.priority t
+
+  let map t = Map.singleton t.symbol t
+
+  let valid t = Stackmark.check t.stackmark
 
 end
 
@@ -336,18 +429,30 @@ module ExpRepr : sig
 
   type t
 
-  val mk : Location.t -> Var.t Heap.t -> Parsetree.expression_desc -> t
+  val mk : Loc.t -> Var.t Heap.t -> expression_desc -> t
 
   (* Verify the free variables of an expression and merge them into a
      heap. *)
   val merge :
-    Location.t -> Var.t Heap.t -> t -> Var.t Heap.t * Parsetree.expression
+    Loc.t -> Var.t Heap.t -> t -> Var.t Heap.t * expression
+
+  module Closed : sig
+
+    type exp = t
+
+    type t
+
+    val close : exp -> t
+
+    val open_ : t -> exp
+
+  end
 
 end  = struct
 
   type t =
     { heap : Var.t Heap.t;
-      exp : Parsetree.expression; }
+      exp : expression; }
 
   let mk loc heap desc =
     let exp =
@@ -357,18 +462,13 @@ end  = struct
     in
       { heap; exp }
 
-  let var _loc v =
-    let heap = Var.heap v in
-    let exp = Var.expression v in
-      { heap; exp }
-
   (* This is a run-time error, rather than a translation-time error *)
   let scope_extrusion_error loc exp name =
     Format.fprintf Format.str_formatter
       "Scope extrusion detected at %a for expression built at %a \
        for the identifier %s bound at %a"
-      Location.print loc Location.print exp.pexp_loc
-      name.txt Location.print name.loc;
+      Loc.print loc Loc.print exp.pexp_loc
+      name.txt Loc.print name.loc;
     failwith (Format.flush_str_formatter ())
 
   (* Check to make sure that free variables in the potentially open
@@ -391,10 +491,44 @@ end  = struct
   let merge loc acc { heap; exp } =
     Heap.iter
       (fun var ->
-        if not (var.stackmark ()) then
-          scope_extrusion_error loc exp var.name)
+        if not (Var.valid var) then
+          scope_extrusion_error loc exp (Var.name var))
       heap;
     (Heap.merge acc heap, exp)
+
+  (* Check that the code is closed and return the closed code *)
+  module Closed = struct
+
+    type exp = t
+
+    (* The closed code is AST *)
+    type t = expression
+
+    (* The same as close_code but return the closedness check as a thunk
+       rather than performing it.
+       This is useful for debugging and for showing the code
+    *)
+    let close_delay_check exp =
+        match Heap.choose exp.heap with
+        | None -> (exp.exp, fun () -> ())
+        | Some var ->
+          (exp.exp, fun () ->
+            Format.fprintf Format.str_formatter
+            "The code built at %a is not closed: \
+             identifier %s bound at %a is free"
+            Loc.print exp.exp.pexp_loc (Var.txt var)
+            Loc.print (Var.loc var);
+            failwith (Format.flush_str_formatter ()))
+
+    let close exp =
+      let exp, check = close_delay_check exp in
+      check (); exp
+
+    let open_ exp =
+      let heap = Heap.empty in
+        { heap; exp }
+
+  end
 
 end
 
@@ -405,31 +539,29 @@ module PatRepr : sig
 
   type t
 
-  val mk : Location.t -> Var.t Map.t -> Parsetree.pattern_desc
+  val mk : Loc.t -> Var.t Map.t -> pattern_desc -> t
 
   (* Validate the free variables of a pattern and merge them into a map
      whilst checking that they are disjoint (used for sub-patterns). *)
-  val merge :
-    Location.t -> Var.t Map.t -> t -> Var.t Map.t * Parsetree.pattern
+  val merge : Loc.t -> Var.t Map.t -> t -> Var.t Map.t * pattern
 
   (* Combine the binding variables of two patterns, checking that they
      are equivalent (used for or-patterns). *)
   val join :
-    Location.t -> t -> t ->
-    Var.t Map.t * Parsetree.pattern * Parsetree.pattern
+    Loc.t -> t -> t -> Var.t Map.t * pattern * pattern
 
   (* Check a pattern binds no variables and return it. *)
-  val nonbinding : Location.t -> t -> Parsetree.pattern
+  val nonbinding : Loc.t -> t -> pattern
 
   (* Check that a pattern binds exactly the given list of variables and
      return it. *)
-  val check_bindings : Location.t -> Var.t list -> t -> Parsetree.pattern
+  val check_bindings : Loc.t -> Var.t list -> t -> pattern
 
 end = struct
 
   type t =
     { map : Var.t Map.t;
-      pat : Parsetree.pattern; }
+      pat : pattern; }
 
   let mk loc map desc =
     let pat =
@@ -443,22 +575,22 @@ end = struct
     Format.fprintf Format.str_formatter
       "Scope extrusion detected at %a for pattern built at %a \
        for the identifier %s"
-      Location.print loc Location.print pat.ppat_loc name.txt;
+      Loc.print loc Loc.print pat.ppat_loc name.txt;
     failwith (Format.flush_str_formatter ())
 
   let duplicate_binding_error loc pat var =
     Format.fprintf Format.str_formatter
        "Duplicate bindings detected at %a for pattern built at %a \
         for the identifier %s already bound at %a"
-      Location.print loc Location.print pat.ppat_loc
-      var.txt Location.print var.loc;
+      Loc.print loc Loc.print pat.ppat_loc
+      (Var.txt var) Loc.print (Var.loc var);
     failwith (Format.flush_str_formatter ())
 
   let merge loc acc { map; pat } =
     Map.iter
       (fun var ->
-        if not (var.stackmark ()) then
-          scope_extrusion_error loc pat var.name)
+        if not (Var.valid var) then
+          scope_extrusion_error loc pat (Var.name var))
       map;
     let duplicate var _ = duplicate_binding_error loc pat var in
     let map = Map.merge duplicate acc map in
@@ -468,8 +600,8 @@ end = struct
     Format.fprintf Format.str_formatter
        "Mismatched bindings detected at %a for patterns built at %a and %a \
         for the identifier %s"
-      Location.print loc Location.print pat1.ppat_loc
-      Location.print pat2.ppat_loc var.txt;
+      Loc.print loc Loc.print pat1.ppat_loc
+      Loc.print pat2.ppat_loc (Var.txt var);
     failwith (Format.flush_str_formatter ())
 
   let join loc {map = map1; pat = pat1} {map = map2; pat = pat2} =
@@ -480,31 +612,30 @@ end = struct
   let unbound_var_error loc pat var =
     Format.fprintf Format.str_formatter
       "Pattern for binding at %a built at %a does not bind the identifier %s"
-      Location.print loc Location.print pat.ppat_loc
-      Location.print occurred var.txt;
+      Loc.print loc Loc.print pat.ppat_loc (Var.txt var);
     failwith (Format.flush_str_formatter ())
 
   let additional_var_error loc pat var =
     Format.fprintf Format.str_formatter
       "Pattern for binding at %a built at %a binds additional identifier %s"
-      Location.print loc Location.print pat.ppat_loc
-      Location.print occurred var.txt;
+      Loc.print loc Loc.print pat.ppat_loc (Var.txt var);
     failwith (Format.flush_str_formatter ())
 
   let nonbinding loc { map; pat } =
     match Map.choose map with
-    | None -> ()
+    | None -> pat
     | Some var -> additional_var_error loc pat var
 
   let check_bindings loc vars { map; pat } =
     let full_map =
       List.fold_left
-        (fun acc var -> Map.add var.symbol var acc)
+        (fun acc var -> Map.add (Var.symbol var) var acc)
         Map.empty vars
     in
     let unbound var = unbound_var_error loc pat var in
     let additional var = additional_var_error loc pat var in
-      Map.same unbound full_map additional map
+    Map.same unbound full_map additional map;
+    pat
 
 end
 
@@ -516,18 +647,16 @@ module CaseRepr : sig
   type t
 
   val mk :
-    Var.t Heap.t -> Parsetree.pattern -> Parsetree.expression option ->
-    Parsetree.expression -> t
+    Var.t Heap.t -> pattern -> expression option -> expression -> t
 
   (* Combine the free variables of two cases. *)
-  val merge :
-    Location.t -> Var.t Heap.t -> t -> Var.t Heap.t * Parsetree.case
+  val merge : Loc.t -> Var.t Heap.t -> t -> Var.t Heap.t * case
 
 end = struct
 
   type t =
     { heap : Var.t Heap.t;
-      case : Parsetree.case; }
+      case : case; }
 
   let mk heap lhs guard rhs =
     let case =
@@ -554,25 +683,23 @@ end
 module Binding : sig
 
   val simple :
-    Location.t -> string loc -> (t -> exp_repr) ->
-    t Heap.t * Parsetree.pattern * Parsetree.expression
+    Loc.t -> string loc -> (Var.t -> ExpRepr.t) ->
+    Var.t Heap.t * pattern * expression
 
   val recursive :
-    Location.t -> string loc list ->
-    (t list -> expr_repr list * expr_repr) ->
-    t Heap.t * (Parsetree.pattern * Parsetree.expression) list
-    * Parsetree.expression
+    Loc.t -> string loc list ->
+    (Var.t list -> ExpRepr.t list * ExpRepr.t) ->
+    Var.t Heap.t * (pattern * expression) list * expression
 
   val pattern :
-    Location.t -> string loc list ->
-    (t list -> pat_repr * exp_repr) ->
-    t Heap.t * Parsetree.pattern * Parsetree.expression
+    Loc.t -> string loc list ->
+    (Var.t list -> PatRepr.t * ExpRepr.t) ->
+    Var.t Heap.t * pattern * expression
 
   val guarded :
-    Location.t -> string loc list ->
-    (t list -> pat_repr * exp_repr option * exp_repr) ->
-    t Heap.t * Parsetree.pattern *
-    Parsetree.expression option * Parsetree.expression
+    Loc.t -> string loc list ->
+    (Var.t list -> PatRepr.t * ExpRepr.t option * ExpRepr.t) ->
+    Var.t Heap.t * pattern * expression option * expression
 
 end = struct
 
@@ -592,16 +719,16 @@ end = struct
     Stackmark.region
       (fun mark ->
         let prio = Priority.fresh () in
-        let var = gensym mark prio name in
+        let var = Var.generate mark prio name in
         let exp = f var in
-        let heap, exp = ExprRepr.merge loc Heap.empty exp;
+        let heap, exp = ExpRepr.merge loc Heap.empty exp in
         let pat = bind var in
-        (Heap.remove prio heap, pat, exp))
+        (Heap.remove heap prio, pat, exp))
 
   let pair_binding_error loc npats nexps =
     Format.fprintf Format.str_formatter
       "Binding at %a has %d patterns but %d expressions"
-      Location.print loc npats nexps;
+      Loc.print loc npats nexps;
     failwith (Format.flush_str_formatter ())
 
   let pair_bindings loc pats exps =
@@ -614,63 +741,59 @@ end = struct
     Stackmark.region
       (fun mark ->
         let prio = Priority.fresh () in
-        let vars = List.map (gensym mark prio) names in
+        let vars = List.map (Var.generate mark prio) names in
         let defs, exp = f vars in
         let heap, defs = accum_list ExpRepr.merge loc Heap.empty defs in
         let heap, exp = ExpRepr.merge loc heap exp in
         let pats = List.map bind vars in
         let pairs = pair_bindings loc pats defs in
-        (Heap.remove prio heap, pairs, exp))
+        (Heap.remove heap prio, pairs, exp))
 
   let pattern loc names f =
     Stackmark.region
       (fun mark ->
         let prio = Priority.fresh () in
-        let vars = List.map (gensym mark prio) names in
+        let vars = List.map (Var.generate mark prio) names in
         let pat, exp = f vars in
         let pat = PatRepr.check_bindings loc vars pat in
         let heap, exp = ExpRepr.merge loc Heap.empty exp in
-        (Heap.remove prio heap, pat, exp))
+        (Heap.remove heap prio, pat, exp))
 
   let guarded loc names f =
     Stackmark.region
       (fun mark ->
         let prio = Priority.fresh () in
-        let vars = List.map (gensym mark prio) names in
+        let vars = List.map (Var.generate mark prio) names in
         let pat, guard, exp = f vars in
         let pat = PatRepr.check_bindings loc vars pat in
         let heap, guard = accum_option ExpRepr.merge loc Heap.empty guard in
         let heap, exp = ExpRepr.merge loc heap exp in
-        (Heap.remove prio heap, pat, guard, exp))
+        (Heap.remove heap prio, pat, guard, exp))
 
 end
 
 (* ------------------------------------------------------------------------ *)
 (* Building Parsetree nodes *)
 
-module Loc = struct
-
-  type t = Location.t
-
-  let none = Location.none
-
-  let unmarshal (s : string) : t = Marshal.from_string s
-
-end
-
 module Constant = struct
 
   type t = constant
 
-  let unmarshal (s : string) : t = Marshal.from_string s
+  let unmarshal (s : string) : t =
+    Marshal.from_string s (String.length s)
 
 end
 
 module Ident = struct
 
-  type t = Longident.t
+  type t = CamlinternalAST.lid CamlinternalAST.loc
 
-  let unmarshal (s : string) : t = Marshal.from_string s
+  let unmarshal (s : string) : t =
+    Marshal.from_string s (String.length s)
+
+  let of_var var =
+    let name = Var.name var in
+    { name with txt = CamlinternalAST.Lident name.txt }
 
 end
 
@@ -705,7 +828,7 @@ module Pat = struct
     let name = Var.name var in
     let map = Var.map var in
     let map, pat = merge loc map pat in
-      mk loc (Ppat_alias(pat, name))
+      mk loc map (Ppat_alias(pat, name))
 
   let constant loc const =
     mk loc Map.empty (Ppat_constant const)
@@ -718,15 +841,17 @@ module Pat = struct
       mk loc map (Ppat_tuple patl)
 
   let construct loc lid pato =
-    let map, pato = accum_opt merge loc Map.empty pato in
+    let map, pato = accum_option merge loc Map.empty pato in
       mk loc map (Ppat_construct(lid, pato))
 
   let variant loc label pato =
-    let map, pato = accum_opt merge loc Map.empty pato in
+    let map, pato = accum_option merge loc Map.empty pato in
       mk loc map (Ppat_variant(label, pato))
 
   let record loc patl closed =
-    let closed = if closed then Asttypes.Closed else Asttype.Open in
+    let closed =
+      if closed then CamlinternalAST.Closed else CamlinternalAST.Open
+    in
     let map, patl = accum_alist merge loc Map.empty patl in
       mk loc map (Ppat_record(patl, closed))
 
@@ -747,7 +872,7 @@ module Pat = struct
 
   let exception_ loc pat =
     let map, pat = merge loc Map.empty pat in
-      mk loc map (Ppat_exception pat.pat)
+      mk loc map (Ppat_exception pat)
 
 end
 
@@ -774,49 +899,18 @@ module Exp = struct
   (* The representation of the possibly open code: AST plus the
      set of free identifiers, annotated with the related marks
   *)
-  type t = ExprRepr.t
+  type t = ExpRepr.t
+
+  module Closed = ExpRepr.Closed
 
   open ExpRepr
-
-  (* Check that the code is closed and return the closed code *)
-  module Closed = struct
-
-    (* The closed code is AST *)
-    type t = Parsetree.expression
-
-    (* The same as close_code but return the closedness check as a thunk
-       rather than performing it.
-       This is useful for debugging and for showing the code
-    *)
-    let close_delay_check exp =
-        match Heap.choose exp.heap with
-        | None -> (exp.exp, fun () -> ())
-        | Some var ->
-          (exp.exp, fun () ->
-            let name = Var.name var in
-            Format.fprintf Format.str_formatter
-            "The code built at %a is not closed: \
-             identifier %s bound at %a is free"
-            Location.print ast.pexp_loc name.txt Location.print name.loc;
-            failwith (Format.flush_str_formatter ()))
-
-    let close exp =
-      let exp, check = close_delay_check exp in
-      check (); exp
-
-    let open_ exp =
-      let heap = Heap.empty in
-        { heap; exp }
-
-  end
 
   let mk_vb loc p e =
     {pvb_pat = p;pvb_expr = e;pvb_loc = loc;pvb_attributes = [];}
 
   let var loc var =
     let heap = Var.heap var in
-    let name = Var.name var in
-    let lid = { name with txt = Longident.Lident name.txt } in
+    let lid = Ident.of_var var in
       mk loc heap (Pexp_ident lid)
 
   let ident loc lid =
@@ -833,7 +927,7 @@ module Exp = struct
 
   let let_rec_simple loc names f =
     let heap, defs, body = Binding.recursive loc names f in
-    let vbs = List.map (fun (pat, exp) -> Vb.mk loc pat exp) defs in
+    let vbs = List.map (fun (pat, exp) -> mk_vb loc pat exp) defs in
       mk loc heap (Pexp_let(Recursive, vbs, body))
 
   let let_ loc names def f =
@@ -845,16 +939,16 @@ module Exp = struct
   let fun_nonbinding loc label pat exp =
     let pat = PatRepr.nonbinding loc pat in
     let heap, exp = merge loc Heap.empty exp in
-      mk loc heap (Pexp_fun (label, None, pat.pat, exp.exp))
+      mk loc heap (Pexp_fun (label, None, pat, exp))
 
   let fun_simple loc name label default f =
     let heap, pat, exp = Binding.simple loc name f in
-    let heap, default = accum_opt merge loc heap default in
+    let heap, default = accum_option merge loc heap default in
       mk loc heap (Pexp_fun (label, default, pat, exp))
 
   let fun_ loc names label default f =
     let heap, pat, exp = Binding.pattern loc names f in
-    let heap, default = accum_opt merge loc heap default in
+    let heap, default = accum_option merge loc heap default in
       mk loc heap (Pexp_fun(label, default, pat, exp))
 
   let function_ loc cases =
@@ -864,7 +958,7 @@ module Exp = struct
   let apply loc fn args =
     let heap, fn = merge loc Heap.empty fn in
     let heap, args = accum_alist merge loc heap args in
-      mk loc heap (Pexp_apply (fn, arg))
+      mk loc heap (Pexp_apply (fn, args))
 
   let match_ loc exp cases =
     let heap, exp = merge loc Heap.empty exp in
@@ -881,16 +975,16 @@ module Exp = struct
       mk loc heap (Pexp_tuple exps)
 
   let construct loc lid argo =
-    let heap, argo = accum_opt merge loc Heap.empty argo in
+    let heap, argo = accum_option merge loc Heap.empty argo in
       mk loc heap (Pexp_construct (lid, argo))
 
   let variant loc label argo =
-    let heap, argo = accum_opt merge loc Heap.empty argo in
+    let heap, argo = accum_option merge loc Heap.empty argo in
       mk loc heap (Pexp_variant (label, argo))
 
   let record loc defs orig =
     let heap, defs = accum_alist merge loc Heap.empty defs in
-    let heap, orig = accum_opt merge loc heap orig in
+    let heap, orig = accum_option merge loc heap orig in
       mk loc heap (Pexp_record (defs, orig))
 
   let field loc rcd lid =
@@ -900,52 +994,54 @@ module Exp = struct
   let setfield loc rcd lid def =
     let heap, rcd = merge loc Heap.empty rcd in
     let heap, def = merge loc heap def in
-      mk loc heap (Pexp_setfield (rcd.exp, lid, def))
+      mk loc heap (Pexp_setfield (rcd, lid, def))
 
   let array loc args =
-    let heap, args = accum_list loc merge Heap.empty args in
+    let heap, args = accum_list merge loc Heap.empty args in
       mk loc heap (Pexp_array args)
 
   let ifthenelse loc cond tr fs =
     let heap, cond = merge loc Heap.empty cond in
     let heap, tr = merge loc heap tr in
-    let heap, fs = accum_opt merge loc heap fs in
-      mk loc heap (Pexp_ifthenelse (cond.exp, tr, fs))
+    let heap, fs = accum_option merge loc heap fs in
+      mk loc heap (Pexp_ifthenelse (cond, tr, fs))
 
   let sequence loc exp1 exp2 =
     let heap, exp1 = merge loc Heap.empty exp1 in
     let heap, exp2 = merge loc heap exp2 in
-      mk loc heap (Pexp_sequence(exp1.exp, exp2))
+      mk loc heap (Pexp_sequence(exp1, exp2))
 
   let for_nonbinding loc pat low high dir body =
-    let dir = if dir then Asttypes.Upto else Asttype.Downto in
+    let dir = if dir then CamlinternalAST.Upto else CamlinternalAST.Downto in
     let pat = PatRepr.nonbinding loc pat in
     let heap, low = merge loc Heap.empty low in
     let heap, high = merge loc heap high in
     let heap, body = merge loc heap body in
-      mk loc heap (Pexp_for (pat, low.exp, high, dir, body))
+      mk loc heap (Pexp_for (pat, low, high, dir, body))
 
   let for_simple loc name low high dir f =
-    let dir = if dir then Asttypes.Upto else Asttype.Downto in
+    let dir = if dir then CamlinternalAST.Upto else CamlinternalAST.Downto in
     let heap, pat, body = Binding.simple loc name f in
     let heap, low = merge loc heap low in
-    let heap, high = merge loc heap, high in
+    let heap, high = merge loc heap high in
       mk loc heap (Pexp_for (pat, low, high, dir, body))
 
   let send loc obj meth =
     let heap, obj = merge loc Heap.empty obj in
-      mk loc (Pexp_send(obj, meth))
+      mk loc heap (Pexp_send(obj, meth))
 
   let assert_ loc exp =
     let heap, exp = merge loc Heap.empty exp in
-      mk loc (Pexp_assert exp)
+      mk loc heap (Pexp_assert exp)
 
   let lazy_ loc exp =
     let heap, exp = merge loc Heap.empty exp in
       mk loc heap (Pexp_lazy exp)
 
   let open_ loc ovr lid exp =
-    let ovr = if ovr then Asttypes.Override else Asttype.Fresh in
+    let ovr =
+      if ovr then CamlinternalAST.Override else CamlinternalAST.Fresh
+    in
     let heap, exp = merge loc Heap.empty exp in
       mk loc heap (Pexp_open(ovr, lid, exp))
 

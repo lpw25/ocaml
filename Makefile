@@ -63,7 +63,6 @@ TYPING=typing/ident.cmo typing/path.cmo \
   typing/mtype.cmo typing/envaux.cmo typing/includecore.cmo \
   typing/typedtreeIter.cmo typing/typedtreeMap.cmo typing/cmt_format.cmo \
   typing/includemod.cmo typing/typetexp.cmo typing/parmatch.cmo \
-  typing/trx.cmo \
   typing/stypes.cmo typing/typecore.cmo \
   typing/typedecl.cmo typing/typeclass.cmo \
   typing/typemod.cmo
