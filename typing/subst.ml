@@ -21,14 +21,16 @@ open Types
 open Btype
 
 type t =
-  { types: (Ident.t, Path.t) Tbl.t;
+  { prefixes: Unit_name.t list;
+    types: (Ident.t, Path.t) Tbl.t;
     modules: (Ident.t, Path.t) Tbl.t;
     modtypes: (Ident.t, module_type) Tbl.t;
     for_saving: bool;
     nongen_level: int }
 
 let identity =
-  { types = Tbl.empty; modules = Tbl.empty; modtypes = Tbl.empty;
+  { prefixes = [];
+    types = Tbl.empty; modules = Tbl.empty; modtypes = Tbl.empty;
     for_saving = false; nongen_level = generic_level }
 
 let add_type id p s = { s with types = Tbl.add id p s.types }
@@ -36,6 +38,8 @@ let add_type id p s = { s with types = Tbl.add id p s.types }
 let add_module id p s = { s with modules = Tbl.add id p s.modules }
 
 let add_modtype id ty s = { s with modtypes = Tbl.add id ty s.modtypes }
+
+let add_prefix uname s = { s with prefixes = uname :: s.prefixes }
 
 let for_saving s = { s with for_saving = true }
 
@@ -65,29 +69,48 @@ let attrs s x =
     then remove_loc.Ast_mapper.attributes remove_loc x
     else x
 
+let ident s id =
+  let rec loop id = function
+    | [] -> id
+    | prefix :: rest ->
+        let id = loop id rest in
+        let uname = Ident.unit_name id in
+        let uname = Unit_name.prefix ~prefix ~uname in
+          Ident.create_unit uname
+  in
+    if Ident.unit id then
+      loop id s.prefixes
+    else id
+
 let rec module_path s = function
-    Pident id as p ->
-      begin try Tbl.find id s.modules with Not_found -> p end
+  | Pident id -> begin
+      match Tbl.find id s.modules with
+      | p -> p
+      | exception Not_found -> Pident (ident s id)
+    end
   | Pdot(p, n, pos) ->
       Pdot(module_path s p, n, pos)
   | Papply(p1, p2) ->
       Papply(module_path s p1, module_path s p2)
 
 let modtype_path s = function
-    Pident id as p ->
-      begin try
-        match Tbl.find id s.modtypes with
-          | Mty_ident p -> p
-          | _ -> fatal_error "Subst.modtype_path"
-      with Not_found -> p end
+  | Pident id -> begin
+      match Tbl.find id s.modtypes with
+      | Mty_ident p -> p
+      | _ -> fatal_error "Subst.modtype_path"
+      | exception Not_found -> Pident (ident s id)
+    end
   | Pdot(p, n, pos) ->
       Pdot(module_path s p, n, pos)
   | Papply _ ->
       fatal_error "Subst.modtype_path"
 
 let type_path s = function
-    Pident id as p ->
-      begin try Tbl.find id s.types with Not_found -> p end
+  | Pident id -> begin
+      match Tbl.find id s.types with
+      | p -> p
+      | exception Not_found -> Pident (ident s id)
+    end
   | Pdot(p, n, pos) ->
       Pdot(module_path s p, n, pos)
   | Papply _ ->
@@ -431,7 +454,8 @@ let merge_tbls f m1 m2 =
      apply (compose s1 s2) x = apply s2 (apply s1 x) *)
 
 let compose s1 s2 =
-  { types = merge_tbls (type_path s2) s1.types s2.types;
+  { prefixes = s2.prefixes @ s1.prefixes;
+    types = merge_tbls (type_path s2) s1.types s2.types;
     modules = merge_tbls (module_path s2) s1.modules s2.modules;
     modtypes = merge_tbls (modtype s2) s1.modtypes s2.modtypes;
     for_saving = s1.for_saving || s2.for_saving;

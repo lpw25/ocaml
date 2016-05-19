@@ -5,8 +5,6 @@ val root : t -> string option
 
 val name : t -> string
 
-val dummy : t
-
 val simple : name:string -> t
 
 val base : root:string -> name:string -> t
@@ -14,6 +12,10 @@ val base : root:string -> name:string -> t
 val project : parent:t -> name:string -> t
 
 val project_or_simple : parent:t -> name:string -> t
+
+val dummy : t
+
+val prefix : prefix:t -> uname:t -> t
 
 val equal : t -> t -> bool
 

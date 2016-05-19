@@ -37,6 +37,19 @@ let dummy =
   { root = None;
     path = Simple "" }
 
+let prefix ~prefix ~uname =
+  match uname.root with
+  | Some _ -> uname
+  | None ->
+      let root = prefix.root in
+      let rec loop = function
+        | Simple name -> ProjectOrSimple(prefix.path, name)
+        | Project(parent, name) -> Project(loop parent, name)
+        | ProjectOrSimple(parent, name) -> ProjectOrSimple(loop parent, name)
+      in
+      let path = loop uname.path in
+      { root; path }
+
 let equal_root r1 r2 =
   match r1, r2 with
   | None, None -> true
