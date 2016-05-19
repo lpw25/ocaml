@@ -65,11 +65,13 @@ let rename_relocation pkgname objfile mapping defined base (rel, ofs) =
           (* PR#5276: unique-ize dotted global names, which appear
              if one of the units being consolidated is itself a packed
              module. *)
-          let uname = Ident.unit_name id in
-          if is_subunit_uname uname then
-            Reloc_getglobal
-              (Ident.create_unit (subunit_uname pkgname uname))
-          else rel
+          if Ident.unit id then begin
+            let uname = Ident.unit_name id in
+            if is_subunit_uname uname then
+              Reloc_getglobal
+                (Ident.create_unit (subunit_uname pkgname uname))
+            else rel
+          end else rel
         end
     | Reloc_setglobal id ->
         begin try

@@ -68,7 +68,7 @@ let implementation ppf sourcefile outputprefix ~backend =
   Compmisc.init_path true;
   let modname = module_of_filename ppf sourcefile outputprefix in
   let uname = Unit_name.simple ~name:modname in
-  Env.set_unit_name modname;
+  Env.set_unit_name uname;
   let env = Compmisc.initial_env() in
   Compilenv.reset ~source_provenance ?packname:!Clflags.for_package modname;
   let cmxfile = outputprefix ^ ".cmx" in
