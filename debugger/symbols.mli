@@ -15,7 +15,7 @@
 (**************************************************************************)
 
 (* Modules used by the program. *)
-val modules : string list ref
+val modules : Unit_name.t list ref
 
 (* Absolute directories containing source code on machine where source was
  * compiled *)
@@ -37,15 +37,15 @@ val event_at_pc : int -> Instruct.debug_event
 val set_event_at_pc : int -> unit
 
 (* List the events in `module'. *)
-val events_in_module : string -> Instruct.debug_event list
+val events_in_module : Unit_name.t -> Instruct.debug_event list
 
 (* First event after the given position. *)
 (* --- Raise `Not_found' if no such event. *)
-val event_at_pos : string -> int -> Instruct.debug_event
+val event_at_pos : Unit_name.t -> int -> Instruct.debug_event
 
 (* Closest event from given position. *)
 (* --- Raise `Not_found' if no such event. *)
-val event_near_pos : string -> int -> Instruct.debug_event
+val event_near_pos : Unit_name.t -> int -> Instruct.debug_event
 
 (* Recompute the current event *)
 val update_current_event : unit -> unit

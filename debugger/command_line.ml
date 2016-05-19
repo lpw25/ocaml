@@ -274,7 +274,10 @@ let instr_dir ppf lexbuf =
       match new_directory' with
       | mdl :: for_keyw :: tl
         when String.lowercase_ascii for_keyw = "for" && List.length tl > 0 ->
-          List.iter (function x -> add_path_for mdl (expand_path x)) tl
+          List.iter
+            (fun x ->
+              add_path_for (Unit_name.of_sting mdl) (expand_path x))
+            tl
       | _ ->
           List.iter (function x -> add_path (expand_path x)) new_directory'
     end;

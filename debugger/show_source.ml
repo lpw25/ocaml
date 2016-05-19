@@ -42,7 +42,7 @@ let show_no_point () =
 
 (* Print the line containing the point *)
 let show_point ev selected =
-  let mdle = ev.ev_module in
+  let mdle = ev.ev_unit_name in
   let before = (ev.ev_kind = Event_before) in
   if !emacs && selected then
     begin try

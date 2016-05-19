@@ -40,7 +40,7 @@ COMPILEROBJS=\
   ../../utils/misc.cmo ../../utils/config.cmo \
   ../../utils/identifiable.cmo ../../utils/numbers.cmo \
   ../../utils/arg_helper.cmo ../../utils/clflags.cmo \
-  ../../utils/tbl.cmo ../../utils/consistbl.cmo \
+  ../../utils/tbl.cmo ../../utils/unit_name.cmo ../../utils/consistbl.cmo \
   ../../utils/terminfo.cmo ../../utils/warnings.cmo \
   ../../parsing/asttypes.cmi \
   ../../parsing/location.cmo ../../parsing/longident.cmo \

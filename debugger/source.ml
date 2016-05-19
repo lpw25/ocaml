@@ -63,12 +63,12 @@ let source_of_module pos mdle =
 (*** Buffer cache ***)
 
 (* Buffer and cache (to associate lines and positions in the buffer). *)
-type buffer = string * (int * int) list ref
+type buffer = Unit_name.t * (int * int) list ref
 
 let buffer_max_count = ref 10
 
 let buffer_list =
-  ref ([] : (string * buffer) list)
+  ref ([] : (Unit_name.t * buffer) list)
 
 let flush_buffer_list () =
   buffer_list := []

@@ -23,7 +23,7 @@ open Program_loading
 module StringSet = Set.Make(String)
 
 let modules =
-  ref ([] : string list)
+  ref ([] : Unit_name.t list)
 
 let program_source_dirs =
   ref ([] : string list)
@@ -33,9 +33,9 @@ let events =
 let events_by_pc =
   (Hashtbl.create 257 : (int, debug_event) Hashtbl.t)
 let events_by_module =
-  (Hashtbl.create 17 : (string, debug_event array) Hashtbl.t)
+  (Unit_name.Tbl.create 17 : debug_event array Unit_name.Tbl.t)
 let all_events_by_module =
-  (Hashtbl.create 17 : (string, debug_event list) Hashtbl.t)
+  (Unit_name.Tbl.create 17 : debug_event list Unit_name.Tbl.t)
 
 let relocate_event orig ev =
   ev.ev_pos <- orig + ev.ev_pos;
@@ -86,8 +86,8 @@ let read_symbols bytecode_file =
 
   modules := []; events := [];
   program_source_dirs := StringSet.elements all_dirs;
-  Hashtbl.clear events_by_pc; Hashtbl.clear events_by_module;
-  Hashtbl.clear all_events_by_module;
+  Hashtbl.clear events_by_pc; Unit_name.Tbl.clear events_by_module;
+  Unit_name.Tbl.clear all_events_by_module;
 
   List.iter
     (fun evl ->
@@ -102,13 +102,13 @@ let read_symbols bytecode_file =
     (function
         [] -> ()
       | ev :: _ as evl ->
-          let md = ev.ev_module in
+          let md = ev.ev_unit_name in
           let cmp ev1 ev2 = compare (Events.get_pos ev1).Lexing.pos_cnum
                                     (Events.get_pos ev2).Lexing.pos_cnum
           in
           let sorted_evl = List.sort cmp evl in
           modules := md :: !modules;
-          Hashtbl.add all_events_by_module md sorted_evl;
+          Unit_name.Tbl.add all_events_by_module md sorted_evl;
           let real_evl =
             List.filter
               (function
@@ -116,7 +116,7 @@ let read_symbols bytecode_file =
                | _                        -> true)
               sorted_evl
           in
-          Hashtbl.add events_by_module md (Array.of_list real_evl))
+          Unit_name.Tbl.add events_by_module md (Array.of_list real_evl))
     all_events
 
 let any_event_at_pc pc =
@@ -135,7 +135,7 @@ let set_event_at_pc pc =
 (* List all events in module *)
 let events_in_module mdle =
   try
-    Hashtbl.find all_events_by_module mdle
+    Unit_name.Tbl.find all_events_by_module mdle
   with Not_found ->
     []
 
@@ -159,13 +159,13 @@ let find_event ev char =
 (* Return first event after the given position. *)
 (* Raise [Not_found] if module is unknown or no event is found. *)
 let event_at_pos md char =
-  let ev = Hashtbl.find events_by_module md in
+  let ev = Unit_name.Tbl.find events_by_module md in
   ev.(find_event ev char)
 
 (* Return event closest to given position *)
 (* Raise [Not_found] if module is unknown or no event is found. *)
 let event_near_pos md char =
-  let ev = Hashtbl.find events_by_module md in
+  let ev = Unit_name.Tbl.find events_by_module md in
   try
     let pos = find_event ev char in
     (* Desired event is either ev.(pos) or ev.(pos - 1),

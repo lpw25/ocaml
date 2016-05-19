@@ -81,21 +81,21 @@ let allow_extension = ref true
 let check_consistency file_name cu =
   try
     List.iter
-      (fun (name, crco) ->
+      (fun (uname, crco) ->
          match crco with
            None -> ()
          | Some crc ->
-             if name = cu.cu_name then
-               Consistbl.set !crc_interfaces name crc file_name
+             if Unit_name.equal uname cu.cu_unit_name then
+               Consistbl.set !crc_interfaces uname crc file_name
              else if !allow_extension then
-               Consistbl.check !crc_interfaces name crc file_name
+               Consistbl.check !crc_interfaces uname crc file_name
              else
-               Consistbl.check_noadd !crc_interfaces name crc file_name)
+               Consistbl.check_noadd !crc_interfaces uname crc file_name)
       cu.cu_imports
-  with Consistbl.Inconsistency(name, _user, _auth) ->
-         raise(Error(Inconsistent_import name))
-     | Consistbl.Not_available(name) ->
-         raise(Error(Unavailable_unit name))
+  with Consistbl.Inconsistency(uname, _user, _auth) ->
+         raise(Error(Inconsistent_import (Unit_name.to_string uname)))
+     | Consistbl.Not_available(uname) ->
+         raise(Error(Unavailable_unit (Unit_name.to_string uname)))
 
 (* Empty the crc_interfaces table *)
 
@@ -106,20 +106,28 @@ let clear_available_units () =
 (* Allow only access to the units with the given names *)
 
 let allow_only names =
-  Consistbl.filter (fun name -> List.mem name names) !crc_interfaces;
+  let unames = List.map (fun name -> Unit_name.of_string name) names in
+  Consistbl.filter
+    (fun uname -> List.exists (Unit_name.equal uname) unames)
+    !crc_interfaces;
   allow_extension := false
 
 (* Prohibit access to the units with the given names *)
 
 let prohibit names =
-  Consistbl.filter (fun name -> not (List.mem name names)) !crc_interfaces;
+  let unames = List.map (fun name -> Unit_name.of_string name) names in
+  Consistbl.filter
+    (fun uname -> not (List.exists (Unit_name.equal uname) unames))
+    !crc_interfaces;
   allow_extension := false
 
 (* Initialize the crc_interfaces table with a list of units with fixed CRCs *)
 
 let add_available_units units =
   List.iter
-    (fun (unit, crc) -> Consistbl.set !crc_interfaces unit crc "")
+    (fun (unit, crc) ->
+      let uname = Unit_name.of_string unit in
+      Consistbl.set !crc_interfaces uname crc "")
     units
 
 (* Default interface CRCs: those found in the current executable *)
@@ -240,7 +248,8 @@ let load_compunit ic file_name file_digest compunit =
   (* PR#5215: identify this code fragment by
      digest of file contents + unit name.
      Unit name is needed for .cma files, which produce several code fragments.*)
-  let digest = Digest.string (file_digest ^ compunit.cu_name) in
+  let modname = Unit_name.name compunit.cu_unit_name in
+  let digest = Digest.string (file_digest ^ modname) in
   register_code_fragment code code_size digest;
   let events =
     if compunit.cu_debug = 0 then [| |]

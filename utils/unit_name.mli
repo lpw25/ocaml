@@ -17,6 +17,8 @@ val dummy : t
 
 val prefix : prefix:t -> uname:t -> t
 
+val of_string : string -> t
+
 val equal : t -> t -> bool
 
 val compare : t -> t -> int
@@ -24,6 +26,8 @@ val compare : t -> t -> int
 val hash : t -> int
 
 val print : Format.formatter -> t -> unit
+
+val to_string : t -> string
 
 module Set : Set.S with type elt = t
 

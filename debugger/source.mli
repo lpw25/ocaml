@@ -18,7 +18,7 @@
 
 (*** Conversion function. ***)
 
-val source_of_module: Lexing.position -> string -> string
+val source_of_module: Lexing.position -> Unit_name.t -> string
 
 (*** buffer cache ***)
 

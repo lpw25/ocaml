@@ -50,6 +50,8 @@ let prefix ~prefix ~uname =
       let path = loop uname.path in
       { root; path }
 
+let of_string s = simple ~name:s
+
 let equal_root r1 r2 =
   match r1, r2 with
   | None, None -> true
@@ -112,6 +114,18 @@ let rec print_path ppf = function
 let print ppf t =
   Format.fprintf ppf "%a%a"
     print_root t.root print_path t.path
+
+let root_to_string = function
+  | None -> ""
+  | Some r -> r ^ ":"
+
+let rec path_to_string = function
+  | Simple s -> s
+  | Project(p, s) | ProjectOrSimple(p, s) ->
+      path_to_string p ^ "." ^ s
+
+let to_string t =
+  root_to_string t.root ^ path_to_string t.path
 
 module Ops = struct
   type nonrec t = t
