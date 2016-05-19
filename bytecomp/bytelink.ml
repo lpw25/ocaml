@@ -87,6 +87,14 @@ let add_ccobjs origin l =
 
 module IdentSet = Lambda.IdentSet
 
+let defined_globals = ref IdentSet.empty
+
+let add_defined (rel, _pos) =
+  match rel with
+    Reloc_setglobal id ->
+      defined_globals := IdentSet.add id !defined_globals
+  | _ -> ()
+
 let missing_globals = ref IdentSet.empty
 
 let is_required (rel, _pos) =
@@ -125,6 +133,7 @@ let scan_file obj_name tolink =
       let compunit = (input_value ic : compilation_unit) in
       close_in ic;
       List.iter add_required compunit.cu_reloc;
+      List.iter add_defined compunit.cu_reloc;
       Link_object(file_name, compunit) :: tolink
     end
     else if buffer = cma_magic_number then begin
@@ -144,6 +153,7 @@ let scan_file obj_name tolink =
             then begin
               List.iter remove_required compunit.cu_reloc;
               List.iter add_required compunit.cu_reloc;
+              List.iter add_defined compunit.cu_reloc;
               compunit :: reqd
             end else
               reqd)
@@ -154,6 +164,51 @@ let scan_file obj_name tolink =
   with
     End_of_file -> close_in ic; raise(Error(Not_an_object_file file_name))
   | x -> close_in ic; raise x
+
+let link_from_path id tolink =
+  defined_globals := IdentSet.add id !defined_globals;
+  if not (Ident.unit id) then tolink
+  else begin
+    let uname = Ident.unit_name id in
+    let modname = Unit_name.name uname in
+      match
+        find_in_path_uncap !load_path (modname ^ ".cmo")
+      with
+      | exception Not_found -> tolink
+      | file_name ->
+          let ic = open_in_bin file_name in
+            try
+              let buffer =
+                really_input_string ic (String.length cmo_magic_number)
+              in
+              if buffer = cmo_magic_number then begin
+                let compunit_pos = input_binary_int ic in
+                (* Go to descriptor *)
+                seek_in ic compunit_pos;
+                let compunit = (input_value ic : compilation_unit) in
+                close_in ic;
+                List.iter remove_required compunit.cu_reloc;
+                List.iter add_required compunit.cu_reloc;
+                List.iter add_defined compunit.cu_reloc;
+                Link_object(file_name, compunit) :: tolink
+              end
+              else raise(Error(Not_an_object_file file_name))
+            with
+            | End_of_file ->
+                close_in ic; raise(Error(Not_an_object_file file_name))
+            | x -> close_in ic; raise x
+    end
+
+let scan_path tolink =
+  let rec loop tolink =
+    let missing = IdentSet.diff !missing_globals !defined_globals in
+    if IdentSet.is_empty missing then tolink
+    else begin
+      let tolink = IdentSet.fold link_from_path missing tolink in
+      loop tolink
+    end
+  in
+  loop tolink
 
 (* Second pass: link in the required units *)
 
@@ -539,6 +594,7 @@ let link ppf objfiles output_name =
     else if !Clflags.output_c_object then "stdlib.cma" :: objfiles
     else "stdlib.cma" :: (objfiles @ ["std_exit.cmo"]) in
   let tolink = List.fold_right scan_file objfiles [] in
+  let tolink = scan_path tolink in
   Clflags.ccobjs := !Clflags.ccobjs @ !lib_ccobjs; (* put user's libs last *)
   Clflags.all_ccopts := !lib_ccopts @ !Clflags.all_ccopts;
                                                    (* put user's opts first *)
