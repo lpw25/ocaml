@@ -187,7 +187,6 @@ let link_from_path id tolink =
                 seek_in ic compunit_pos;
                 let compunit = (input_value ic : compilation_unit) in
                 close_in ic;
-                List.iter remove_required compunit.cu_reloc;
                 List.iter add_required compunit.cu_reloc;
                 List.iter add_defined compunit.cu_reloc;
                 Link_object(file_name, compunit) :: tolink
@@ -589,12 +588,16 @@ let fix_exec_name name =
 (* Main entry point (build a custom runtime if needed) *)
 
 let link ppf objfiles output_name =
-  let objfiles =
-    if !Clflags.nopervasives then objfiles
-    else if !Clflags.output_c_object then "stdlib.cma" :: objfiles
-    else "stdlib.cma" :: (objfiles @ ["std_exit.cmo"]) in
-  let tolink = List.fold_right scan_file objfiles [] in
+  let tolink =
+    if !Clflags.nopervasives || !Clflags.output_c_object then []
+    else scan_file "std_exit.cmo" []
+  in
+  let tolink = List.fold_right scan_file objfiles tolink in
   let tolink = scan_path tolink in
+  let tolink =
+    if !Clflags.nopervasives then tolink
+    else scan_file "stdlib.cma" tolink
+  in
   Clflags.ccobjs := !Clflags.ccobjs @ !lib_ccobjs; (* put user's libs last *)
   Clflags.all_ccopts := !lib_ccopts @ !Clflags.all_ccopts;
                                                    (* put user's opts first *)
