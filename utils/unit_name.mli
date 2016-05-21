@@ -17,6 +17,10 @@ val dummy : t
 
 val prefix : prefix:t -> uname:t -> t
 
+val pack : pack:t -> uname:t -> t
+
+val packed : t -> bool
+
 val of_string : string -> t
 
 val equal : t -> t -> bool

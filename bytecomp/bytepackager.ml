@@ -39,15 +39,6 @@ let debug_dirs = ref StringSet.empty
 let primitives = ref ([] : string list)
 let force_link = ref false
 
-(* Create a unit name for a subunit of the package *)
-let subunit_uname pkgname uname =
-  let name = Unit_name.name pkgname ^ "." ^ Unit_name.name uname in
-  Unit_name.simple ~name
-
-(* Test whether a unit name is the subunit of a package *)
-let is_subunit_uname uname =
-  String.contains (Unit_name.name uname) '.'
-
 (* Record a relocation.  Update its offset, and rename GETGLOBAL and
    SETGLOBAL relocations that correspond to one of the units being
    consolidated. *)
@@ -67,9 +58,9 @@ let rename_relocation pkgname objfile mapping defined base (rel, ofs) =
              module. *)
           if Ident.unit id then begin
             let uname = Ident.unit_name id in
-            if is_subunit_uname uname then
+            if Unit_name.packed uname then
               Reloc_getglobal
-                (Ident.create_unit (subunit_uname pkgname uname))
+                (Ident.create_unit (Unit_name.pack ~pack:pkgname ~uname))
             else rel
           end else rel
         end
@@ -82,9 +73,9 @@ let rename_relocation pkgname objfile mapping defined base (rel, ofs) =
         with Not_found ->
           (* PR#5276, as above *)
           let uname = Ident.unit_name id in
-          if is_subunit_uname uname then
+          if Unit_name.packed uname then
             Reloc_setglobal
-              (Ident.create_unit (subunit_uname pkgname uname))
+              (Ident.create_unit (Unit_name.pack ~pack:pkgname ~uname))
           else rel
         end
     | _ ->
@@ -95,7 +86,8 @@ let rename_relocation pkgname objfile mapping defined base (rel, ofs) =
 
 let relocate_debug base pkgname subst ev =
   let ev' = { ev with ev_pos = base + ev.ev_pos;
-                      ev_unit_name = subunit_uname pkgname ev.ev_unit_name;
+                      ev_unit_name =
+                        Unit_name.pack ~pack:pkgname ~uname:ev.ev_unit_name;
                       ev_typsubst = Subst.compose ev.ev_typsubst subst } in
   events := ev' :: !events
 
@@ -225,7 +217,7 @@ let package_object_files ppf files targetfile pkgname coercion =
     List.map
       (fun uname ->
           (Ident.create_unit uname,
-           Ident.create_unit (subunit_uname pkgname uname)))
+           Ident.create_unit (Unit_name.pack ~pack:pkgname ~uname)))
       unit_names in
   let oc = open_out_bin targetfile in
   try

@@ -44,7 +44,7 @@ let need_symbol sym =
   with _ -> true
 
 let dll_run dll uname =
-  let entry = Unit_name.name entry in
+  let entry = Unit_name.name uname in
   match (try Result (Obj.magic (ndl_run_toplevel dll entry))
          with exn -> Exception exn)
   with

@@ -595,7 +595,7 @@ let link ppf objfiles output_name =
   let tolink = List.fold_right scan_file objfiles tolink in
   let tolink = scan_path tolink in
   let tolink =
-    if !Clflags.nopervasives then tolink
+    if !Clflags.nopervasives || !Clflags.no_std_include then tolink
     else scan_file "stdlib.cma" tolink
   in
   Clflags.ccobjs := !Clflags.ccobjs @ !lib_ccobjs; (* put user's libs last *)
@@ -726,6 +726,7 @@ let reset () =
   lib_ccobjs := [];
   lib_ccopts := [];
   lib_dllibs := [];
+  defined_globals := IdentSet.empty;
   missing_globals := IdentSet.empty;
   Consistbl.clear crc_interfaces;
   implementations_defined := [];
