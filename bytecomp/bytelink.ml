@@ -85,35 +85,43 @@ let add_ccobjs origin l =
 
 (* First pass: determine which units are needed *)
 
-module IdentSet = Lambda.IdentSet
+type global_status =
+  | Missing
+  | Required
+  | Available of Ident.t list
+  | Path of string * compilation_unit
 
-let defined_globals = ref IdentSet.empty
+let globals = ref Ident.empty
 
-let add_defined (rel, _pos) =
+let add_global status (rel, _pos) =
   match rel with
-    Reloc_setglobal id ->
-      defined_globals := IdentSet.add id !defined_globals
+  | Reloc_setglobal id -> globals := Ident.add id status !globals
   | _ -> ()
 
-let missing_globals = ref IdentSet.empty
+let add_global_id status id =
+  globals := Ident.add id status !globals
 
-let is_required (rel, _pos) =
+let global_status id =
+  Ident.find_same id !globals
+
+let is_required_global (rel, _pos) =
   match rel with
-    Reloc_setglobal id ->
-      IdentSet.mem id !missing_globals
+  | Reloc_setglobal id -> begin
+      match global_status id with
+      | Missing | Available _ -> false
+      | Required | Path _ -> true
+    end
   | _ -> false
 
-let add_required (rel, _pos) =
-  match rel with
-    Reloc_getglobal id ->
-      missing_globals := IdentSet.add id !missing_globals
-  | _ -> ()
-
-let remove_required (rel, _pos) =
-  match rel with
-    Reloc_setglobal id ->
-      missing_globals := IdentSet.remove id !missing_globals
-  | _ -> ()
+let required_globals l =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | (Reloc_getglobal id, _pos) :: rest ->
+        loop (id :: acc) rest
+    | _ :: rest ->
+        loop acc rest
+  in
+    loop [] l
 
 let scan_file obj_name tolink =
   let file_name =
@@ -132,8 +140,7 @@ let scan_file obj_name tolink =
       seek_in ic compunit_pos;
       let compunit = (input_value ic : compilation_unit) in
       close_in ic;
-      List.iter add_required compunit.cu_reloc;
-      List.iter add_defined compunit.cu_reloc;
+      List.iter (add_global Required) compunit.cu_reloc;
       Link_object(file_name, compunit) :: tolink
     end
     else if buffer = cma_magic_number then begin
@@ -144,37 +151,38 @@ let scan_file obj_name tolink =
       let toc = (input_value ic : library) in
       close_in ic;
       add_ccobjs (Filename.dirname file_name) toc;
-      let required =
-        List.fold_right
-          (fun compunit reqd ->
-            if compunit.cu_force_link
-            || !Clflags.link_everything
-            || List.exists is_required compunit.cu_reloc
-            then begin
-              List.iter remove_required compunit.cu_reloc;
-              List.iter add_required compunit.cu_reloc;
-              List.iter add_defined compunit.cu_reloc;
-              compunit :: reqd
-            end else
-              reqd)
-          toc.lib_units [] in
-      Link_archive(file_name, required) :: tolink
+      List.iter
+          (fun compunit ->
+            let status =
+              if compunit.cu_force_link || !Clflags.link_everything then
+                Required
+              else begin
+                let required = required_globals compunit.cu_reloc in
+                Available required
+              end
+            in
+            List.iter (add_global status) compunit.cu_reloc)
+          toc.lib_units;
+      Link_archive(file_name, toc.lib_units) :: tolink
     end
     else raise(Error(Not_an_object_file file_name))
   with
     End_of_file -> close_in ic; raise(Error(Not_an_object_file file_name))
   | x -> close_in ic; raise x
 
-let link_from_path id tolink =
-  defined_globals := IdentSet.add id !defined_globals;
-  if not (Ident.unit id) then tolink
-  else begin
+let scan_from_path id =
+  if not (Ident.unit id) then begin
+    add_global_id Missing id;
+    []
+  end else begin
     let uname = Ident.unit_name id in
     let modname = Unit_name.name uname in
       match
         find_in_path_uncap !load_path (modname ^ ".cmo")
       with
-      | exception Not_found -> tolink
+      | exception Not_found ->
+          add_global_id Missing id;
+          []
       | file_name ->
           let ic = open_in_bin file_name in
             try
@@ -187,9 +195,9 @@ let link_from_path id tolink =
                 seek_in ic compunit_pos;
                 let compunit = (input_value ic : compilation_unit) in
                 close_in ic;
-                List.iter add_required compunit.cu_reloc;
-                List.iter add_defined compunit.cu_reloc;
-                Link_object(file_name, compunit) :: tolink
+                let status = Path(file_name, compunit) in
+                List.iter (add_global status) compunit.cu_reloc;
+                required_globals compunit.cu_reloc
               end
               else raise(Error(Not_an_object_file file_name))
             with
@@ -199,15 +207,65 @@ let link_from_path id tolink =
     end
 
 let scan_path tolink =
-  let rec loop tolink =
-    let missing = IdentSet.diff !missing_globals !defined_globals in
-    if IdentSet.is_empty missing then tolink
-    else begin
-      let tolink = IdentSet.fold link_from_path missing tolink in
-      loop tolink
-    end
+  let rec complete = function
+    | [] -> ()
+    | required :: rest ->
+        match global_status required with
+        | Missing | Required | Path _ -> complete rest
+        | Available reqs ->
+            add_global_id Required required;
+            complete (List.rev_append reqs rest)
+        | exception Not_found ->
+            let reqs = scan_from_path required in
+            complete (List.rev_append reqs rest)
   in
-  loop tolink
+  List.iter
+    (function
+     | Link_archive _ -> ()
+     | Link_object(_, compunit) ->
+         complete (required_globals compunit.cu_reloc))
+    tolink
+
+let complete_link_actions tolink =
+  let rec expand_ids = function
+    | [] -> []
+    | required :: rest ->
+        match global_status required with
+        | Missing | Required -> expand_ids rest
+        | Path(file_name, compunit) ->
+            add_global_id Required required;
+            let required = required_globals compunit.cu_reloc in
+            let prefix = expand_ids required in
+            let action = Link_object(file_name, compunit) in
+            List.concat [prefix; [action]; expand_ids rest]
+        | Available _ -> assert false
+        | exception Not_found -> assert false
+  in
+  let rec expand_compunits = function
+    | [] -> []
+    | compunit :: rest ->
+        let required = required_globals compunit.cu_reloc in
+        let prefix = expand_ids required in
+         prefix @ expand_compunits rest
+  in
+  let rec expand_actions = function
+    | [] -> []
+    | Link_object(_, compunit) as action :: rest ->
+        let required = required_globals compunit.cu_reloc in
+        let prefix = expand_ids required in
+        List.concat [prefix; [action]; expand_actions rest]
+    | Link_archive(file_name, compunits) :: rest ->
+        let compunits =
+          List.filter
+            (fun compunit ->
+              List.exists is_required_global compunit.cu_reloc)
+            compunits
+        in
+        let prefix = expand_compunits compunits in
+        let action = Link_archive(file_name, compunits) in
+        List.concat [prefix; [action]; expand_actions rest]
+  in
+  expand_actions tolink
 
 (* Second pass: link in the required units *)
 
@@ -593,11 +651,12 @@ let link ppf objfiles output_name =
     else scan_file "std_exit.cmo" []
   in
   let tolink = List.fold_right scan_file objfiles tolink in
-  let tolink = scan_path tolink in
   let tolink =
     if !Clflags.nopervasives || !Clflags.no_std_include then tolink
     else scan_file "stdlib.cma" tolink
   in
+  scan_path tolink;
+  let tolink = complete_link_actions tolink in
   Clflags.ccobjs := !Clflags.ccobjs @ !lib_ccobjs; (* put user's libs last *)
   Clflags.all_ccopts := !lib_ccopts @ !Clflags.all_ccopts;
                                                    (* put user's opts first *)
@@ -726,8 +785,7 @@ let reset () =
   lib_ccobjs := [];
   lib_ccopts := [];
   lib_dllibs := [];
-  defined_globals := IdentSet.empty;
-  missing_globals := IdentSet.empty;
+  globals := Ident.empty;
   Consistbl.clear crc_interfaces;
   implementations_defined := [];
   debug_info := [];
