@@ -1011,6 +1011,11 @@ module Exp = struct
     let heap, exp2 = merge loc heap exp2 in
       mk loc heap (Pexp_sequence(exp1, exp2))
 
+  let while_ loc cond body =
+    let heap, cond = merge loc Heap.empty cond in
+    let heap, body = merge loc heap body in
+      mk loc heap (Pexp_while(cond, body))
+
   let for_nonbinding loc pat low high dir body =
     let dir = if dir then CamlinternalAST.Upto else CamlinternalAST.Downto in
     let pat = PatRepr.nonbinding loc pat in

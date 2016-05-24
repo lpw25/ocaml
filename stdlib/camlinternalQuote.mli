@@ -148,6 +148,8 @@ and Exp : sig
 
   val sequence : Loc.t -> t -> t -> t
 
+  val while_ : Loc.t -> t -> t -> t
+
   val for_nonbinding : Loc.t -> Pat.t -> t -> t -> bool -> t -> t
 
   val for_simple : Loc.t -> Name.t -> t -> t -> bool -> (Var.t -> t) -> t
