@@ -807,6 +807,22 @@ module Label = struct
 
 end
 
+module Variant = struct
+
+  type t = string
+
+  let of_string (s : string) : t = s
+
+end
+
+module Method = struct
+
+  type t = string
+
+  let of_string (s : string) : t = s
+
+end
+
 (* Pattern builders *)
 module Pat = struct
 

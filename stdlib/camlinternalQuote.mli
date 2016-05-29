@@ -53,6 +53,22 @@ module Label : sig
 
 end
 
+module Variant : sig
+
+  type t
+
+  val of_string : string -> t
+
+end
+
+module Method : sig
+
+  type t
+
+  val of_string : string -> t
+
+end
+
 module Pat : sig
 
   type t
@@ -71,7 +87,7 @@ module Pat : sig
 
   val construct : Loc.t -> Ident.t -> t option -> t
 
-  val variant : Loc.t -> Label.t -> t option -> t
+  val variant : Loc.t -> Variant.t -> t option -> t
 
   val record : Loc.t -> (Ident.t * t) list -> bool -> t
 
@@ -134,7 +150,7 @@ and Exp : sig
 
   val construct : Loc.t -> Ident.t -> t option -> t
 
-  val variant : Loc.t -> Label.t -> t option -> t
+  val variant : Loc.t -> Variant.t -> t option -> t
 
   val record : Loc.t -> (Ident.t * t) list -> t option -> t
 
@@ -154,7 +170,7 @@ and Exp : sig
 
   val for_simple : Loc.t -> Name.t -> t -> t -> bool -> (Var.t -> t) -> t
 
-  val send : Loc.t -> t -> Label.t -> t
+  val send : Loc.t -> t -> Method.t -> t
 
   val assert_ : Loc.t -> t -> t
 
