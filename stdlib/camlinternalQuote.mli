@@ -107,10 +107,14 @@ module rec Case : sig
 
   type t
 
-  val nonbinding : Loc.t -> Pat.t -> Exp.t option -> Exp.t -> t
+  val nonbinding : Loc.t -> Pat.t -> Exp.t -> t
 
-  val binding :
-    Loc.t -> Name.t list -> (Var.t list -> Pat.t * Exp.t option * Exp.t) -> t
+  val simple : Loc.t -> Name.t -> (Var.t -> Exp.t) -> t
+
+  val pattern : Loc.t -> Name.t list -> (Var.t list -> Pat.t * Exp.t) -> t
+
+  val guarded :
+    Loc.t -> Name.t list -> (Var.t list -> Pat.t * Exp.t * Exp.t) -> t
 
 end
 
@@ -123,6 +127,8 @@ and Exp : sig
   val ident : Loc.t -> Ident.t -> t
 
   val constant : Loc.t -> Constant.t -> t
+
+  val let_nonbinding : Loc.t -> Pat.t -> t -> t -> t
 
   val let_simple : Loc.t -> Name.t -> t -> (Var.t -> t) -> t
 

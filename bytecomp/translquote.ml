@@ -82,7 +82,9 @@ end
 
 module rec Case : sig
   let nonbinding = combinator "Case" "nonbinding"
-  let binding = combinator "Case" "binding"
+  let simple = combinator "Case" "simple"
+  let pattern = combinator "Case" "pattern"
+  let guarded = combinator "Case" "guarded"
 end
 
 and Exp : sig
@@ -158,29 +160,39 @@ let rec list list =
 let pair (x, y) =
   Lprim(Pmakeblock(0, Immutable), [x; y])
 
+let triple (x, y, z) =
+  Lprim(Pmakeblock(0, Immutable), [x; y; z])
+
 let func ids body =
   Lfunction(Curried, ids, body)
 
 let bind id def body =
   Llet(Strict, id, def, body)
 
-let quote_loc loc =
-  if loc = none then use Loc.none
+let quote_loc (loc : Location.t) =
+  if loc = Location.none then use Loc.none
   else apply Location.none Loc.unmarshal [marshal loc]
 
-let quote_constant loc const =
+let quote_constant loc (const : Asttypes.constant) =
   apply loc Const.unmarshal [marshal const]
 
-let quote_variant loc variant =
+let quote_name loc (str : string loc) =
+  apply loc Name.unmarshal [marshal str]
+
+let quote_variant loc (variant : label) =
   apply loc Variant.of_string [string variant]
 
-let quote_method loc meth =
+let quote_method loc (meth : Typedtree.meth) =
   let name =
     match meth with
     | Tmeth_name name -> name
     | Tmeth_val id -> Ident.name id
   in
   apply loc Method.of_string [string name]
+
+let quote_label loc lbl =
+  if lbl = "" then use Label.none
+  else apply loc Label.of_string [string lbl]
 
 let lid_of_path p =
   let rec loop = function
@@ -202,7 +214,7 @@ let lid_of_type_path env ty =
   | Tconstr(p, _, _) -> lid_of_path p
   | _ -> None
 
-let quote_constructor env loc constr =
+let quote_variant_constructor env loc constr =
   let lid =
     match lid_of_type_path env constr.cstr_res with
     | None -> fatal_error "No global path for variant constructor"
@@ -211,7 +223,7 @@ let quote_constructor env loc constr =
   in
   apply loc Ident.unmarshall [marshall lid]
 
-let quote_label env loc lbl =
+let quote_record_label env loc lbl =
   let lid =
     match lid_of_type_path env lbl.lbl_res with
     | None -> fatal_error "No global path for record label"
@@ -253,7 +265,7 @@ let rec quote_pattern p =
       let lbl_pats =
         List.map
           (fun (lid, lbl, pat) ->
-            let lbl = quote_label env lid.loc lbl in
+            let lbl = quote_record_label env lid.loc lbl in
             let pat = quote_pattern pat in
             pair (lbl, pat))
           lbl_pats
@@ -275,54 +287,44 @@ let rec quote_pattern p =
       let pat = quote_pattern pat in
       apply loc Pat.lazy_ [quote_loc loc; pat]
 
-let bindings = function
-  | Tpat_any -> []
-  | Tpat_var(id, name) -> [id, name]
-  | Tpat_alias(pat, id, name) -> (id, name) :: bindings pat
-  | Tpat_constant _ -> []
-  | Tpat_tuple pats -> List.concat (List.map bindings pats)
-  | Tpat_construct(_, _, args) -> List.concat (List.map bindings args)
-  | Tpat_variant(_, argo, _) -> begin
-      match argo with
-      | None -> []
-      | Some arg -> bindings arg
-    end
-  | Tpat_record(lbl_pats, _) ->
-      List.concat
-        (List.map
-          (fun (_, _, pat) -> bindings pat)
-          lbl_pats)
-  | Tpat_array pats -> List.concat (List.map bindings pats)
-  | Tpat_or(pat1, pat2, _) ->
-      bindings pat1 @ bindings pat2
-  | Tpat_lazy pat -> bindings pat
-
-type case =
+type case_binding =
   | Non_binding of lambda * lambda
-  | Simple of string loc * lambda
-  | Full of string loc list * lambda
+  | Simple of lambda * lambda
+  | Pattern of lambda * lambda
+  | Guarded of lambda * lambda
 
-type cases =
-  | Single of case
-  | Multiple of case list
-
-let rec quote_cases transl stage cases =
-  match cases with
-  | [case] when case.c_guard = None -> begin
-      match case.c_lhs with
-      | Tpat_var(id, name) ->
+let rec case_binding exn transl stage cases =
+  match cases.c_guard with
+  | None -> begin
+      match case.c_lhs, exn with
+      | Tpat_var(id, name), false ->
+          let name = quote_name name.loc name in
           let body = quote_expression transl stage case.c_rhs in
           Simple(name, func [id] body)
-      | pat ->
-          match bindings pat with
+      | pat, _ ->
+          match pat_bound_idents pat with
           | [] ->
               let pat = quote_pattern pat in
+              let pat =
+                if exn then
+                  apply pat.pat_loc Pat.exception_ [quote_loc loc; pat]
+                else
+                  pat
+              in
               let exp = quote_expression transl stage case.c_rhs in
               Non_binding(pat, exp)
           | id_names ->
               let ids = List.map fst id_names in
-              let names = List.map snd id_names in
+              let names =
+                List.map (fun (_, name) -> quote_name name.loc name) id_names
+              in
               let pat = quote_pattern pat in
+              let pat =
+                if exn then
+                  apply pat.pat_loc Pat.exception_ [quote_loc loc; pat]
+                else
+                  pat
+              in
               let exp = quote_expression transl stage case.c_rhs in
               let pat_id = Ident.create "pattern" in
               let exp_id = Ident.create "expression" in
@@ -331,11 +333,45 @@ let rec quote_cases transl stage cases =
                   (bind exp_id exp
                     (pair (Lvar pat_id, Lvar exp_id)))
               in
-              Single(names, func ids body)
+              Pattern(list names, func ids body)
     end
-  | cases ->
+  | Some guard ->
+      let id_names = pat_bound_idents case.c_lhs in
+      let ids = List.map fst id_names in
+      let names =
+        List.map (fun (_, name) -> quote_name name.loc name) id_names
+      in
+      let pat = quote_pattern case.c_lhs in
+      let pat =
+        if exn then apply pat.pat_loc Pat.exception_ [quote_loc loc; pat]
+        else pat
+      in
+      let guard = quote_expression transl stage guard in
+      let exp = quote_expression transl stage case.c_rhs in
+      let pat_id = Ident.create "pattern" in
+      let guard_id = Ident.create "guard" in
+      let exp_id = Ident.create "expression" in
+      let body =
+        bind pat_id pat
+          (bind guard_id guard
+            (bind exp_id exp
+              (triple (Lvar pat_id, Lvar guard_id, Lvar exp_id)))
+      in
+      Guarded(list names, func ids body)
 
+and quote_case_binding loc cb =
+  match cb with
+  | Non_binding(pat, exp) ->
+      apply loc Case.nonbinding [quote_loc loc; pat; exp]
+  | Simple(name, body) ->
+      apply loc Case.simple [quote_loc loc; name; body]
+  | Pattern(names, body) ->
+      apply loc Case.pattern [quote_loc loc; names; body]
+  | Guarded(names, body) ->
+      apply loc Case.guarded [quote_loc loc; names; body]
 
+and quote_case exn transl stage loc case =
+  quote_case_binding loc (case_binding exn transl stage case)
 
 and quote_expression transl stage e =
   let env = e.exp_env in
@@ -359,13 +395,45 @@ and quote_expression transl stage e =
       apply loc Exp.constant [quote_loc loc; const]
   | Texp_let of rec_flag * value_binding list * expression
   | Texp_function(label, cases, _) -> begin
-      match quote_cases cases with
-      | 
-
+      let cbs = List.map (case_binding transl stage) cases in
+      match cbs with
+      | [Non_binding(pat, exp)] ->
+          let label = quote_label label in
+          apply loc Exp.fun_nonbinding [quote_loc loc; label; pat; exp]
+      | [Simple(name, body)] ->
+          let label = quote_label label in
+          apply loc Exp.fun_simple [quote_loc loc; name; label; body]
+      | [Pattern(names, body)] ->
+          let label = quote_label label in
+          apply loc Exp.fun_ [quote_loc loc; names; label; body]
+      | cases ->
+          let cases = List.map (quote_case_binding loc) cases in
+          apply loc Exp.function_ [quote_loc loc; list cases]
     end
-  | Texp_apply of expression * (label * expression option * optional) list
-  | Texp_match of expression * case list * case list * partial
-  | Texp_try of expression * case list
+  | Texp_apply(fn, args) ->
+      let fn = quote_expression transl stage fn in
+      let args = List.filter (fun (_, exp, _) -> exp <> None) args in
+      let args =
+        List.map
+          (fun (lbl, exp, _) ->
+             match exp with
+             | None -> assert false
+             | Some exp ->
+                 let lbl = quote_label loc lbl in
+                 let exp = quote_expression transl stage exp in
+                   pair (lbl, exp))
+          args
+      in
+      apply loc Exp.apply [quote_loc loc; fn; list args]
+  | Texp_match(exp, cases, exn_cases, _) ->
+      let exp = quote_expression transl stage exp in
+      let cases = List.map (quote_case false transl stage loc) cases in
+      let exn_cases = List.map (quote_case true transl stage loc) exn_cases in
+      apply loc Exp.match_ [quote_loc loc; exp; list (cases @ exn_cases)]
+  | Texp_try(exp, cases) ->
+      let exp = quote_expression transl stage exp in
+      let cases = List.map (quote_case false transl stage loc) cases in
+      apply loc Exp.try_ [quote_loc loc; exp; list cases]
   | Texp_tuple exps ->
       let exps = List.map (quote_expression transl stage) exps in
       apply loc Exp.tuple [quote_loc loc; list exps]
@@ -387,7 +455,7 @@ and quote_expression transl stage e =
       let lbl_exps =
         List.map
           (fun (lid, lbl, exp) ->
-            let lbl = quote_label env lid.loc lbl in
+            let lbl = quote_record_label env lid.loc lbl in
             let exp = quote_expression transl stage exp in
             pair (lbl, exp))
           lbl_exps
@@ -396,11 +464,11 @@ and quote_expression transl stage e =
       apply loc Exp.record [quote_loc loc; list lbl_exps; option base]
   | Texp_field(rcd, lid, lbl) ->
       let rcd = quote_expression transl stage rcd in
-      let lbl = quote_label env lid.loc lbl in
+      let lbl = quote_record_label env lid.loc lbl in
       apply loc Exp.field [quote_loc loc; rcd; lbl]
   | Texp_setfield(rcd, lid, lbl, exp) ->
       let rcd = quote_expression transl stage rcd in
-      let lbl = quote_label env lid.loc lbl in
+      let lbl = quote_record_label env lid.loc lbl in
       let exp = quote_expression transl stage exp in
       apply loc Exp.setfield [quote_loc loc; rcd; lbl; exp]
   | Texp_array exps ->

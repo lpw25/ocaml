@@ -898,13 +898,20 @@ module Case = struct
 
   open CaseRepr
 
-  let nonbinding loc lhs guard rhs =
+  let nonbinding loc lhs rhs =
     let lhs = PatRepr.nonbinding loc lhs in
-    let heap, guard = accum_option ExpRepr.merge loc Heap.empty guard in
     let heap, rhs = ExpRepr.merge loc heap rhs in
-      mk heap lhs guard rhs
+      mk heap lhs None rhs
 
-  let binding loc names f =
+  let simple loc name f =
+    let heap, lhs, rhs = Binding.simple loc name f in
+      mk heap lhs None rhs
+
+  let pattern loc names f =
+    let heap, lhs, rhs = Binding.pattern loc names f in
+      mk heap lhs None rhs
+
+  let guarded loc names f =
     let heap, lhs, guard, rhs = Binding.guarded loc names f in
       mk heap lhs guard rhs
 
@@ -934,6 +941,13 @@ module Exp = struct
 
   let constant loc const =
     mk loc Heap.empty (Pexp_constant const)
+
+  let let_nonbinding loc pat def body =
+    let pat = PatRepr.nonbinding loc pat in
+    let heap, def = merge loc Heap.empty def in
+    let heap, body = merge loc heap body in
+    let vb = mk_vb loc pat def in
+      mk loc heap (Pexp_let(Nonrecursive, [vb], body))
 
   let let_simple loc name def f =
     let heap, pat, body = Binding.simple loc name f in
