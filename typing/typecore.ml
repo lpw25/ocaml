@@ -1808,12 +1808,6 @@ and type_expect ?in_function env sexp ty_expected =
     (Cmt_format.Partial_expression exp :: previous_saved_types);
   exp
 
-(* NNN This whole function type_expect_ *)
-(* Type checking staging constructs *)
-(* If we are type-checking bracket at level 0, don't build the
-   bracket Texp node. Rather, invoke trx_bracket to translate
-   the bracket body and convert it to the code generator.
-*)
 and type_expect_ ?in_function env sexp ty_expected =  (* NNN *)
   let loc = sexp.pexp_loc in
   (* Record the expression type before unifying it with the expected type *)
@@ -2778,7 +2772,7 @@ and type_expect_ ?in_function env sexp ty_expected =  (* NNN *)
       let ty = newgenvar() in
       let to_unify = Predef.type_expr ty in
       unify_exp_types loc env to_unify ty_expected;
-      let body = with_stage_up (fun () -> type_expect env sexp ty) in
+      let body = with_stage_up (fun () -> type_expect env sbody ty) in
       re {
           exp_desc = Texp_quote body;
           exp_loc = loc; exp_extra = [];
@@ -2789,7 +2783,7 @@ and type_expect_ ?in_function env sexp ty_expected =  (* NNN *)
       let body =
         with_stage_down loc env
           (fun () ->
-             type_expect env sexp
+             type_expect env sbody
                (Predef.type_expr ty_expected))
       in
         re {

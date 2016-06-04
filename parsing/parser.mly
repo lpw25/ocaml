@@ -471,7 +471,6 @@ The precedences must be listed from low to high.
 %nonassoc prec_unary_minus prec_unary_plus /* unary - */
 %nonassoc prec_constant_constructor     /* cf. simple_expr (C versus C x) */
 %nonassoc prec_constr_appl              /* above AS BAR COLONCOLON COMMA */
-%left	  prec_escape    /* NNN */
 %nonassoc below_SHARP
 %nonassoc SHARP                         /* simple_expr/toplevel_directive */
 %nonassoc below_DOT
@@ -479,8 +478,8 @@ The precedences must be listed from low to high.
 /* Finally, the first tokens of simple_expr are above everything else. */
 %nonassoc BACKQUOTE BANG BEGIN CHAR FALSE FLOAT INT INT32 INT64
           LBRACE LBRACELESS LBRACKET LBRACKETBAR LIDENT LPAREN
-          NEW NATIVEINT PREFIXOP STRING TRUE UIDENT
-          LBRACKETPERCENT LBRACKETPERCENTPERCENT
+          NEW NATIVEINT PREFIXOP STRING TRUE UIDENT DOLLAR
+          LBRACKETPERCENT LBRACKETPERCENTPERCENT LESSLESS
 
 
 /* Entry points */
@@ -1204,10 +1203,10 @@ simple_expr:
       { reloc_exp $2 }
   | LPAREN seq_expr error
       { unclosed "(" 1 ")" 3 }
-  | LESSLESS expr GREATERGREATER
+  | LESSLESS seq_expr GREATERGREATER
       { mkexp(Pexp_quote $2) }
-  | DOLLAR simple_expr %prec prec_escape  /* NNN */
-      { mkexp(Pexp_escape $2) }             /* NNN */
+  | DOLLAR simple_expr
+      { mkexp(Pexp_escape $2) }
   | BEGIN ext_attributes seq_expr END
       { wrap_exp_attrs (reloc_exp $3) $2 (* check location *) }
   | BEGIN ext_attributes END

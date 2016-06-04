@@ -329,7 +329,7 @@ module Loc = struct
       { loc_start = loc; loc_end = loc; loc_ghost = true }
 
   let unmarshal (s : string) : t =
-    Marshal.from_string s (String.length s)
+    Marshal.from_string s 0
 
   let print ppf { loc_start; loc_end } =
     let open Lexing in
@@ -358,7 +358,7 @@ module Name = struct
   let mk txt loc = { txt; loc }
 
   let unmarshal s : t =
-    Marshal.from_string s (String.length s)
+    Marshal.from_string s 0
 
 end
 
@@ -776,7 +776,7 @@ module Constant = struct
   type t = constant
 
   let unmarshal (s : string) : t =
-    Marshal.from_string s (String.length s)
+    Marshal.from_string s 0
 
 end
 
@@ -785,7 +785,7 @@ module Ident = struct
   type t = CamlinternalAST.lid CamlinternalAST.loc
 
   let unmarshal (s : string) : t =
-    Marshal.from_string s (String.length s)
+    Marshal.from_string s 0
 
   let of_var var =
     let name = Var.name var in
