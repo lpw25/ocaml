@@ -919,7 +919,8 @@ and transl_exp0 e =
           cl_env = e.exp_env;
           cl_attributes = [];
          }
-  | Texp_quote e -> assert false (* TODO: should use global stage *)
+  | Texp_quote e ->
+      Translquote.quote_expression transl_exp e
   | Texp_escape e -> assert false (* TODO: should use global stage *)
 
 and transl_list expr_list =

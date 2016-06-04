@@ -350,6 +350,8 @@ and untype_expression exp =
         Pexp_object (untype_class_structure cl)
     | Texp_pack (mexpr) ->
         Pexp_pack (untype_module_expr mexpr)
+    | Texp_quote exp -> Pexp_quote (untype_expression exp)
+    | Texp_escape exp -> Pexp_escape (untype_expression exp)
   in
   List.fold_right untype_extra exp.exp_extra
     (Exp.mk ~loc:exp.exp_loc ~attrs:exp.exp_attributes desc)
