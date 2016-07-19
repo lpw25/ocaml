@@ -18,9 +18,9 @@ Error: In this definition, a type variable cannot be deduced
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: In this definition, a type variable cannot be deduced
        from the type parameters.
-#     Characters 36-37:
+#     Characters 42-43:
     let A x = A x in
-        ^
+              ^
 Error: Unbound constructor A
 # Characters 0-37:
   type 'a t = A : 'a -> [< `X of 'a ] t;; (* fail *)
