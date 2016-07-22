@@ -648,7 +648,7 @@ let find_module ~alias path env =
       begin match get_components desc1 with
         Functor_comps f ->
           md begin match f.fcomp_res with
-          | Mty_alias p as mty-> mty
+          | Mty_alias _ as mty-> mty
           | mty ->
               if alias then mty else
               try

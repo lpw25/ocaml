@@ -30,15 +30,6 @@ module M3 : sig module N' : sig val x : int end end = struct include M' end;;
 M3.N'.x;;
 module M3' : sig module N' : sig val x : int end end = M2;;
 M3'.N'.x;;
-[%%expect{|
-module M'' : sig module N' : sig val x : int end end
-- : int = 1
-module M2 : sig module N = M'.N module N' = N end
-module M3 : sig module N' : sig val x : int end end
-- : int = 1
-module M3' : sig module N' : sig val x : int end end
-- : int = 1
-|}];;
 
 module M4 : sig module N' : sig val x : int end end = struct
   module N = struct let x = 1 end
@@ -244,19 +235,6 @@ module R = struct
   module Q = M
 end;;
 module R' : S = R;;
-[%%expect{|
-module type S =
-  sig
-    module M : sig module N : sig  end module P : sig  end end
-    module Q : sig module N = M.N module P = M.P end
-  end
-module R :
-  sig
-    module M : sig module N : sig  end module P : sig  end end
-    module Q = M
-  end
-module R' : S
-|}];;
 
 module F (X : sig end) = struct type t end;;
 module M : sig
@@ -272,11 +250,6 @@ end = struct
   end
   type a = Foo.b
 end;;
-[%%expect{|
-module F : functor (X : sig  end) -> sig type t end
-module M :
-  sig type a module Foo : sig module Bar : sig  end type b = a end end
-|}];;
 
 (* PR#6578 *)
 

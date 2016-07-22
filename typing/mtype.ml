@@ -79,7 +79,7 @@ and strengthen_sig ~aliasable env sg p pos =
       let str = strengthen_decl ~aliasable env md (Pdot(p, Ident.name id, pos)) in
       Sig_module(id, str, rs)
       :: strengthen_sig ~aliasable
-        (Env.add_module_declaration ~check:false id md env) rem p (pos+1)
+        (Env.add_module_declaration id md env) rem p (pos+1)
       (* Need to add the module in case it defines manifest module types *)
   | Sig_modtype(id, decl) :: rem ->
       let newdecl =
@@ -208,7 +208,7 @@ and enrich_item env p = function
 let rec type_paths env p mty =
   match scrape env mty with
     Mty_ident p -> []
-  | Mty_alias p -> []
+  | Mty_alias _ -> []
   | Mty_signature sg -> type_paths_sig env p 0 sg
   | Mty_functor(param, arg, res) -> []
 

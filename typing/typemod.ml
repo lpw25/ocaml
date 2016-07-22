@@ -848,7 +848,7 @@ let path_of_module mexp =
 
 let rec closed_modtype env = function
     Mty_ident p -> true
-  | Mty_alias p -> true
+  | Mty_alias _ -> true
   | Mty_signature sg ->
       let env = Env.add_signature sg env in
       List.for_all (closed_signature_item env) sg
@@ -1477,7 +1477,7 @@ let type_structure = type_structure false None
 
 let rec normalize_modtype env = function
     Mty_ident p -> ()
-  | Mty_alias p -> ()
+  | Mty_alias _ -> ()
   | Mty_signature sg -> normalize_signature env sg
   | Mty_functor(id, param, body) -> normalize_modtype env body
 
