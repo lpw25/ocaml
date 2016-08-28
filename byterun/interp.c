@@ -188,7 +188,8 @@ sp is a local copy of the global variable caml_extern_sp. */
 static __thread intnat caml_bcodcount;
 #endif
 
-static caml_root raise_unhandled;
+static caml_root resume_raise;
+static caml_root resume_value;
 
 /* The interpreter itself */
 value caml_interprete(code_t prog, asize_t prog_size)
@@ -228,18 +229,24 @@ value caml_interprete(code_t prog, asize_t prog_size)
 #endif
 
   if (prog == NULL) {           /* Interpreter is initializing */
-    static opcode_t raise_unhandled_code[] = { ACC, 0, RAISE };
+    static opcode_t resume_raise_code[] = { ACC, 0, RAISE };
+    static opcode_t resume_value_code[] = { ACC, 0, RETURN, 1 };
+    value resume_raise_closure;
+    value resume_value_closure;
 #ifdef THREADED_CODE
     caml_instr_table = (char **) jumptable;
     caml_instr_base = Jumptbl_base;
-    caml_thread_code(raise_unhandled_code,
-                     sizeof(raise_unhandled_code));
+    caml_thread_code(resume_raise_code,
+                     sizeof(resume_raise_code));
+    caml_thread_code(resume_value_code,
+                     sizeof(resume_value_code));
 #endif
-    value raise_unhandled_closure =
-      caml_alloc_small(1, Closure_tag);
-    Init_field(raise_unhandled_closure, 0,
-               Val_bytecode(raise_unhandled_code));
-    raise_unhandled = caml_create_root(raise_unhandled_closure);
+    resume_raise_closure = caml_alloc_small(1, Closure_tag);
+    Init_field(resume_raise_closure, 0, Val_bytecode(resume_raise_code));
+    resume_value_closure = caml_alloc_small(1, Closure_tag);
+    Init_field(resume_value_closure, 0, Val_bytecode(resume_value_code));
+    resume_raise = caml_create_root(resume_raise_closure);
+    resume_value = caml_create_root(resume_value_closure);
     caml_global_data = caml_create_root(Val_unit);
     caml_init_callbacks();
     return Val_unit;
@@ -900,6 +907,9 @@ value caml_interprete(code_t prog, asize_t prog_size)
     raise_notrace:
       if (caml_trap_sp_off > 0) {
         if (Stack_parent(caml_domain_state->current_stack) == Val_long(0)) {
+          if (Tag_val(accu) == 1) {
+            caml_fatal_error ("Fatal error: unhandled effect.\n");
+          }
           caml_external_raise = initial_external_raise;
           caml_trap_sp_off = initial_trap_sp_off;
           caml_extern_sp = caml_domain_state->stack_high - initial_stack_words;
@@ -1269,8 +1279,24 @@ do_resume:
       value heff = Stack_handle_effect(caml_domain_state->current_stack);
 
       if (parent_stack == Val_long(0)) {
-        accu = Field(caml_read_root(caml_global_data), UNHANDLED_EXN);
-        goto raise_exception;
+        value handler = Field(eff, 0);
+        if (Tag_val(eff) != 2){
+          if (Is_block(handler) && Tag_val(handler) == 2) {
+            handler = Field(handler, 0);
+          } else {
+            caml_fatal_error ("Fatal error: unhandled effect.\n");
+          }
+        }
+        sp -= 4;
+        sp[0] = eff;
+        sp[1] = Val_pc(pc);
+        sp[2] = env;
+        sp[3] = Val_long(extra_args);
+        accu = handler;
+        pc = Code_val(handler);
+        env = handler;
+        extra_args = 0;
+        goto check_stacks;
       }
 
       sp -= 4;
@@ -1306,9 +1332,33 @@ do_resume:
       sp[1] = Val_long(extra_args);
 
       if (parent == Val_long(0)) {
-        accu = performer;
-        resume_fn = caml_read_root(raise_unhandled);
-        resume_arg = Field(caml_read_root(caml_global_data), UNHANDLED_EXN);
+        value handler = Field(eff, 0);
+        if (Tag_val(eff) != 2){
+          if (Is_block(handler) && Tag_val(handler) == 2) {
+            handler = Field(handler, 0);
+          } else {
+            caml_fatal_error ("Fatal error: unhandled effect.\n");
+          }
+        }
+        value res;
+        sp -= 2;
+        sp[0] = performer;
+        sp[1] = env;
+        caml_extern_sp = sp;
+        res = caml_callback_exn (Field(eff, 0), eff);
+        sp = caml_extern_sp;
+        env = sp[1];
+        performer = sp[0];
+        sp += 2;
+        if (Is_exception_result (res)) {
+          accu = performer;
+          resume_fn = caml_read_root(resume_raise);
+          resume_arg = Extract_exception (res);
+        } else {
+          accu = performer;
+          resume_fn = caml_read_root(resume_value);
+          resume_arg = res;
+        }
         goto do_resume;
       }
 
@@ -1322,8 +1372,8 @@ do_resume:
       caml_trap_sp_off = Long_val(sp[0]);
       extra_args = Long_val(sp[1]);
       sp[0] = eff;
-      sp[1] = self;
-      accu = Stack_handle_effect(self);
+      sp[1] = old_stack;
+      accu = Stack_handle_effect(old_stack);
       pc = Code_val(accu);
       env = accu;
       extra_args += 1;
