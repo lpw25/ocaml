@@ -389,6 +389,11 @@
 #define Stack_handle_effect(REG)    32(REG)
 #define Stack_parent(REG)           40(REG)
 
+/* Header and tag */
+#define Header(REG)                 -8(REG)
+#define First(REG)                  (REG)
+#define Second(REG)                 8(REG)
+
         .text
 
         .globl  G(caml_system__code_begin)
@@ -922,9 +927,15 @@ CFI_STARTPROC
         LEA_VAR(caml_apply2, %rsi)
         jmp     *%rsi
 LBL(112):
-    /* No parent stack. Raise Unhandled. */
-        LEA_VAR(caml_exn_Unhandled, %rax)
-        jmp LBL(caml_raise_exn)
+    /* No parent stack. Use default handler. */
+        movq    First(%rax), %rbx
+        movzbq  Header(%rax), %rdi
+        cmpq    $2, %rdi
+        je      LBL(116)
+        movq    First(%rbx), %rbx
+LBL(116):
+        movq    (%rbx), %rsi
+        jmp     *%rsi
 CFI_ENDPROC
 
 FUNCTION(G(caml_reperform))
@@ -946,9 +957,21 @@ CFI_STARTPROC
         LEA_VAR(caml_apply2, %rsi)
         jmp     *%rsi
 LBL(113):
-    /* No parent stack. Raise Unhandled. */
-        LEA_VAR(caml_exn_Unhandled, %rax)
-        jmp LBL(caml_raise_exn)
+    /* No parent stack. Use default handler. */
+        movq    %r12, %rax
+    /* Get the default handler */
+        movzbq  Header(%rax), %rcx
+        cmpq    $2, %rcx
+        je      LBL(117)
+        movq    First(%rax), %rdi
+        movq    Second(%rdi), %rdi
+        LEA_VAR(caml_apply2, %rsi)
+        jmp     *%rsi
+LBL(117):
+    /* Call the default handler */
+        movq    Second(%rax), %rdi
+        LEA_VAR(caml_apply2, %rsi)
+        jmp     *%rsi
 CFI_ENDPROC
 
 FUNCTION(G(caml_resume))
@@ -985,7 +1008,7 @@ G(caml_system__code_end):
         .globl  G(caml_system__frametable)
         .align  EIGHT_ALIGN
 G(caml_system__frametable):
-        .quad   2           /* two descriptors */
+        .quad   3           /* three descriptors */
         .quad   LBL(108)    /* return address into callback */
         .value  -1          /* negative frame size => use callback link */
         .value  0           /* no roots here */
