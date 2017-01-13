@@ -129,14 +129,14 @@ method is_immediate n = n <= 0x7FFFFFFF && n >= -0x80000000
 
 method is_immediate_natint n = n <= 0x7FFFFFFFn && n >= -0x80000000n
 
-method! is_simple_expr e =
+method! effects_of e =
   match e with
   | Cop(Cextcall(fn, _, _, _), args)
     when List.mem fn inline_ops ->
-      (* inlined ops are simple if their arguments are *)
-      List.for_all self#is_simple_expr args
+      (* inlined ops' purity depends only on that of their arguments *)
+      Selectgen.Effect_and_coeffect.join_list_map args self#effects_of
   | _ ->
-      super#is_simple_expr e
+      super#effects_of e
 
 method select_addressing chunk exp =
   let (a, d) = select_addr exp in
@@ -190,7 +190,7 @@ method! select_operation op args =
       self#select_floatarith false Idivf Ifloatdiv args
   | Cextcall("sqrt", _, false, _) ->
      begin match args with
-       [Cop(Cload (Double|Double_u as chunk), [loc])] ->
+       [Cop(Cload ((Double|Double_u as chunk), _), [loc])] ->
          let (addr, arg) = self#select_addressing chunk loc in
          (Ispecific(Ifloatsqrtf addr), [arg])
      | [arg] ->
@@ -224,11 +224,12 @@ method! select_operation op args =
 
 method select_floatarith commutative regular_op mem_op args =
   match args with
-    [arg1; Cop(Cload (Double|Double_u as chunk), [loc2])] ->
+    [arg1; Cop(Cload ((Double|Double_u as chunk), _), [loc2])] ->
       let (addr, arg2) = self#select_addressing chunk loc2 in
       (Ispecific(Ifloatarithmem(mem_op, addr)),
                  [arg1; arg2])
-  | [Cop(Cload (Double|Double_u as chunk), [loc1]); arg2] when commutative ->
+  | [Cop(Cload ((Double|Double_u as chunk), _), [loc1]); arg2]
+        when commutative ->
       let (addr, arg1) = self#select_addressing chunk loc1 in
       (Ispecific(Ifloatarithmem(mem_op, addr)),
                  [arg2; arg1])
