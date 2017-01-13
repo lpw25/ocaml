@@ -207,11 +207,11 @@ expr:
   | LPAREN TRY sequence WITH bind_ident sequence RPAREN
                 { unbind_ident $5; Ctrywith($3, $5, $6) }
   | LPAREN ADDRAREF expr expr RPAREN
-      { Cop(Cload (Word_val, Mutable), [access_array $3 $4 Arch.size_addr]) }
+      { Cop(Cload (Word_val, Asttypes.Mutable), [access_array $3 $4 Arch.size_addr]) }
   | LPAREN INTAREF expr expr RPAREN
-      { Cop(Cload (Word_int, Mutable), [access_array $3 $4 Arch.size_int]) }
+      { Cop(Cload (Word_int, Asttypes.Mutable), [access_array $3 $4 Arch.size_int]) }
   | LPAREN FLOATAREF expr expr RPAREN
-      { Cop(Cload (Double_u, Mutable), [access_array $3 $4 Arch.size_float]) }
+      { Cop(Cload (Double_u, Asttypes.Mutable), [access_array $3 $4 Arch.size_float]) }
   | LPAREN ADDRASET expr expr expr RPAREN
       { Cop(Cstore (Word_val, Assignment),
             [access_array $3 $4 Arch.size_addr; $5]) }
@@ -252,7 +252,7 @@ chunk:
 
 ;
 unaryop:
-    LOAD chunk                  { Cload ($2, Mutable) }
+    LOAD chunk                  { Cload ($2, Asttypes.Mutable) }
   | ALLOC                       { Calloc }
   | FLOATOFINT                  { Cfloatofint }
   | INTOFFLOAT                  { Cintoffloat }
