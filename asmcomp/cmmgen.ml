@@ -506,9 +506,6 @@ let field_address ptr n =
 let get_field ptr n =
   Cop(Cload (Word_val, Mutable), [field_address ptr n])
 
-let get_immutable_field ptr n =
-  Cop(Cload (Word_val, Immutable), [field_address ptr n])
-
 let set_field ptr n newval init =
   Cop(Cstore (Word_val, init), [field_address ptr n; newval])
 
@@ -1684,7 +1681,7 @@ let rec transl env e =
           return_unit(Cassign(unboxed_id, transl_unbox_number env bn exp))
       end
   | Uunreachable ->
-      Cop(Cload Word_int, [Cconst_int 0])
+      Cop(Cload (Word_int, Mutable), [Cconst_int 0])
 
 and transl_make_array env kind args =
   match kind with
@@ -1738,8 +1735,6 @@ and transl_prim_1 env p arg dbg =
   (* Heap operations *)
   | Pfield n ->
       get_field (transl env arg) n
-  | Pimmutable_field n ->
-      get_immutable_field (transl env arg) n
   | Pfloatfield n ->
       let ptr = transl env arg in
       box_float(

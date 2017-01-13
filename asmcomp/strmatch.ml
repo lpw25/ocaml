@@ -72,7 +72,7 @@ module Make(I:I) = struct
 
   let mk_let_cell id str ind body =
     let cell =
-      Cop(Cload (Word_int, Mutable),
+      Cop(Cload (Word_int, Asttypes.Mutable),
         [Cop(Cadda,[str;Cconst_int(Arch.size_int*ind)])]) in
     Clet(id, cell, body)
 

@@ -294,7 +294,8 @@ method effects_of exp =
   let module EC = Effect_and_coeffect in
   match exp with
   | Cconst_int _ | Cconst_natint _ | Cconst_float _ | Cconst_symbol _
-  | Cconst_pointer _ | Cconst_natpointer _ | Cblockheader _ | Cvar _ -> EC.none
+  | Cconst_pointer _ | Cconst_natpointer _ | Cconst_blockheader _
+  | Cvar _ -> EC.none
   | Ctuple el -> EC.join_list_map el self#effects_of
   | Clet (_id, arg, body) ->
     EC.join (self#effects_of arg) (self#effects_of body)
@@ -303,13 +304,13 @@ method effects_of exp =
   | Cifthenelse (cond, ifso, ifnot) ->
     EC.join (self#effects_of cond)
       (EC.join (self#effects_of ifso) (self#effects_of ifnot))
-  | Cop (op, args, _dbg) ->
+  | Cop (op, args) ->
     let from_op =
       match op with
       | Capply _ | Cextcall _ -> EC.arbitrary
       | Calloc -> EC.none
       | Cstore _ -> EC.effect_only Effect.Arbitrary
-      | Craise _ | Ccheckbound -> EC.effect_only Effect.Raise
+      | Craise _ | Ccheckbound _ -> EC.effect_only Effect.Raise
       | Cload (_, Asttypes.Immutable) -> EC.none
       | Cload (_, Asttypes.Mutable) ->
         (* Loads from the current function's closure are a common case.
@@ -321,7 +322,7 @@ method effects_of exp =
           | None -> false
           | Some env_param ->
             match args with
-            | [Cop (Cadda, [Cvar ident; Cconst_int _], _)] ->
+            | [Cop (Cadda, [Cvar ident; Cconst_int _])] ->
               Ident.same ident env_param
             | _ -> false
         in
@@ -349,13 +350,14 @@ method effects_of exp =
 *)
 method private cannot_defer = function
   | Cconst_int _ | Cconst_natint _ | Cconst_float _ | Cconst_symbol _
-  | Cconst_pointer _ | Cconst_natpointer _ | Cblockheader _ | Cvar _ -> false
+  | Cconst_pointer _ | Cconst_natpointer _ | Cconst_blockheader _
+  | Cvar _ -> false
   | Ctuple el -> List.exists self#cannot_defer el
   | Clet (_id, arg, body) -> self#cannot_defer arg || self#cannot_defer body
   | Csequence (e1, e2) -> self#cannot_defer e1 || self#cannot_defer e2
   | Cifthenelse (cond, e1, e2) ->
     self#cannot_defer cond || self#cannot_defer e1 || self#cannot_defer e2
-  | Cop (op, args, _dbg) ->
+  | Cop (op, args) ->
     begin match op with
     | Calloc -> true
     | _ -> List.exists self#cannot_defer args
