@@ -457,7 +457,7 @@ let rec unbox_float = function
   | Cswitch(e, tbl, el) -> Cswitch(e, tbl, Array.map unbox_float el)
   | Ccatch(n, ids, e1, e2) -> Ccatch(n, ids, unbox_float e1, unbox_float e2)
   | Ctrywith(e1, id, e2) -> Ctrywith(unbox_float e1, id, unbox_float e2)
-  | c -> Cop(Cload (Double_u, Mutable), [c])
+  | c -> Cop(Cload (Double_u, Immutable), [c])
 
 (* Complex *)
 
