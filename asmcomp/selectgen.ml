@@ -283,7 +283,7 @@ class virtual selector_generic = object (self)
    [emit_parts].  This criterion is a property of the instruction selection
    algorithm in this file rather than a property of the Cmm language.
 *)
-method private is_simple_expr = function
+method is_simple_expr = function
     Cconst_int _ -> true
   | Cconst_natint _ -> true
   | Cconst_float _ -> true

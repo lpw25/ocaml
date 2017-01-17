@@ -58,6 +58,7 @@ class virtual selector_generic : object
   method virtual select_addressing :
     Cmm.memory_chunk -> Cmm.expression -> Arch.addressing_mode * Cmm.expression
     (* Must be defined to select addressing modes *)
+  method is_simple_expr: Cmm.expression -> bool
   method effects_of : Cmm.expression -> Effect_and_coeffect.t
     (* Can be overridden to reflect special extcalls known to be pure *)
   method select_operation :

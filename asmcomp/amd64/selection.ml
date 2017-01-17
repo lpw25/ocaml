@@ -129,6 +129,15 @@ method is_immediate n = n <= 0x7FFFFFFF && n >= -0x80000000
 
 method is_immediate_natint n = n <= 0x7FFFFFFFn && n >= -0x80000000n
 
+method! is_simple_expr e =
+  match e with
+  | Cop(Cextcall(fn, _, _, _), args)
+    when List.mem fn inline_ops ->
+      (* inlined ops are simple if their arguments are *)
+      List.for_all self#is_simple_expr args
+  | _ ->
+      super#is_simple_expr e
+
 method! effects_of e =
   match e with
   | Cop(Cextcall(fn, _, _, _), args)
