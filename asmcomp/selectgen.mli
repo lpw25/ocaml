@@ -30,7 +30,7 @@ end
 module Coeffect : sig
   type t =
     | None
-    | Read_mutable
+    | Arbitrary
 end
 
 module Effect_and_coeffect : sig

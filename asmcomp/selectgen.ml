@@ -208,17 +208,17 @@ end
 module Coeffect = struct
   type t =
     | None
-    | Read_mutable
+    | Arbitrary
 
   let join t1 t2 =
     match t1, t2 with
     | None, None -> None
-    | None, Read_mutable | Read_mutable, None
-    | Read_mutable, Read_mutable -> Read_mutable
+    | None, Arbitrary | Arbitrary, None
+    | Arbitrary, Arbitrary -> Arbitrary
 
   let copure = function
     | None -> true
-    | Read_mutable -> false
+    | Arbitrary -> false
 end
 
 module Effect_and_coeffect : sig
@@ -241,7 +241,7 @@ end = struct
   type t = Effect.t * Coeffect.t
 
   let none = Effect.None, Coeffect.None
-  let arbitrary = Effect.Arbitrary, Coeffect.Read_mutable
+  let arbitrary = Effect.Arbitrary, Coeffect.Arbitrary
 
   let effect (e, _ce) = e
   let coeffect (_e, ce) = ce
@@ -340,7 +340,7 @@ method effects_of exp =
             | _ -> false
         in
         if is_from_closure then EC.none
-        else EC.coeffect_only Coeffect.Read_mutable
+        else EC.coeffect_only Coeffect.Arbitrary
       | Caddi | Csubi | Cmuli | Cmulhi | Cdivi | Cmodi | Cand | Cor | Cxor
       | Clsl | Clsr | Casr | Ccmpi _ | Caddv | Cadda | Ccmpa _ | Cnegf | Cabsf
       | Caddf | Csubf | Cmulf | Cdivf | Cfloatofint | Cintoffloat | Ccmpf _ ->
@@ -820,8 +820,8 @@ method private emit_parts (env:environment) ~effects_after exp =
       | Coeffect.None ->
         (* Pure expressions may be moved. *)
         true
-      | Coeffect.Read_mutable ->
-        (* Read-mutable expressions may only be deferred if evaluation of
+      | Coeffect.Arbitrary ->
+        (* Coeffecting expressions may only be deferred if evaluation of
            every [exp'] (for [exp'] as in the comment above) has no effects
            "worse" (in the sense of the ordering in [Effect.t]) than raising
            an exception. *)
