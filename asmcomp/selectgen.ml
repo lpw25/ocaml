@@ -78,20 +78,6 @@ let size_expr_exn (env:environment) exp =
         size (Tbl.add id (size localenv arg) localenv) body
     | Csequence(e1, e2) ->
         size localenv e2
-    | Cifthenelse (_cond, ifso, ifnot) ->
-        let size_ifso = size localenv ifso in
-        let size_ifnot = size localenv ifnot in
-        let ok =
-          size_ifso = size_ifnot
-            || size_ifso = 0
-            || size_ifnot = 0
-        in
-        if not ok then begin
-          fatal_errorf "Selection.size_expr: Cifthenelse size mismatch \
-              (ifso %d, ifnot %d)"
-            size_ifso size_ifnot
-        end;
-        max size_ifso size_ifnot
     | _ ->
         raise Size_expr
   in
