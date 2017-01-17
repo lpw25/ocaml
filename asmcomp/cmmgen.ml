@@ -1738,7 +1738,7 @@ and transl_prim_1 env p arg dbg =
   | Pfloatfield n ->
       let ptr = transl env arg in
       box_float(
-        Cop(Cload (Double_u, Immutable),
+        Cop(Cload (Double_u, Mutable),
             [if n = 0 then ptr
                        else Cop(Cadda, [ptr; Cconst_int(n * size_float)])]))
   | Pint_as_pointer ->
