@@ -278,6 +278,33 @@ end
 
 class virtual selector_generic = object (self)
 
+(* A syntactic criterion used in addition to judgements about (co)effects as
+   to whether the evaluation of a given expression may be deferred by
+   [emit_parts].  This criterion is a property of the instruction selection
+   algorithm in this file rather than a property of the Cmm language.
+*)
+method private is_simple_expr = function
+    Cconst_int _ -> true
+  | Cconst_natint _ -> true
+  | Cconst_float _ -> true
+  | Cconst_symbol _ -> true
+  | Cconst_pointer _ -> true
+  | Cconst_natpointer _ -> true
+  | Cconst_blockheader _ -> true
+  | Cvar _ -> true
+  | Ctuple el -> List.for_all self#is_simple_expr el
+  | Clet(_id, arg, body) -> self#is_simple_expr arg && self#is_simple_expr body
+  | Csequence(e1, e2) -> self#is_simple_expr e1 && self#is_simple_expr e2
+  | Cop(op, args) ->
+      begin match op with
+        (* The following may have side effects *)
+      | Capply _ | Cextcall _ | Calloc | Cstore _ | Craise _ -> false
+        (* The remaining operations are simple if their args are *)
+      | _ ->
+          List.for_all self#is_simple_expr args
+      end
+  | _ -> false
+
 (* Analyses the effects and coeffects of an expression.  This is used across
    a whole list of expressions with a view to determining which expressions
    may have their evaluation deferred.  The result of this function, modulo
@@ -336,33 +363,6 @@ method effects_of exp =
     EC.join from_op (EC.join_list_map args self#effects_of)
   | Cassign _ | Cswitch _ | Cloop _ | Ccatch _ | Cexit _ | Ctrywith _ ->
     EC.arbitrary
-
-(* A syntactic criterion used in addition to judgements about (co)effects as
-   to whether the evaluation of a given expression may be deferred by
-   [emit_parts].  This criterion is a property of the instruction selection
-   algorithm in this file rather than a property of the Cmm language.
-*)
-method private is_simple_expr = function
-    Cconst_int _ -> true
-  | Cconst_natint _ -> true
-  | Cconst_float _ -> true
-  | Cconst_symbol _ -> true
-  | Cconst_pointer _ -> true
-  | Cconst_natpointer _ -> true
-  | Cconst_blockheader _ -> true
-  | Cvar _ -> true
-  | Ctuple el -> List.for_all self#is_simple_expr el
-  | Clet(_id, arg, body) -> self#is_simple_expr arg && self#is_simple_expr body
-  | Csequence(e1, e2) -> self#is_simple_expr e1 && self#is_simple_expr e2
-  | Cop(op, args) ->
-      begin match op with
-        (* The following may have side effects *)
-      | Capply _ | Cextcall _ | Calloc | Cstore _ | Craise _ -> false
-        (* The remaining operations are simple if their args are *)
-      | _ ->
-          List.for_all self#is_simple_expr args
-      end
-  | _ -> false
 
 (* Says whether an integer constant is a suitable immediate argument *)
 
