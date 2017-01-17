@@ -684,16 +684,13 @@ method emit_expr env exp =
               self#insert_move_results loc_res rd stack_ofs;
               Some rd
           | Iextcall(lbl, alloc) ->
-              begin match self#emit_extcall_args env new_args with
-              | None -> None
-              | Some (loc_arg, stack_ofs) ->
-                  let rd = self#regs_for ty in
-                  let loc_res = self#insert_op_debug (Iextcall(lbl, alloc)) dbg
-                                        loc_arg (Proc.loc_external_results rd)
-                  in
-                  self#insert_move_results loc_res rd stack_ofs;
-                  Some rd
-              end
+              let (loc_arg, stack_ofs) = self#emit_extcall_args env new_args in
+              let rd = self#regs_for ty in
+              let loc_res = self#insert_op_debug (Iextcall(lbl, alloc)) dbg
+                                    loc_arg (Proc.loc_external_results rd)
+              in
+              self#insert_move_results loc_res rd stack_ofs;
+              Some rd
           | Ialloc _ ->
               let rd = self#regs_for typ_val in
               let size = size_expr env (Ctuple new_args) in
@@ -901,13 +898,13 @@ method emit_extcall_args env args =
     Proc.loc_external_arguments (Array.of_list args)
   in
   (* Flattening [args] and [arg_hard_regs] causes parts of values split
-    across multiple registers to line up correctly, by virtue of the
-    semantics of [split_int64_for_32bit_target] in cmmgen.ml, and the
-    required semantics of [loc_external_arguments] (see proc.mli). *)
+     across multiple registers to line up correctly, by virtue of the
+     semantics of [split_int64_for_32bit_target] in cmmgen.ml, and the
+     required semantics of [loc_external_arguments] (see proc.mli). *)
   let args = Array.concat args in
   let arg_hard_regs = Array.concat (Array.to_list arg_hard_regs) in
   self#insert_move_args args arg_hard_regs stack_ofs;
-  Some (arg_hard_regs, stack_ofs)
+  arg_hard_regs, stack_ofs
 
 method emit_stores env data regs_addr =
   let a =
