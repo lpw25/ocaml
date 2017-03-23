@@ -33,14 +33,6 @@ C;;
 include M open M;;
 C;;
 
-module L = struct type v = V end
-open L;;
-V;;
-module L = struct type v = V end
-open L;;
-V;;
-
-
 type t1 = A;;
 module M1 = struct type u = v and v = t1 end;;
 module N1 = struct type u = v and v = M1.v end;;

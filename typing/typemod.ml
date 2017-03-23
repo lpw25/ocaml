@@ -431,7 +431,7 @@ let check_recmod_typedecls env sdecls decls =
 (* Auxiliaries for checking uniqueness of names in signatures and structures *)
 
 module StringSet =
-  Set.Make(struct type t = string let compare (x:t) y = compare x y end)
+  Set.Make(struct type t = string let compare (x:t) y = String.compare x y end)
 
 let check cl loc set_ref name =
   if StringSet.mem name !set_ref
@@ -587,6 +587,7 @@ and transl_signature env sg =
             let (decls, newenv) =
               Typedecl.transl_type_decl env rec_flag sdecls
             in
+            let newenv = Env.update_short_paths newenv in
             let (trem, rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_type (rec_flag, decls)) env loc :: trem,
             map_rec_type_with_row_types ~rec_flag
@@ -626,6 +627,7 @@ and transl_signature env sg =
             }
             in
             let newenv = Env.enter_module_declaration id md env in
+            let newenv = Env.update_short_paths newenv in
             let (trem, rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_module {md_id=id; md_name=pmd.pmd_name; md_type=tmty;
                                 md_loc=pmd.pmd_loc;
@@ -639,6 +641,7 @@ and transl_signature env sg =
               sdecls;
             let (decls, newenv) =
               transl_recmodule_modtypes item.psig_loc env sdecls in
+            let newenv = Env.update_short_paths newenv in
             let (trem, rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_recmodule decls) env loc :: trem,
             map_rec (fun rs md ->
@@ -654,12 +657,14 @@ and transl_signature env sg =
               Builtin_attributes.with_warning_attribute pmtd.pmtd_attributes
                 (fun () -> transl_modtype_decl names env item.psig_loc pmtd)
             in
+            let newenv = Env.update_short_paths newenv in
             let (trem, rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_modtype mtd) env loc :: trem,
             sg :: rem,
             final_env
         | Psig_open sod ->
             let (path, newenv, od) = type_open env sod in
+            let newenv = Env.update_short_paths newenv in
             let (trem, rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_open od) env loc :: trem,
             rem, final_env
@@ -674,6 +679,7 @@ and transl_signature env sg =
                        (extract_sig env smty.pmty_loc mty) in
             List.iter (check_sig_item names item.psig_loc) sg;
             let newenv = Env.add_signature sg env in
+            let newenv = Env.update_short_paths newenv in
             let incl =
               { incl_mod = tmty;
                 incl_type = sg;
@@ -690,6 +696,7 @@ and transl_signature env sg =
               (fun {pci_name} -> check_name check_type names pci_name)
               cl;
             let (classes, newenv) = Typeclass.class_descriptions env cl in
+            let newenv = Env.update_short_paths newenv in
             let (trem, rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_class
                      (List.map2
@@ -712,6 +719,7 @@ and transl_signature env sg =
               (fun {pci_name} -> check_name check_type names pci_name)
               cl;
             let (classes, newenv) = Typeclass.class_type_declarations env cl in
+            let newenv = Env.update_short_paths newenv in
             let (trem,rem, final_env) = transl_sig newenv srem in
             mksig (Tsig_class_type (List.map2 (fun pcl tcl ->
               let (_, _, _, _, _, _, _, tcl) = tcl in
@@ -1242,6 +1250,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
           (fun decl -> check_name check_type names decl.ptype_name)
           sdecls;
         let (decls, newenv) = Typedecl.transl_type_decl env rec_flag sdecls in
+        let newenv = Env.update_short_paths newenv in
         Tstr_type (rec_flag, decls),
         map_rec_type_with_row_types ~rec_flag
           (fun rs info -> Sig_type(info.typ_id, info.typ_type, rs))
@@ -1284,6 +1293,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
           }
         in
         let newenv = Env.enter_module_declaration id md env in
+        let newenv = Env.update_short_paths newenv in
         Tstr_module {mb_id=id; mb_name=name; mb_expr=modl;
                      mb_attributes=attrs;  mb_loc=pmb_loc;
                     },
@@ -1318,6 +1328,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
                  {pmd_name=name; pmd_type=smty;
                   pmd_attributes=attrs; pmd_loc=loc}) sbind
             ) in
+        let newenv = Env.update_short_paths newenv in
         let bindings1 =
           List.map2
             (fun {md_id=id; md_type=mty} (name, _, smodl, attrs, loc) ->
@@ -1347,6 +1358,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
             )
             env decls
         in
+        let newenv = Env.update_short_paths newenv in
         let bindings2 =
           check_recmodule_inclusion newenv bindings1 in
         Tstr_recmodule bindings2,
@@ -1364,15 +1376,18 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
           Builtin_attributes.with_warning_attribute pmtd.pmtd_attributes
             (fun () -> transl_modtype_decl names env loc pmtd)
         in
+        let newenv = Env.update_short_paths newenv in
         Tstr_modtype mtd, [sg], newenv
     | Pstr_open sod ->
         let (path, newenv, od) = type_open ~toplevel env sod in
+        let newenv = Env.update_short_paths newenv in
         Tstr_open od, [], newenv
     | Pstr_class cl ->
         List.iter
           (fun {pci_name} -> check_name check_type names pci_name)
           cl;
-        let (classes, new_env) = Typeclass.class_declarations env cl in
+        let (classes, newenv) = Typeclass.class_declarations env cl in
+        let newenv = Env.update_short_paths newenv in
         Tstr_class
           (List.map (fun (_,_,_,_,_,_,_,_,_,_, m, c) -> (c, m)) classes),
 (* TODO: check with Jacques why this is here
@@ -1391,12 +1406,13 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
                  Sig_type(i'', d'', rs);
                  Sig_type(i''', d''', rs)])
              classes []),
-        new_env
+        newenv
     | Pstr_class_type cl ->
         List.iter
           (fun {pci_name} -> check_name check_type names pci_name)
           cl;
-        let (classes, new_env) = Typeclass.class_type_declarations env cl in
+        let (classes, newenv) = Typeclass.class_type_declarations env cl in
+        let newenv = Env.update_short_paths newenv in
         Tstr_class_type
           (List.map (fun (i, i_loc, d, _, _, _, _, c) ->
                (i, i_loc, c)) classes),
@@ -1412,7 +1428,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
                  Sig_type(i', d', rs);
                  Sig_type(i'', d'', rs)])
              classes []),
-        new_env
+        newenv
     | Pstr_include sincl ->
         let smodl = sincl.pincl_mod in
         let modl =
@@ -1423,7 +1439,8 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
         let sg = Subst.signature Subst.identity
             (extract_sig_open env smodl.pmod_loc modl.mod_type) in
         List.iter (check_sig_item names loc) sg;
-        let new_env = Env.add_signature sg env in
+        let newenv = Env.add_signature sg env in
+        let newenv = Env.update_short_paths newenv in
         let incl =
           { incl_mod = modl;
             incl_type = sg;
@@ -1431,7 +1448,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
             incl_loc = sincl.pincl_loc;
           }
         in
-        Tstr_include incl, sg, new_env
+        Tstr_include incl, sg, newenv
     | Pstr_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Pstr_attribute x ->

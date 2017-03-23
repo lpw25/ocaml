@@ -58,6 +58,9 @@ let initial_env () =
     if !Clflags.nopervasives then initial else
     open_implicit_module "Pervasives" initial
   in
-  List.fold_left (fun env m ->
-    open_implicit_module m env
-  ) env (!implicit_modules @ List.rev !Clflags.open_modules)
+  let env =
+    List.fold_left (fun env m ->
+      open_implicit_module m env
+    ) env (!implicit_modules @ List.rev !Clflags.open_modules)
+  in
+  Env.update_short_paths env
