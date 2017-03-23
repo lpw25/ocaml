@@ -2032,10 +2032,12 @@ and fold_cltypes f =
 
 let short_paths_type_desc decl =
   let open Short_paths.Desc.Type in
-  match decl.type_manifest, decl.type_private with
-  | None, _ -> Fresh
-  | _, Private -> Fresh
-  | Some ty, _ -> begin
+  match decl.type_manifest with
+  | None -> Fresh
+  | Some ty ->
+    match decl.type_private, decl.type_kind with
+    | Private, Type_abstract -> Fresh
+    | _, _ -> begin
       match repr ty with
       | {desc = Tconstr (path, args, _)} ->
           let params = List.map repr decl.type_params in
@@ -2045,7 +2047,7 @@ let short_paths_type_desc decl =
           then Alias path
           else Fresh
       | _ -> Fresh
-  end
+    end
 
 let short_paths_module_type_desc mty =
   let open Short_paths.Desc.Module_type in
