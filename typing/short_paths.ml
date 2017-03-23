@@ -818,7 +818,7 @@ module Shortest = struct
       | Some section ->
           Section.forward ~type_ ~module_type ~module_ section id;
           true
-      | None -> all
+      | None -> not all
 
     type result =
       | Not_found_here
