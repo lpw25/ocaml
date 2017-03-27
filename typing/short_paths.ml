@@ -1399,18 +1399,18 @@ module Shortest = struct
                   else r.arg, r.func
                 in
                 let fst, snd =
-                  let not_found =
-                    Height.less_than
-                      r.min (min_application fst snd r.suffix)
+                  let should_try_app =
+                    Height.equal
+                      (min_application fst snd r.suffix) r.min
                   in
-                  if not_found then fst, snd
+                  if not should_try_app then fst, snd
                   else begin
                     let fst = step shortest fst in
-                    let not_found =
-                      Height.less_than
-                        r.min (min_application fst snd r.suffix)
+                    let should_try_app =
+                      Height.equal
+                        (min_application fst snd r.suffix) r.min
                     in
-                    if not_found then fst, snd
+                    if not should_try_app then fst, snd
                     else fst, step shortest snd
                   end
                 in
@@ -1418,21 +1418,26 @@ module Shortest = struct
                   if r.func_first then fst, snd
                   else snd, fst
                 in
-                let not_found =
-                  Height.less_than
-                    r.min (min_application func arg r.suffix)
+                let found =
+                  finished func && finished arg
+                  && Height.equal
+                       (min_application fst snd r.suffix) r.min
                 in
-                if not_found then begin
-                  let finished = searched && finished func && finished arg in
-                  let min = if finished then r.max else Height.succ r.min in
-                  Application
-                    { r with func; arg; min; searched; finished }
-                end else begin
+                if found then begin
                   let best = path_application func arg r.suffix in
                   let max = r.min in
                   let finished = true in
                   Application
                     { r with best; func; arg; max; searched; finished }
+                end else begin
+                  let finished =
+                    searched
+                    && Height.less_than_or_equal
+                         r.max (min_application fst snd r.suffix)
+                  in
+                  let min = if finished then r.max else Height.succ r.min in
+                  Application
+                    { r with func; arg; min; searched; finished }
                 end
               in
               if r.searched then try_app true
@@ -1445,8 +1450,9 @@ module Shortest = struct
                 | Sections.Found path ->
                     let best = path in
                     let max = r.min in
+                    let searched = true in
                     let finished = true in
-                    Application { r with best; max; finished }
+                    Application { r with best; max; searched; finished }
               end
         end
 
