@@ -227,6 +227,27 @@ clean::
 
 beforedepend::
 
+# Compare paths
+
+CHECKPATHS= \
+          ../compilerlibs/ocamlcommon.cma \
+          checkpaths.cmo
+
+CHECKPATHS_OPT1 = $(READ_CMT:.cmo=.cmx)
+CHECKPATHS_OPT = $(READ_CMT_OPT1:.cma=.cmxa)
+
+checkpaths: $(CHECKPATHS)
+	$(CAMLC) $(LINKFLAGS) -o checkpaths $(CHECKPATHS)
+
+checkpaths.opt: $(CHECKPATHS_OPT)
+	$(CAMLOPT) $(LINKFLAGS) -o checkpaths.opt $(CHECKPATHS)
+
+clean::
+	rm -f checkpaths checkpaths.opt
+
+beforedepend::
+
+
 # The bytecode disassembler
 
 DUMPOBJ=opnames.cmo dumpobj.cmo
