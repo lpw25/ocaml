@@ -947,8 +947,6 @@ end = struct
           end else begin
             let typ = Type.declare origin id in
             let types = Ident_map.add id typ acc.types in
-            let item = Diff.Item.Type(id, typ, None) in
-            let diff = item :: diff in
             let acc = { acc with types } in
             trace "Declaring type %a in graph\n%!"
               IdentOps.print id;
@@ -960,8 +958,6 @@ end = struct
           end else begin
             let mty = Module_type.declare origin id in
             let module_types = Ident_map.add id mty acc.module_types in
-            let item = Diff.Item.Module_type(id, mty, None) in
-            let diff = item :: diff in
             let acc = { acc with module_types } in
             trace "Declaring module type %a\n%!"
               IdentOps.print id;
@@ -973,8 +969,6 @@ end = struct
           end else begin
             let md = Module.declare origin id in
             let modules = Ident_map.add id md acc.modules in
-            let item = Diff.Item.Module(id, md, None) in
-            let diff = item :: diff in
             let acc = { acc with modules } in
             trace "Declaring module %a in graph\n%!"
               IdentOps.print id;
