@@ -394,19 +394,21 @@ let short_paths_basis = ref (Short_paths.Basis.create ())
 let short_paths_module_components_desc' = ref (fun _ -> assert false)
 
 let register_pers_for_short_paths ps =
-  let deps =
-    List.map
-      (fun (name, _) ->
+  let deps, alias_deps =
+    List.fold_left
+      (fun (deps, alias_deps) (name, digest) ->
          Short_paths.Basis.add !short_paths_basis name;
-         name)
-      ps.ps_crcs
+         match digest with
+         | None -> deps, name :: alias_deps
+         | Some _ -> name :: deps, alias_deps)
+      ([], []) ps.ps_crcs
   in
   let path = Pident (Ident.create_persistent ps.ps_name) in
   let desc =
     Short_paths.Desc.Module.(Fresh
       (Signature (lazy (!short_paths_module_components_desc' empty path ps.ps_comps))))
   in
-  Short_paths.Basis.load !short_paths_basis ps.ps_name deps desc
+  Short_paths.Basis.load !short_paths_basis ps.ps_name deps alias_deps desc
 
 (* Reading persistent structures from .cmi files *)
 

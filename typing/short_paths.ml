@@ -7,28 +7,115 @@ let trace fmt =
 
 open Short_paths_graph
 
+let print_sort ppf = function
+  | Sort.Defined ->
+      Format.fprintf ppf "Defined"
+  | Sort.Declared ids ->
+      Format.fprintf ppf "Declared(%a)"
+        Ident_set.print ids
+
 module Desc = Desc
 
-module Rev_deps = struct
+module Rev_deps : sig
 
-  type t = Dependency.Set.t Dependency.Array.t
+  type t
 
-  let get = Dependency.Array.get
+  val create : unit -> t
 
-  let add t source target =
-    let old_set = Dependency.Array.get t source in
-    let new_set = Dependency.Set.add target old_set in
-    Dependency.Array.set t source new_set
+  val extend_up_to : t -> Dependency.t -> unit
 
-  let empty = Dependency.Array.empty
+  val get : t -> Dependency.t -> Dependency.Set.t
+
+  val add : t -> source:Dependency.t -> target:Dependency.t -> unit
+
+  val add_alias : t -> source:Dependency.t -> target:Dependency.t -> unit
+
+  val before : t -> Origin.t -> Origin.t -> bool
+
+end = struct
+
+  module Stamp = Natural.Make()
+
+  type item =
+    { mutable set : Dependency.Set.t;
+      mutable edges : Dependency.t list;
+      mutable alias_edges : Dependency.t list;
+      mutable last : Stamp.t; }
+
+  type t =
+    { mutable stamp : Stamp.t;
+      mutable items : item Dependency.Array.t; }
+
+  let create () =
+    { stamp = Stamp.one;
+      items = Dependency.Array.empty; }
 
   let extend_up_to t next =
     match Dependency.pred next with
-    | None -> t
+    | None -> ()
     | Some curr ->
-      if not (Dependency.Array.contains t curr) then
-        Dependency.Array.extend t curr (fun _ -> Dependency.Set.empty)
-      else t
+      if not (Dependency.Array.contains t.items curr) then begin
+        let items =
+          Dependency.Array.extend t.items curr
+            (fun _ -> { set = Dependency.Set.empty;
+                        edges = [];
+                        alias_edges = [];
+                        last = Stamp.zero; })
+        in
+        t.items <- items
+      end
+
+  let add t ~source ~target =
+    let item = Dependency.Array.get t.items source in
+    item.edges <- target :: item.edges;
+    t.stamp <- Stamp.succ t.stamp
+
+  let add_alias t ~source ~target =
+    let item = Dependency.Array.get t.items source in
+    item.alias_edges <- target :: item.alias_edges;
+    t.stamp <- Stamp.succ t.stamp
+
+  let update t item =
+    if Stamp.less_than item.last t.stamp then begin
+      let rec add_edges t item acc =
+        let rec loop t acc added = function
+          | [] ->
+              List.fold_left
+                (fun acc dep ->
+                   let item = Dependency.Array.get t.items dep in
+                   add_alias_edges t item acc)
+                acc added
+          | dep :: rest ->
+              if Dependency.Set.mem dep acc then loop t acc added rest
+              else begin
+                let acc = Dependency.Set.add dep acc in
+                let added = dep :: added in
+                loop t acc added rest
+              end
+        in
+        loop t acc [] item.edges
+      and add_alias_edges t item acc =
+        List.fold_left
+          (fun acc dep ->
+             if Dependency.Set.mem dep acc then acc
+             else begin
+               let acc = Dependency.Set.add dep acc in
+               let item = Dependency.Array.get t.items dep in
+               let acc = add_edges t item acc in
+               add_alias_edges t item acc
+             end)
+          acc item.alias_edges
+      in
+      let set = add_edges t item Dependency.Set.empty in
+      let set = add_alias_edges t item set in
+      item.set <- set;
+      item.last <- t.stamp
+    end
+
+  let get t dep =
+    let item = Dependency.Array.get t.items dep in
+    update t item;
+    item.set
 
   let before t origin1 origin2 =
     let open Origin in
@@ -275,7 +362,13 @@ module Todo = struct
     type t =
       | Base of Diff.Item.t
       | Children of Module.t * Path.t
-      | Forward of Ident.t * Origin.t
+      | Update of
+          { id : Ident.t;
+            origin : Origin.t; }
+      | Forward of
+          { id : Ident.t;
+            decl : Origin.t;
+            origin : Origin.t; }
 
     let pp ppf = function
       | Base(Diff.Item.Type(id, _, _)) ->
@@ -290,30 +383,35 @@ module Todo = struct
       | Children(_, path) ->
           Format.fprintf ppf "Children(%a)"
             PathOps.print path
-      | Forward(id, _) ->
+      | Update{id; _} ->
+          Format.fprintf ppf "Update(%a)"
+            IdentOps.print id
+      | Forward{id; _} ->
           Format.fprintf ppf "Forward(%a)"
             IdentOps.print id
+
   end
 
   type t =
     { mutable table : Item.t Origin_range_tbl.t Height.Array.t }
 
-  let add_diff_item graph rev_deps tbl item =
-    let origin = Diff.Item.origin graph item in
-    match Diff.Item.previous graph item with
-    | None ->
-        trace "Adding todo item %a to %a\n%!"
-          Item.pp (Item.Base item) Origin.pp origin;
-        Origin_range_tbl.add rev_deps origin (Item.Base item) tbl;
-    | Some prev ->
-        let id = Diff.Item.id graph item in
-        trace "Adding todo item %a to %a\n%!"
-          Item.pp (Item.Forward(id, prev)) Origin.pp origin;
-        Origin_range_tbl.add rev_deps origin (Item.Forward(id, prev)) tbl
-
   let create graph rev_deps diff =
     let tbl = Origin_range_tbl.create () in
-    List.iter (add_diff_item graph rev_deps tbl) diff;
+    List.iter
+      (fun item ->
+         let origin = Diff.Item.origin graph item in
+         match Diff.Item.previous graph item with
+         | None ->
+             trace "Adding todo item %a to %a\n%!"
+               Item.pp (Item.Base item) Origin.pp origin;
+             Origin_range_tbl.add rev_deps origin (Item.Base item) tbl;
+         | Some decl ->
+             let id = Diff.Item.id graph item in
+             let item = Item.Forward { id; decl; origin } in
+             trace "Adding todo item %a to %a\n%!"
+               Item.pp item Origin.pp origin;
+             Origin_range_tbl.add rev_deps origin item tbl)
+      diff;
     let table = Height.Array.singleton tbl in
     { table }
 
@@ -333,14 +431,11 @@ module Todo = struct
     let rec loop height =
       match Height.pred height with
       | None ->
-          trace "Retracting todo list to length 0\n%!";
           t.table <- Height.Array.empty
       | Some prev ->
           let tbl = Height.Array.get t.table prev in
           if Origin_range_tbl.is_completely_empty tbl then loop prev
           else begin
-            trace "Retracting todo list to length %a\n%!"
-              Height.pp prev;
             t.table <- Height.Array.retract t.table height
           end
     in
@@ -351,9 +446,37 @@ module Todo = struct
       if Origin_range_tbl.is_completely_empty tbl then loop last
       else ()
 
-  let add graph rev_deps t diff =
+  let merge graph rev_deps t diff =
     let tbl = get_table t Height.one in
-    List.iter (add_diff_item graph rev_deps tbl) diff
+    List.iter
+      (fun item ->
+         match Diff.Item.previous graph item with
+         | None -> ()
+         | Some origin ->
+             let id = Diff.Item.id graph item in
+             let item = Item.Update { id; origin } in
+             trace "Adding todo item %a to %a\n%!"
+               Item.pp item Origin.pp origin;
+             Origin_range_tbl.add rev_deps origin item tbl)
+      diff
+
+  let mutate graph rev_deps t diff =
+    let tbl = get_table t Height.one in
+    List.iter
+      (fun item ->
+         match Diff.Item.previous graph item with
+         | None ->
+             let origin = Diff.Item.origin graph item in
+             trace "Adding todo item %a to %a\n%!"
+               Item.pp (Item.Base item) Origin.pp origin;
+             Origin_range_tbl.add rev_deps origin (Item.Base item) tbl;
+         | Some origin ->
+             let id = Diff.Item.id graph item in
+             let item = Item.Update { id; origin } in
+             trace "Adding todo item %a to %a\n%!"
+               Item.pp item Origin.pp origin;
+             Origin_range_tbl.add rev_deps origin item tbl)
+      diff
 
   let add_children graph rev_deps t height md path =
     let height = Height.succ height in
@@ -363,12 +486,21 @@ module Todo = struct
       Item.pp (Item.Children(md, path)) Origin.pp origin;
     Origin_range_tbl.add rev_deps origin (Item.Children(md, path)) tbl
 
-  let add_next_forward rev_deps t height origin id prev =
+  let add_next_update rev_deps t height origin id =
     let height = Height.succ height in
     let tbl = get_table t height in
+    let item = Item.Update { id; origin } in
     trace "Adding todo item %a to %a\n%!"
-      Item.pp (Item.Forward(id, prev)) Origin.pp origin;
-    Origin_range_tbl.add rev_deps origin (Item.Forward(id, prev)) tbl
+      Item.pp item Origin.pp origin;
+    Origin_range_tbl.add rev_deps origin item tbl
+
+  let add_next_forward rev_deps t height origin id decl =
+    let height = Height.succ height in
+    let tbl = get_table t height in
+    let item = Item.Forward { id; decl; origin } in
+    trace "Adding todo item %a to %a\n%!"
+      Item.pp item Origin.pp origin;
+    Origin_range_tbl.add rev_deps origin item tbl
 
   let rec is_empty_from rev_deps t height origin =
     match get_table_opt t height with
@@ -407,69 +539,92 @@ module Forward_path_map : sig
 
   val find : t -> Path.t -> Path.t list
 
-  val union : t -> t -> t
+  val rebase : t -> t -> t
 
-  val forward : (Path.t -> Path.t -> unit) -> t -> Ident.t -> unit
+  val iter_forwards : (Path.t -> Path.t -> unit) -> t -> Ident.t -> unit
+
+  val iter_updates : (Path.t -> Path.t -> unit) -> t -> Ident.t -> unit
 
   val print : Format.formatter -> t -> unit
 
 end = struct
 
   type t =
-    { paths : Path.t list Path_map.t;
-      forward : Path_set.t Ident_map.t; }
+    { new_paths : Path.t list Path_map.t;
+      old_paths : Path.t list Path_map.t;
+      updates : Path_set.t Ident_map.t;
+      forwards : Path_set.t Ident_map.t; }
 
   let empty =
-    { paths = Path_map.empty;
-      forward = Ident_map.empty; }
+    { new_paths = Path_map.empty;
+      old_paths = Path_map.empty;
+      forwards = Ident_map.empty;
+      updates = Ident_map.empty; }
 
   let add t sort path data =
-    let paths = t.paths in
+    let new_paths = t.new_paths in
     let prev =
-      match Path_map.find path paths with
+      match Path_map.find path new_paths with
       | prev -> prev
       | exception Not_found -> []
     in
-    let paths = Path_map.add path (data :: prev) paths in
-    let forward = t.forward in
-    let forward =
+    let new_paths = Path_map.add path (data :: prev) new_paths in
+    let updates = t.updates in
+    let updates =
       match sort with
-      | Sort.Defined -> forward
+      | Sort.Defined -> updates
       | Sort.Declared ids ->
           Ident_set.fold
             (fun id acc ->
                let prev =
-                 match Ident_map.find id t.forward with
+                 match Ident_map.find id updates with
                  | prev -> prev
                  | exception Not_found -> Path_set.empty
                in
                Ident_map.add id (Path_set. add path prev) acc)
-            ids forward
+            ids updates
     in
-    { paths; forward }
+    { t with new_paths; updates }
 
   let find t path =
-    Path_map.find path t.paths
+    match Path_map.find path t.new_paths with
+    | exception Not_found -> Path_map.find path t.old_paths
+    | new_paths ->
+      match Path_map.find path t.old_paths with
+      | exception Not_found -> new_paths
+      | old_paths -> new_paths @ old_paths
 
-  let union t1 t2 =
-    let choose_right _ _ data2 = Some data2 in
-    let paths =
-      Path_map.union choose_right t1.paths t2.paths
+  let rebase t base =
+    let old_paths =
+      Path_map.union
+        (fun _ paths1 paths2 -> Some (paths1 @ paths2))
+        base.new_paths base.old_paths
     in
-    let forward =
+    let forwards =
       Ident_map.union
         (fun _ pset1 pset2 -> Some (Path_set.union pset1 pset2))
-        t1.forward t2.forward
+        base.updates base.forwards
     in
-    { paths; forward }
+    { t with old_paths; forwards }
 
-  let forward f t id =
-    match Ident_map.find id t.forward with
+  let iter_updates f t id =
+    match Ident_map.find id t.updates with
     | exception Not_found -> ()
     | pset ->
         Path_set.iter
           (fun path ->
-             match find t path with
+             match Path_map.find path t.new_paths with
+             | exception Not_found -> ()
+             | paths -> List.iter (f path) paths)
+          pset
+
+  let iter_forwards f t id =
+    match Ident_map.find id t.forwards with
+    | exception Not_found -> ()
+    | pset ->
+        Path_set.iter
+          (fun path ->
+             match Path_map.find path t.old_paths with
              | exception Not_found -> ()
              | paths -> List.iter (f path) paths)
           pset
@@ -477,7 +632,10 @@ end = struct
   let print ppf t =
     Path_map.print
       (Format.pp_print_list ~pp_sep:Format.pp_print_space PathOps.print)
-      ppf t.paths
+      ppf t.new_paths;
+    Path_map.print
+      (Format.pp_print_list ~pp_sep:Format.pp_print_space PathOps.print)
+      ppf t.old_paths;
 
 end
 
@@ -582,22 +740,20 @@ module Shortest = struct
       let sort = Module.sort graph md in
       t.modules <- Forward_path_map.add t.modules sort canonical path
 
-    let merge t parent =
-      t.types <- Forward_path_map.union parent.types t.types;
-      t.module_types <- Forward_path_map.union parent.module_types t.module_types;
-      t.modules <- Forward_path_map.union parent.modules t.modules
+    let rebase t parent =
+      t.types <- Forward_path_map.rebase t.types parent.types;
+      t.module_types <- Forward_path_map.rebase t.module_types parent.module_types;
+      t.modules <- Forward_path_map.rebase t.modules parent.modules
 
-    let forward ~type_ ~module_type ~module_ t id =
-      Forward_path_map.forward type_ t.types id;
-      Forward_path_map.forward module_type t.module_types id;
-      Forward_path_map.forward module_ t.modules id
+    let iter_updates ~type_ ~module_type ~module_ t id =
+      Forward_path_map.iter_updates type_ t.types id;
+      Forward_path_map.iter_updates module_type t.module_types id;
+      Forward_path_map.iter_updates module_ t.modules id
 
-    let _print_sort ppf = function
-      | Sort.Defined ->
-          Format.fprintf ppf "Defined"
-      | Sort.Declared ids ->
-          Format.fprintf ppf "Declared(%a)"
-            Ident_set.print ids
+    let iter_forwards ~type_ ~module_type ~module_ t id =
+      Forward_path_map.iter_forwards type_ t.types id;
+      Forward_path_map.iter_forwards module_type t.module_types id;
+      Forward_path_map.iter_forwards module_ t.modules id
 
     let find_type graph t typ =
       let canonical = Type.path graph typ in
@@ -781,7 +937,7 @@ module Shortest = struct
       | Some parent ->
           let sections = expand t height in
           let section = Height.Array.get sections height in
-          Section.merge section parent;
+          Section.rebase section parent;
           set_initialised t height
       | None ->
           if is_finished parent then
@@ -804,21 +960,29 @@ module Shortest = struct
       let section = Height.Array.get sections height in
       Section.add_module graph section md path
 
+    (* returns [true] if there might be updated paths at a greater height. *)
+    let iter_updates ~type_ ~module_type ~module_ t height id =
+      match get t height with
+      | Some section ->
+          Section.iter_updates ~type_ ~module_type ~module_ section id;
+          true
+      | None -> false
+
     (* returns [true] if there might be forward paths at a greater height. *)
-    let forward ~type_ ~module_type ~module_ t height id =
-      let all =
+    let iter_forwards ~type_ ~module_type ~module_ t height id =
+      let all_initialised =
         match t.initialised with
         | All -> true
         | Until until ->
             if not (Height.less_than height until) then
-              failwith "Sections.forward: section not initialised";
+              failwith "Sections.iter_forwards: section not initialised";
             false
       in
       match get t height with
       | Some section ->
-          Section.forward ~type_ ~module_type ~module_ section id;
+          Section.iter_forwards ~type_ ~module_type ~module_ section id;
           true
-      | None -> not all
+      | None -> not all_initialised
 
     type result =
       | Not_found_here
@@ -948,6 +1112,8 @@ module Shortest = struct
               trace "Merging updates from basis in Env(%a) (%i additions)\n%!"
                 Age.pp (age t) (List.length diff);
               let graph = Graph.merge graph diff in
+              let rev_deps = History.Revision.rev_deps revision in
+              Todo.merge graph rev_deps t.todos diff;
               loop graph revision
         in
         let revision, graph = loop t.graph revision in
@@ -997,7 +1163,7 @@ module Shortest = struct
     let Basis { history } = t.kind in
     History.commit history rev_deps diff;
     t.graph <- graph;
-    Todo.add graph rev_deps t.todos diff
+    Todo.mutate graph rev_deps t.todos diff
 
   let sections t origin =
     match Origin_tbl.find t.sections origin with
@@ -1013,6 +1179,10 @@ module Shortest = struct
     if not (Path.same canonical_path path) then begin
       let origin = Type.origin t.graph typ in
       let sections = sections t origin in
+      trace "Adding type path %a for %a of sort %a to %a at height %a in Env(%a)\n%!"
+        PathOps.print path PathOps.print canonical_path print_sort
+        (Type.sort t.graph typ) Origin.pp origin Height.pp height
+        Age.pp (age t);
       Sections.add_type t.graph sections height typ path
     end
 
@@ -1099,18 +1269,54 @@ module Shortest = struct
                   end
               | Todo.Item.Children(md, path) ->
                   process_children t height path md
-              | Todo.Item.Forward(id, prev) ->
-                  process_forward t origin height id prev)
+              | Todo.Item.Update{ id; origin } ->
+                  process_update t origin height id
+              | Todo.Item.Forward{ id; decl; origin } ->
+                  process_forward t origin height id decl)
             items;
             false
 
-  and process_forward : 'k . 'k t -> _ =
-    fun t origin height id prev ->
-      trace "Processing forwarded paths from %a\n%!"
-        IdentOps.print id;
-      let sections = init t prev height in
+  and process_update : 'k . 'k t -> _ =
+    fun t origin height id ->
+      trace "Processing updated paths from %a at %a with height %a in Env(%a)\n%!"
+        IdentOps.print id Origin.pp origin Height.pp height Age.pp (age t);
+      let sections = sections t origin in
       let more =
-        Sections.forward sections height id
+        Sections.iter_updates sections height id
+          ~type_:(fun canon path ->
+            let typ = Graph.find_type t.graph canon in
+            trace "Updating %a type path from %a to %a\n%!"
+              PathOps.print path PathOps.print canon
+              PathOps.print (Type.path t.graph typ);
+            process_type t height path typ)
+          ~module_type:(fun canon path ->
+            let mty = Graph.find_module_type t.graph canon in
+            trace "Updating %a module type path from %a to %a\n%!"
+              PathOps.print path PathOps.print canon
+              PathOps.print (Module_type.path t.graph mty);
+            process_module_type t height path mty)
+          ~module_:(fun canon path ->
+            let md = Graph.find_module t.graph canon in
+            trace "Updating %a module path from %a to %a\n%!"
+              PathOps.print path PathOps.print canon
+              PathOps.print (Module.path t.graph md);
+            process_module t height path md);
+      in
+      if more then begin
+        Todo.add_next_update (rev_deps t) t.todos height origin id
+      end else begin
+        trace "No more updated paths from %a\n%!"
+          IdentOps.print id;
+      end
+
+
+  and process_forward : 'k . 'k t -> _ =
+    fun t origin height id decl ->
+      trace "Processing forwarded paths from %a at %a with height %a in Env(%a)\n%!"
+        IdentOps.print id Origin.pp decl Height.pp height Age.pp (age t);
+      let sections = init t decl height in
+      let more =
+        Sections.iter_forwards sections height id
           ~type_:(fun canon path ->
             let typ = Graph.find_type t.graph canon in
             trace "Forwarding %a type path from %a to %a\n%!"
@@ -1130,8 +1336,12 @@ module Shortest = struct
               PathOps.print (Module.path t.graph md);
             process_module t height path md);
       in
-      if more then
-        Todo.add_next_forward (rev_deps t) t.todos height origin id prev
+      if more then begin
+        Todo.add_next_forward (rev_deps t) t.todos height origin id decl
+      end else begin
+        trace "No more forwarded paths from %a\n%!"
+          IdentOps.print id;
+      end
 
   and initialise : type k. k t -> _ =
     fun t sections origin height ->
@@ -1479,74 +1689,79 @@ module Shortest = struct
 
 end
 
+module String_set = Set.Make(String)
+
 module Basis = struct
 
-  type modification =
-    | Add of
-        { name : string; }
-    | Load of
-        { name : string;
-          depends : string list;
-          desc : Desc.Module.t; }
+  type load =
+    { name : string;
+      depends : string list;
+      alias_depends : string list;
+      desc : Desc.Module.t; }
 
   type t =
     { mutable next_dep : Dependency.t;
-      mutable pending : modification list;
+      mutable pending_additions : String_set.t;
+      mutable pending_loads : load list;
       mutable assignment : Dependency.t String_map.t;
-      mutable rev_deps : Rev_deps.t;
+      rev_deps : Rev_deps.t;
       mutable shortest : Shortest.basis Shortest.t option; }
 
   let create () =
     { next_dep = Dependency.zero;
-      pending = [];
+      pending_additions = String_set.empty;
+      pending_loads = [];
       assignment = String_map.empty;
-      rev_deps = Rev_deps.empty;
+      rev_deps = Rev_deps.create ();
       shortest = None; }
 
-  let rec update_assignments t = function
-    | [] -> ()
-    | Load _ :: rest -> update_assignments t rest
-    | Add { name } :: rest ->
-      if not (String_map.mem name t.assignment) then begin
-        t.assignment <- String_map.add name t.next_dep t.assignment;
-        t.next_dep <- Dependency.succ t.next_dep
-      end;
-      update_assignments t rest
+  let update_assignments t additions =
+    String_set.iter
+      (fun name ->
+         if not (String_map.mem name t.assignment) then begin
+           t.assignment <- String_map.add name t.next_dep t.assignment;
+           t.next_dep <- Dependency.succ t.next_dep
+         end)
+      additions
 
-  let update_rev_deps t mods =
-    let rec loop = function
-      | [] -> ()
-      | Add _ :: rest -> loop rest
-      | Load { name; depends; _ } :: rest ->
-        let index = String_map.find name t.assignment in
-        List.iter
-          (fun dep_name ->
-             let dep_index = String_map.find dep_name t.assignment in
-             Rev_deps.add t.rev_deps dep_index index)
-          depends;
-        loop rest
-    in
+  let update_rev_deps t loads =
     trace "Extending rev_deps to %a\n%!"
         Dependency.pp t.next_dep;
-    let rev_deps = Rev_deps.extend_up_to t.rev_deps t.next_dep in
-    t.rev_deps <- rev_deps;
-    loop mods
+    Rev_deps.extend_up_to t.rev_deps t.next_dep;
+    List.iter
+      (fun { name; depends; alias_depends; _ } ->
+         let index = String_map.find name t.assignment in
+         List.iter
+           (fun dep_name ->
+              let dep_index = String_map.find dep_name t.assignment in
+              Rev_deps.add t.rev_deps ~source:dep_index ~target:index)
+           depends;
+         List.iter
+           (fun dep_name ->
+              let dep_index = String_map.find dep_name t.assignment in
+              Rev_deps.add_alias t.rev_deps ~source:dep_index ~target:index)
+           alias_depends)
+      loads
 
-  let update_shortest t mods =
+  let update_shortest t additions loads =
     let components =
       List.map
-        (function
-          | Add { name } ->
-              let index = String_map.find name t.assignment in
-              let origin = Origin.Dependency index in
-              let id = Ident.create_persistent name in
-              Component.Declare_module(origin, id)
-          | Load { name; desc; _ } ->
-              let index = String_map.find name t.assignment in
-              let origin = Origin.Dependency index in
-              let id = Ident.create_persistent name in
-              Component.Module(origin, id, desc, true))
-        mods
+        (fun { name; desc; _ } ->
+           let index = String_map.find name t.assignment in
+           let origin = Origin.Dependency index in
+           let id = Ident.create_persistent name in
+           Component.Module(origin, id, desc, true))
+        loads
+    in
+    let components =
+      String_set.fold
+        (fun name acc ->
+           let index = String_map.find name t.assignment in
+           let origin = Origin.Dependency index in
+           let id = Ident.create_persistent name in
+           Component.Declare_module(origin, id) :: acc)
+        additions
+        components
     in
     match t.shortest with
     | None ->
@@ -1554,21 +1769,26 @@ module Basis = struct
     | Some shortest ->
         Shortest.mutate shortest t.rev_deps components
 
-  let print_modification ppf = function
-    | Add { name } -> Format.fprintf ppf "Add(%s)" name
-    | Load { name } -> Format.fprintf ppf "Load(%s)" name
+  let print_load ppf { name; _ } =
+    Format.fprintf ppf "%s" name
 
   let update t =
-    match t.pending with
-    | [] -> ()
-    | _ :: _ as pending ->
-      trace "Updating basis (%i pending): %a\n%!"
-        (List.length pending) (Format.pp_print_list print_modification) pending;
-      t.pending <- [];
-      let mods = List.rev pending in
-      update_assignments t mods;
-      update_rev_deps t mods;
-      update_shortest t mods
+    let loads = t.pending_loads in
+    let additions = t.pending_additions in
+    match loads, String_set.is_empty additions with
+    | [], true -> ()
+    | _, _ ->
+      trace "Updating basis (%i loads) (%i additions)\n%!"
+        (List.length loads) (String_set.cardinal additions);
+      trace "Loading %a\n%!"
+        (Format.pp_print_list ~pp_sep:Format.pp_print_space print_load)
+        loads;
+      t.pending_loads <- [];
+      t.pending_additions <- String_set.empty;
+      let loads = List.rev loads in
+      update_assignments t additions;
+      update_rev_deps t loads;
+      update_shortest t additions loads
 
   let shortest t =
     update t;
@@ -1580,10 +1800,10 @@ module Basis = struct
     | Some shortest -> shortest
 
   let add t name =
-    t.pending <- Add { name } :: t.pending
+    t.pending_additions <- String_set.add name t.pending_additions
 
-  let load t name depends desc =
-    t.pending <- Load { name; depends; desc } :: t.pending
+  let load t name depends alias_depends desc =
+    t.pending_loads <- { name; depends; alias_depends; desc } :: t.pending_loads
 
 end
 

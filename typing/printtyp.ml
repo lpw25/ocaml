@@ -238,7 +238,7 @@ let rec uniq = function
     [] -> true
   | a :: l -> not (List.memq a l) && uniq l
 
-let rec normalize_type_path ?(cache=false) env p =
+let rec normalize_type_path env p =
   try
     let (params, ty, _) = Env.find_type_expansion p env in
     let params = List.map repr params in
@@ -247,12 +247,12 @@ let rec normalize_type_path ?(cache=false) env p =
         let tyl = List.map repr tyl in
         if List.length params = List.length tyl
         && List.for_all2 (==) params tyl
-        then normalize_type_path ~cache env p1
-        else if cache || List.length params <= List.length tyl
+        then normalize_type_path env p1
+        else if List.length params <= List.length tyl
              || not (uniq tyl) then (p, Id)
         else
           let l1 = List.map (index params) tyl in
-          let (p2, s2) = normalize_type_path ~cache env p1 in
+          let (p2, s2) = normalize_type_path env p1 in
           (p2, compose l1 s2)
     | ty ->
         (p, Nth (index params ty))
@@ -275,13 +275,13 @@ let best_type_path p =
   if !Clflags.real_paths || !printing_env == Env.empty
   then (p, Id)
   else
-    let (p', s) = normalize_type_path !printing_env p in
-    let p'' =
+    let (p, s) = normalize_type_path !printing_env p in
+    let p =
       match get_best_type_path !printing_env p with
-      | exception Not_found -> p'
-      | p'' -> p''
+      | exception Not_found -> p
+      | p -> p
     in
-    (p'', s)
+    (p, s)
 
 let best_type_path_subst p =
   if !Clflags.real_paths || !printing_env == Env.empty

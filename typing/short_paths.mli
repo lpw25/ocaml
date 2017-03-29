@@ -9,7 +9,7 @@ module Basis : sig
 
   val add : t -> string -> unit
 
-  val load : t -> string -> string list -> Desc.Module.t -> unit
+  val load : t -> string -> string list -> string list -> Desc.Module.t -> unit
 
 end
 
