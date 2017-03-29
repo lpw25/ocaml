@@ -463,12 +463,16 @@ let read_pers_struct check modname filename =
   register_pers_for_short_paths ps;
   ps
 
+let can_load_cmis = ref true
+let without_cmis f x =
+  Misc.(protect_refs [R (can_load_cmis, false)] (fun () -> f x))
+
 let find_pers_struct check name =
   if name = "*predef*" then raise Not_found;
   match Hashtbl.find persistent_structures name with
   | Some ps -> ps
   | None -> raise Not_found
-  | exception Not_found ->
+  | exception Not_found when !can_load_cmis ->
       let filename =
         try
           find_in_path_uncap !load_path (name ^ ".cmi")

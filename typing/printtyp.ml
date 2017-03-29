@@ -268,6 +268,9 @@ let wrap_printing_env env f =
   set_printing_env (Env.update_short_paths env);
   try_finally f (fun () -> set_printing_env Env.empty)
 
+let wrap_printing_env env f =
+  Env.without_cmis (wrap_printing_env env) f
+
 let get_best_type_path env p =
   Short_paths.find_type (Env.short_paths env) p
 
