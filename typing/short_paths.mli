@@ -19,7 +19,18 @@ val initial : Basis.t -> t
 
 val add : t -> Desc.t list Lazy.t -> t
 
-val find_type : t -> Path.t -> Path.t
+type type_result =
+  | Nth of int
+  | Path of int list option * Path.t
+
+val find_type : t -> Path.t -> type_result
+
+type type_resolution =
+  | Nth of int
+  | Subst of int list
+  | Id
+
+val find_type_resolution : t -> Path.t -> type_resolution
 
 val find_module_type : t -> Path.t -> Path.t
 

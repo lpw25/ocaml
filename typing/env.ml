@@ -2037,6 +2037,15 @@ and fold_cltypes f =
 (* Update short paths *)
 
 let short_paths_type_desc decl =
+  let rec index l x =
+    match l with
+      [] -> raise Not_found
+    | a :: l -> if x == a then 0 else 1 + index l x
+  in
+  let rec uniq = function
+      [] -> true
+    | a :: l -> not (List.memq a l) && uniq l
+  in
   let open Short_paths.Desc.Type in
   match decl.type_manifest with
   | None -> Fresh
@@ -2044,15 +2053,25 @@ let short_paths_type_desc decl =
     match decl.type_private, decl.type_kind with
     | Private, Type_abstract -> Fresh
     | _, _ -> begin
+      let params = List.map repr decl.type_params in
       match repr ty with
       | {desc = Tconstr (path, args, _)} ->
-          let params = List.map repr decl.type_params in
           let args = List.map repr args in
           if List.length params = List.length args
              && List.for_all2 (==) params args
           then Alias path
-          else Fresh
-      | _ -> Fresh
+          else if List.length params <= List.length args
+                  || not (uniq args) then Fresh
+          else begin
+            match List.map (index params) args with
+            | exception Not_found -> Fresh
+            | ns -> Subst(path, ns)
+          end
+      | ty -> begin
+          match index params ty with
+          | exception Not_found -> Fresh
+          | n -> Nth n
+        end
     end
 
 let short_paths_module_type_desc mty =

@@ -5,6 +5,8 @@ module Desc : sig
 
     type t =
       | Fresh
+      | Nth of int
+      | Subst of Path.t * int list
       | Alias of Path.t
 
   end
@@ -102,6 +104,12 @@ module Type : sig
   val path : graph -> t -> Path.t
 
   val sort : graph -> t -> Sort.t
+
+  type resolved =
+    | Nth of int
+    | Path of int list option * t
+
+  val resolve : graph -> t -> resolved
 
 end
 

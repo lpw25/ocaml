@@ -74,6 +74,8 @@ module Desc = struct
 
     type t =
       | Fresh
+      | Nth of int
+      | Subst of Path.t * int list
       | Alias of Path.t
 
   end
@@ -239,6 +241,12 @@ module rec Type : sig
 
   val sort : Graph.t -> t -> Sort.t
 
+  type resolved =
+    | Nth of int
+    | Path of int list option * t
+
+  val resolve : Graph.t -> t -> resolved
+
 end = struct
 
   open Desc.Type
@@ -246,6 +254,8 @@ end = struct
   type definition =
     | Indirection of Path.t
     | Defined
+    | Nth of int
+    | Subst of Path.t * int list
     | Unknown
 
   type t =
@@ -258,27 +268,25 @@ end = struct
           sort : Sort.t;
           definition : definition; }
 
+  let definition_of_desc (desc : Desc.Type.t option) =
+    match desc with
+    | None -> Unknown
+    | Some Fresh -> Defined
+    | Some (Nth n) -> Nth n
+    | Some (Subst(p, ns)) -> Subst(p, ns)
+    | Some (Alias alias) -> Indirection alias
+
   let base origin id desc =
     let path = Path.Pident id in
     let sort = Sort.Defined in
-    let definition =
-      match desc with
-      | None -> Unknown
-      | Some Fresh -> Defined
-      | Some (Alias alias) -> Indirection alias
-    in
+    let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
   let child root md name desc =
     let origin = Module.origin root md in
     let sort = Module.sort root md in
     let path = Path.Pdot(Module.path root md, name, 0) in
-    let definition =
-      match desc with
-      | None -> Unknown
-      | Some Fresh -> Defined
-      | Some (Alias alias) -> Indirection alias
-    in
+    let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
   let declare origin id =
@@ -298,7 +306,7 @@ end = struct
     let rec loop root t =
       match t with
       | Declaration _ -> t
-      | Definition { definition = Defined | Unknown } -> t
+      | Definition { definition = Defined | Unknown | Nth _ | Subst _ } -> t
       | Definition ({ definition = Indirection alias } as r) -> begin
           match Graph.find_type root alias with
           | exception Not_found -> Definition { r with definition = Unknown }
@@ -326,6 +334,30 @@ end = struct
     match normalize root t with
     | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
     | Definition { sort; _ } -> sort
+
+  type resolved =
+    | Nth of int
+    | Path of int list option * t
+
+  let subst ns = function
+    | Nth n -> Nth (List.nth ns n)
+    | Path(None, p) -> Path(Some ns, p)
+    | Path(Some ms, p) -> Path(Some (List.map (List.nth ns) ms), p)
+
+  let resolve root t =
+    let rec loop root t =
+      match normalize root t with
+      | Declaration _ -> Path(None, t)
+      | Definition { definition = Defined | Unknown } -> Path(None, t)
+      | Definition { definition = Nth n } -> Nth n
+      | Definition { definition = Subst(p, ns) } -> begin
+          match Graph.find_type root p with
+          | exception Not_found -> Path(None, t)
+          | aliased -> subst ns (loop root aliased)
+        end
+      | Definition { definition = Indirection _ } -> assert false
+    in
+    loop root t
 
 end
 

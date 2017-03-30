@@ -714,6 +714,21 @@ end = struct
 
 end
 
+type type_resolution =
+  | Nth of int
+  | Subst of int list
+  | Id
+
+type type_result =
+  | Nth of int
+  | Path of int list option * Path.t
+
+let print_type_result ppf = function
+  | Nth _ ->
+      Format.fprintf ppf "*nth*"
+  | Path(_, p) ->
+      PathOps.print ppf p
+
 module Shortest = struct
 
   module Section = struct
@@ -1002,21 +1017,33 @@ module Shortest = struct
       | path :: rest ->
           let visible = Graph.is_type_path_visible graph path in
           if visible then Some path
-          else get_visible_type graph rest
+          else begin
+            trace "Type path %a is not visible\n%!"
+                PathOps.print path;
+            get_visible_type graph rest
+          end
 
     let rec get_visible_module_type graph = function
       | [] -> None
       | path :: rest ->
           let visible = Graph.is_module_type_path_visible graph path in
           if visible then Some path
-          else get_visible_module_type graph rest
+          else begin
+            trace "Module type path %a is not visible\n%!"
+                PathOps.print path;
+            get_visible_module_type graph rest
+          end
 
     let rec get_visible_module graph = function
       | [] -> None
       | path :: rest ->
           let visible = Graph.is_module_path_visible graph path in
           if visible then Some path
-          else get_visible_module graph rest
+          else begin
+            trace "Module path %a is not visible\n%!"
+                PathOps.print path;
+            get_visible_module graph rest
+          end
 
     let find_type graph t height typ =
       check_initialised t height;
@@ -1489,7 +1516,7 @@ module Shortest = struct
       let base = best parent in
       Path.Pdot(base, name.name, 0)
 
-    let create (type k) shortest (kind : k kind) path =
+    let create (type k) shortest (kind : k kind) (node : k) =
       let rec loop :
         type k. k kind -> k -> Origin.t -> Sort.t -> Path.t ->
           Height.t -> string list -> Path.t -> k t =
@@ -1581,13 +1608,12 @@ module Shortest = struct
                   func; arg; suffix; func_first; searched; finished }
       in
       let graph = shortest.graph in
-      let node, canonical_path, origin, sort, max =
-        (match kind with
+      let canonical_path, origin, sort, max =
+        match kind with
         | Type ->
-            let typ = Graph.find_type graph path in
-            let canonical_path = Type.path graph typ in
-            let origin = Type.origin graph typ in
-            let sort = Type.sort graph typ in
+            let canonical_path = Type.path graph node in
+            let origin = Type.origin graph node in
+            let sort = Type.sort graph node in
             let max =
               let visible =
                 Graph.is_type_path_visible graph canonical_path
@@ -1595,12 +1621,11 @@ module Shortest = struct
               if visible then Height.measure_path canonical_path
               else Height.maximum
             in
-            typ, canonical_path, origin, sort, max
+            canonical_path, origin, sort, max
         | Module_type ->
-            let mty = Graph.find_module_type graph path in
-            let canonical_path = Module_type.path graph mty in
-            let origin = Module_type.origin graph mty in
-            let sort = Module_type.sort graph mty in
+            let canonical_path = Module_type.path graph node in
+            let origin = Module_type.origin graph node in
+            let sort = Module_type.sort graph node in
             let max =
               let visible =
                 Graph.is_module_type_path_visible graph canonical_path
@@ -1608,12 +1633,11 @@ module Shortest = struct
               if visible then Height.measure_path canonical_path
               else Height.maximum
             in
-            mty, canonical_path, origin, sort, max
+            canonical_path, origin, sort, max
         | Module ->
-            let md = Graph.find_module graph path in
-            let canonical_path = Module.path graph md in
-            let origin = Module.origin graph md in
-            let sort = Module.sort graph md in
+            let canonical_path = Module.path graph node in
+            let origin = Module.origin graph node in
+            let sort = Module.sort graph node in
             let max =
               let visible =
                 Graph.is_module_path_visible graph canonical_path
@@ -1621,7 +1645,7 @@ module Shortest = struct
               if visible then Height.measure_path canonical_path
               else Height.maximum
             in
-            md, canonical_path, origin, sort, max : k * _ * _ * _ * _)
+            canonical_path, origin, sort, max
       in
       loop kind node origin sort canonical_path max [] canonical_path
 
@@ -1784,17 +1808,32 @@ module Shortest = struct
 
   let find_type t path =
     update t;
-    let search = Search.create t Search.Type path in
-    Search.perform t search
+    let typ = Graph.find_type t.graph path in
+    match Type.resolve t.graph typ with
+    | Type.Nth n -> Nth n
+    | Type.Path(subst, typ) ->
+      let search = Search.create t Search.Type typ in
+      let path = Search.perform t search in
+      Path(subst, path)
+
+  let find_type_resolution t path : type_resolution =
+    update t;
+    let typ = Graph.find_type t.graph path in
+    match Type.resolve t.graph typ with
+    | Type.Nth n -> Nth n
+    | Type.Path(Some ns, _) -> Subst ns
+    | Type.Path(None, _) -> Id
 
   let find_module_type t path =
     update t;
-    let search = Search.create t Search.Module_type path in
+    let mty = Graph.find_module_type t.graph path in
+    let search = Search.create t Search.Module_type mty in
     Search.perform t search
 
   let find_module t path =
     update t;
-    let search = Search.create t Search.Module path in
+    let md = Graph.find_module t.graph path in
+    let search = Search.create t Search.Module md in
     Search.perform t search
 
 end
@@ -1953,38 +1992,45 @@ let initial basis = ref (Initial basis)
 let add parent desc =
   ref (Unforced { parent; desc })
 
+type ext_shortest = Shortest : 'k Shortest.t -> ext_shortest
+
+let shortest t =
+  match force t with
+  | Unforced _ -> assert false
+  | Initial basis ->
+      Basis.update basis;
+      Shortest (Basis.shortest basis)
+  | Forced { basis; shortest } ->
+      Basis.update basis;
+      Shortest shortest
+
 let find_type t path =
   trace "\n*********************************\n%!";
   trace "Finding type %a\n%!" PathOps.print path;
+  let Shortest shortest = shortest t in
   let result =
-    match force t with
-    | Unforced _ -> assert false
-    | Initial basis ->
-        Basis.update basis;
-        let shortest = Basis.shortest basis in
-        Shortest.find_type shortest path
-  | Forced { basis; shortest } ->
-      Basis.update basis;
-      Shortest.find_type shortest path
+    match Shortest.find_type shortest path with
+    | exception Not_found -> Path(None, path)
+    | result -> result
   in
-  trace "Found %a\n%!" PathOps.print result;
+  trace "Found %a\n%!" print_type_result result;
   trace "*********************************\n%!";
   result
 
+let find_type_resolution t path : type_resolution =
+  let Shortest shortest = shortest t in
+  match Shortest.find_type_resolution shortest path with
+  | exception Not_found -> Id
+  | subst -> subst
 
 let find_module_type t path =
   trace "\n*********************************\n%!";
   trace "Finding module type %a\n%!" PathOps.print path;
+  let Shortest shortest = shortest t in
   let result =
-    match force t with
-    | Unforced _ -> assert false
-    | Initial basis ->
-        Basis.update basis;
-        let shortest = Basis.shortest basis in
-        Shortest.find_module_type shortest path
-    | Forced { basis; shortest } ->
-        Basis.update basis;
-        Shortest.find_module_type shortest path
+    match Shortest.find_module_type shortest path with
+    | exception Not_found -> path
+    | path -> path
   in
   trace "Found %a\n%!" PathOps.print result;
   trace "*********************************\n%!";
@@ -1993,16 +2039,11 @@ let find_module_type t path =
 let find_module t path =
   trace "\n*********************************\n%!";
   trace "Finding module %a\n%!" PathOps.print path;
+  let Shortest shortest = shortest t in
   let result =
-    match force t with
-    | Unforced _ -> assert false
-    | Initial basis ->
-        Basis.update basis;
-        let shortest = Basis.shortest basis in
-        Shortest.find_module shortest path
-    | Forced { basis; shortest } ->
-        Basis.update basis;
-        Shortest.find_module shortest path
+    match Shortest.find_module shortest path with
+    | exception Not_found -> path
+    | path -> path
   in
   trace "Found %a\n%!" PathOps.print result;
   trace "*********************************\n%!";
