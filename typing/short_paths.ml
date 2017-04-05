@@ -1074,8 +1074,6 @@ module Shortest = struct
     update parent;
     let age = Age.succ (age parent) in
     let origin = Origin.Environment age in
-    let revision = revision parent in
-    let rev_deps = History.Revision.rev_deps revision in
     let components =
       List.map
         (fun desc ->
@@ -1095,8 +1093,10 @@ module Shortest = struct
         desc
     in
     let graph, diff = Graph.add parent.graph components in
+    let revision = revision parent in
     let kind = Env { revision; parent; age } in
     let sections = Origin_tbl.create 0 in
+    let rev_deps = History.Revision.rev_deps revision in
     let todos = Todo.create graph rev_deps diff in
     { kind; graph; sections; todos }
 

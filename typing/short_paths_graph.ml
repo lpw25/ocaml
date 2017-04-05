@@ -10,7 +10,7 @@ module Ident = struct
   let equal t1 t2 =
     if t1.stamp = 0 then
       t2.stamp = 0
-      && t1.name = t2.name
+      && String.equal t1.name t2.name
     else t1.stamp = t2.stamp
 
   let compare t1 t2 =
