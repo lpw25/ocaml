@@ -247,6 +247,26 @@ clean::
 
 beforedepend::
 
+# Benchmark merlin
+
+BENCHMERLIN= \
+          ../compilerlibs/ocamlcommon.cma \
+          benchmerlin.cmo
+
+BENCHMERLIN_OPT1 = $(READ_CMT:.cmo=.cmx)
+BENCHMERLIN_OPT = $(READ_CMT_OPT1:.cma=.cmxa)
+
+benchmerlin: $(BENCHMERLIN)
+	$(CAMLC) $(LINKFLAGS) -o benchmerlin $(BENCHMERLIN)
+
+benchmerlin.opt: $(BENCHMERLIN_OPT)
+	$(CAMLOPT) $(LINKFLAGS) -o benchmerlin.opt $(BENCHMERLIN)
+
+clean::
+	rm -f benchmerlin benchmerlin.opt
+
+beforedepend::
+
 
 # The bytecode disassembler
 
