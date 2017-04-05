@@ -456,23 +456,23 @@ end = struct
 
   type normalized = t
 
-  let normalize root t =
-    let rec loop root t =
-      match t with
-      | Declaration _ -> t
-      | Definition { definition = Defined | Unknown | Nth _ | Subst _ } -> t
-      | Definition ({ definition = Indirection alias } as r) -> begin
-          match Graph.find_type root alias with
-          | exception Not_found -> Definition { r with definition = Unknown }
-          | aliased -> loop root aliased
-        end
-    in
+  let rec normalize_loop root t =
     match t with
-    | Definition { sort = Sort.Defined } -> loop root t
+    | Declaration _ -> t
+    | Definition { definition = Defined | Unknown | Nth _ | Subst _ } -> t
+    | Definition ({ definition = Indirection alias } as r) -> begin
+        match Graph.find_type root alias with
+        | exception Not_found -> Definition { r with definition = Unknown }
+        | aliased -> normalize_loop root aliased
+      end
+
+  let normalize root t =
+    match t with
+    | Definition { sort = Sort.Defined } -> normalize_loop root t
     | Definition { sort = Sort.Declared _ } | Declaration _ ->
         match Graph.find_type root (raw_path t) with
-        | exception Not_found -> loop root t
-        | t -> loop root t
+        | exception Not_found -> normalize_loop root t
+        | t -> normalize_loop root t
 
   let unnormalize t = t
 
@@ -494,20 +494,17 @@ end = struct
     | Path(None, p) -> Path(Some ns, p)
     | Path(Some ms, p) -> Path(Some (List.map (List.nth ns) ms), p)
 
-  let resolve root t =
-    let rec loop root t =
-      match normalize root t with
-      | Declaration _ -> Path(None, t)
-      | Definition { definition = Defined | Unknown } -> Path(None, t)
-      | Definition { definition = Nth n } -> Nth n
-      | Definition { definition = Subst(p, ns) } -> begin
-          match Graph.find_type root p with
-          | exception Not_found -> Path(None, t)
-          | aliased -> subst ns (loop root aliased)
-        end
-      | Definition { definition = Indirection _ } -> assert false
-    in
-    loop root t
+  let rec resolve root t =
+    match normalize root t with
+    | Declaration _ -> Path(None, t)
+    | Definition { definition = Defined | Unknown } -> Path(None, t)
+    | Definition { definition = Nth n } -> Nth n
+    | Definition { definition = Subst(p, ns) } -> begin
+        match Graph.find_type root p with
+        | exception Not_found -> Path(None, t)
+        | aliased -> subst ns (resolve root aliased)
+      end
+    | Definition { definition = Indirection _ } -> assert false
 
 end
 
@@ -610,23 +607,23 @@ end = struct
 
   type normalized = t
 
-  let normalize root t =
-    let rec loop root t =
-      match t with
-      | Declaration _ -> t
-      | Definition { definition = Defined | Unknown } -> t
-      | Definition ({ definition = Indirection alias } as r) -> begin
-          match Graph.find_module_type root alias with
-          | exception Not_found -> Definition { r with definition = Unknown }
-          | aliased -> loop root aliased
-        end
-    in
+  let rec normalize_loop root t =
     match t with
-    | Definition { sort = Sort.Defined } -> loop root t
+    | Declaration _ -> t
+    | Definition { definition = Defined | Unknown } -> t
+    | Definition ({ definition = Indirection alias } as r) -> begin
+        match Graph.find_module_type root alias with
+        | exception Not_found -> Definition { r with definition = Unknown }
+        | aliased -> normalize_loop root aliased
+      end
+
+  let normalize root t =
+    match t with
+    | Definition { sort = Sort.Defined } -> normalize_loop root t
     | Definition { sort = Sort.Declared _ } | Declaration _ ->
         match Graph.find_module_type root (raw_path t) with
-        | exception Not_found -> loop root t
-        | t -> loop root t
+        | exception Not_found -> normalize_loop root t
+        | t -> normalize_loop root t
 
   let unnormalize t = t
 
@@ -802,23 +799,23 @@ end = struct
 
   type normalized = t
 
-  let normalize root t =
-    let rec loop root t =
-      match t with
-      | Declaration _ -> t
-      | Definition { definition = Signature _ | Functor _ | Unknown } -> t
-      | Definition ({ definition = Indirection alias } as r) -> begin
-          match Graph.find_module root alias with
-          | exception Not_found -> Definition { r with definition = Unknown }
-          | aliased -> loop root aliased
-        end
-    in
+  let rec normalize_loop root t =
     match t with
-    | Definition { sort = Sort.Defined } -> loop root t
+    | Declaration _ -> t
+    | Definition { definition = Signature _ | Functor _ | Unknown } -> t
+    | Definition ({ definition = Indirection alias } as r) -> begin
+        match Graph.find_module root alias with
+        | exception Not_found -> Definition { r with definition = Unknown }
+        | aliased -> normalize_loop root aliased
+      end
+
+  let normalize root t =
+    match t with
+    | Definition { sort = Sort.Defined } -> normalize_loop root t
     | Definition { sort = Sort.Declared _ } | Declaration _ ->
         match Graph.find_module root (raw_path t) with
-        | exception Not_found -> loop root t
-        | t -> loop root t
+        | exception Not_found -> normalize_loop root t
+        | t -> normalize_loop root t
 
   let unnormalize t = t
 
