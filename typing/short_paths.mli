@@ -1,52 +1,5 @@
 
-module Desc : sig
-
-  module Type : sig
-
-    type t =
-      | Fresh
-      | Nth of int
-      | Subst of Path.t * int list
-      | Alias of Path.t
-
-  end
-
-  module Module_type : sig
-
-    type t =
-      | Fresh
-      | Alias of Path.t
-
-  end
-
-  module Module : sig
-
-    type component =
-      | Type of string * Type.t
-      | Module_type of string * Module_type.t
-      | Module of string * t
-
-    and components = component list
-
-    and kind =
-      | Signature of components Lazy.t
-      | Functor of (Path.t -> t)
-
-    and t =
-      | Fresh of kind
-      | Alias of Path.t
-
-  end
-
-  type t =
-    | Type of Ident.t * Type.t * bool
-    | Module_type of Ident.t * Module_type.t * bool
-    | Module of Ident.t * Module.t * bool
-    | Declare_type of Ident.t
-    | Declare_module_type of Ident.t
-    | Declare_module of Ident.t
-
-end
+module Desc = Short_paths_graph.Desc
 
 module Basis : sig
 

@@ -1,205 +1,150 @@
 
 module String_map = Map.Make(String)
 
-module Age = Natural.Make()
-
-module Dependency = Natural.Make()
-
-module Height = Natural.Make_no_zero()
-
-let hidden name =
-  if name <> "" && name.[0] = '_' then true
-  else
-    try
-      for i = 1 to String.length name - 2 do
-        if name.[i] = '_' && name.[i + 1] = '_' then
-          raise Exit
-      done;
-      false
-    with Exit -> true
-
 module Ident = struct
 
-  type t =
-    | Global of
-        { dep : Dependency.t;
-          name : string;
-          hidden : bool; }
-    | Local of
-        { istamp : int;
-          name : string;
-          hidden : bool; }
+  type t = Ident.t
 
-  let global name dep =
-    let hidden = hidden name in
-    Global { dep; name; hidden }
-
-  let create smap id =
-    let istamp = id.Ident.stamp in
-    if istamp = 0 then begin
-      let name = id.Ident.name in
-      let dep = String_map.find name smap in
-      let hidden = hidden name in
-      Global { dep; name; hidden }
-    end else begin
-      let name = id.Ident.name in
-      let hidden =
-        if !Clflags.unsafe_string && Ident.same id Predef.ident_bytes then true
-        else hidden name
-      in
-      Local { istamp; name; hidden }
-    end
-
-  let compare t1 t2 =
-    match t1, t2 with
-    | Local _, Global _ -> -1
-    | Global _, Local _ -> 1
-    | Global { dep = dep1; _ }, Global { dep = dep2; _ } ->
-        Dependency.compare dep1 dep2
-    | Local { istamp = istamp1; _ }, Local { istamp = istamp2; _ } ->
-        Pervasives.compare istamp1 istamp2
+  open Ident
 
   let equal t1 t2 =
-    match t1, t2 with
-    | Local _, Global _ -> false
-    | Global _, Local _ -> false
-    | Global { dep = dep1; _ }, Global { dep = dep2; _ } ->
-        Dependency.equal dep1 dep2
-    | Local { istamp = istamp1; _ }, Local { istamp = istamp2; _ } ->
-        istamp1 = istamp2
-
-  let hidden = function
-    | Global { hidden; _ } -> hidden
-    | Local { hidden; _ } -> hidden
-
-  let name = function
-    | Global { name; _ } -> name
-    | Local { name; _ } -> name
-
-  let height t =
-    if hidden t then Height.maximum
-    else Height.one
-
-  let ident = function
-    | Global { name; _ } ->
-        Ident.create_persistent name
-    | Local { istamp; name; _ } ->
-        { Ident.stamp = istamp; name; flags = 0 }
-
-end
-
-module Path = struct
-
-  type t =
-    | Pident of Ident.t
-    | Pdot of
-        { parent : t;
-          name : string;
-          hidden : bool; }
-    | Papply of
-        { func : t;
-          arg : t; }
-
-  let create smap p =
-    let rec loop smap = function
-      | Path.Pident id -> Pident (Ident.create smap id)
-      | Path.Pdot(parent, name, _) ->
-          let parent = loop smap parent in
-          let hidden = hidden name in
-          Pdot { parent; name; hidden }
-      | Path.Papply(func, arg) ->
-          let func = loop smap func in
-          let arg = loop smap arg in
-          Papply { func; arg }
-    in
-    loop smap p
+    if t1.stamp = 0 then
+      t2.stamp = 0
+      && t1.name = t2.name
+    else t1.stamp = t2.stamp
 
   let compare t1 t2 =
-    let rec loop t1 t2 =
-      match t1, t2 with
-      | Papply _, Pident _ -> -1
-      | Pdot _, Pident _ -> -1
-      | Papply _, Pdot _ -> -1
-      | Pident _, Papply _ -> 1
-      | Pident _, Pdot _ -> 1
-      | Pdot _, Papply _ -> 1
-      | Pident id1, Pident id2 -> Ident.compare id1 id2
-      | Pdot { parent = parent1; name = name1; _ },
-        Pdot { parent = parent2; name = name2; _ } ->
-          let c = loop parent1 parent2 in
-          if c <> 0 then c
-          else String.compare name1 name2
-      | Papply { func = func1; arg = arg1 },
-        Papply { func = func2; arg = arg2} ->
-          let c = loop func1 func2 in
-          if c <> 0 then c
-          else loop arg1 arg2
-    in
-    loop t1 t2
+    if t1.stamp = 0 then
+      if t2.stamp = 0 then
+        String.compare t1.name t2.name
+      else -1
+    else Pervasives.compare t1.stamp t2.stamp
 
-  let equal t1 t2 =
-    let rec loop t1 t2 =
-      match t1, t2 with
-      | Papply _, Pident _ -> false
-      | Pdot _, Pident _ -> false
-      | Papply _, Pdot _ -> false
-      | Pident _, Papply _ -> false
-      | Pident _, Pdot _ -> false
-      | Pdot _, Papply _ -> false
-      | Pident id1, Pident id2 -> Ident.equal id1 id2
-      | Pdot { parent = parent1; name = name1; _ },
-        Pdot { parent = parent2; name = name2; _ } ->
-          loop parent1 parent2
-          && String.equal name1 name2
-      | Papply { func = func1; arg = arg1 },
-        Papply { func = func2; arg = arg2} ->
-          loop func1 func2
-          && loop arg1 arg2
-    in
-    loop t1 t2
+  let name = Ident.name
 
-  let hidden t =
-    let rec loop = function
-      | Pident id -> Ident.hidden id
-      | Pdot { parent; hidden; _ } ->
-          hidden || loop parent
-      | Papply { func; arg; _ } ->
-          loop func || loop arg
-    in
-    loop t
-
-  let height t =
-    let rec loop = function
-      | Pident id ->
-          Ident.height id
-      | Pdot { parent; name; hidden } ->
-          if hidden then Height.maximum
-          else Height.succ (loop parent)
-      | Papply { func; arg } ->
-          Height.plus (loop func) (loop arg)
-    in
-    loop t
-
-  let path t =
-    let rec loop = function
-      | Pident id -> Path.Pident (Ident.ident id)
-      | Pdot { parent; name; _ } ->
-          let parent = loop parent in
-          Path.Pdot(parent, name, 0)
-      | Papply { func; arg } ->
-          let func = loop func in
-          let arg = loop arg in
-          Path.Papply(func, arg)
-    in
-    loop t
+  let global name =
+    Ident.create_persistent name
 
 end
 
 module Ident_map = Map.Make(Ident)
 module Ident_set = Set.Make(Ident)
 
+module Path = struct
+
+  type t = Path.t =
+    | Pident of Ident.t
+    | Pdot of t * string * int
+    | Papply of t * t
+
+  open Path
+
+  let rec equal t1 t2 =
+    match t1, t2 with
+    | Pident id1, Pident id2 -> Ident.equal id1 id2
+    | Pident _, Pdot _ -> false
+    | Pident _, Papply _ -> false
+    | Pdot _, Pident _ -> false
+    | Pdot(parent1, name1, _), Pdot(parent2, name2, _) ->
+        equal parent1 parent2
+        && String.equal name1 name2
+    | Pdot _, Papply _ -> false
+    | Papply _, Pident _ -> false
+    | Papply _, Pdot _ -> false
+    | Papply(func1, arg1), Papply(func2, arg2) ->
+        equal func1 func2
+        && equal arg1 arg2
+
+  let rec compare t1 t2 =
+    match t1, t2 with
+    | Pident id1, Pident id2 -> Ident.compare id1 id2
+    | Pident _, Pdot _ -> -1
+    | Pident _, Papply _ -> -1
+    | Pdot _, Pident _ -> 1
+    | Pdot(parent1, name1, _), Pdot(parent2, name2, _) ->
+        let c = compare parent1 parent2 in
+        if c <> 0 then c
+        else String.compare name1 name2
+    | Pdot _, Papply _ -> -1
+    | Papply _, Pident _ -> 1
+    | Papply _, Pdot _ -> 1
+    | Papply(func1, arg1), Papply(func2, arg2) ->
+        let c = compare func1 func2 in
+        if c <> 0 then c
+        else compare arg1 arg2
+
+end
+
 module Path_map = Map.Make(Path)
 module Path_set = Set.Make(Path)
+
+module Desc = struct
+
+  module Type = struct
+
+    type t =
+      | Fresh
+      | Nth of int
+      | Subst of Path.t * int list
+      | Alias of Path.t
+
+  end
+
+  module Module_type = struct
+
+    type t =
+      | Fresh
+      | Alias of Path.t
+
+  end
+
+  module Module = struct
+
+    type component =
+      | Type of string * Type.t
+      | Module_type of string * Module_type.t
+      | Module of string * t
+
+    and components = component list
+
+    and kind =
+      | Signature of components Lazy.t
+      | Functor of (Path.t -> t)
+
+    and t =
+      | Fresh of kind
+      | Alias of Path.t
+
+  end
+
+  type t =
+    | Type of Ident.t * Type.t * bool
+    | Module_type of Ident.t * Module_type.t * bool
+    | Module of Ident.t * Module.t * bool
+    | Declare_type of Ident.t
+    | Declare_module_type of Ident.t
+    | Declare_module of Ident.t
+
+end
+
+module Sort = struct
+
+  type t =
+    | Defined
+    | Declared of Ident_set.t
+
+  let application t1 t2 =
+    match t1, t2 with
+    | Defined, Defined -> Defined
+    | Defined, Declared _ -> t2
+    | Declared _, Defined -> t1
+    | Declared ids1, Declared ids2 -> Declared (Ident_set.union ids1 ids2)
+
+end
+
+module Age = Natural.Make()
+
+module Dependency = Natural.Make()
 
 module Origin = struct
 
@@ -277,79 +222,6 @@ module Origin = struct
 
 end
 
-module Sort = struct
-
-  type t =
-    | Defined
-    | Declared of Ident_set.t
-
-  let application t1 t2 =
-    match t1, t2 with
-    | Defined, Defined -> Defined
-    | Defined, Declared _ -> t2
-    | Declared _, Defined -> t1
-    | Declared ids1, Declared ids2 -> Declared (Ident_set.union ids1 ids2)
-
-end
-
-module Desc = struct
-
-  module Type = struct
-
-    type t =
-      | Fresh
-      | Nth of int
-      | Subst of Path.t * int list
-      | Alias of Path.t
-
-  end
-
-  module Module_type = struct
-
-    type t =
-      | Fresh
-      | Alias of Path.t
-
-  end
-
-  module Module = struct
-
-    type component =
-      | Type of
-          { name : string;
-            hidden : bool;
-            desc : Type.t; }
-      | Module_type of
-          { name : string;
-            hidden : bool;
-            desc : Module_type.t; }
-      | Module of
-          { name : string;
-            hidden : bool;
-            desc : t; }
-
-    and components = component list
-
-    and kind =
-      | Signature of components Lazy.t
-      | Functor of (Path.t -> t)
-
-    and t =
-      | Fresh of kind
-      | Alias of Path.t
-
-  end
-
-  type t =
-    | Type of Origin.t * Ident.t * Type.t * bool
-    | Module_type of Origin.t * Ident.t * Module_type.t * bool
-    | Module of Origin.t * Ident.t * Module.t * bool
-    | Declare_type of Origin.t * Ident.t
-    | Declare_module_type of Origin.t * Ident.t
-    | Declare_module of Origin.t * Ident.t
-
-end
-
 (* CR lwhite: Should probably short-circuit indirections if they are to
     canonical entries older than the indirection. *)
 module rec Type : sig
@@ -358,7 +230,7 @@ module rec Type : sig
 
   val base : Origin.t -> Ident.t -> Desc.Type.t option -> t
 
-  val child : Module.normalized -> string -> bool -> Desc.Type.t option -> t
+  val child : Module.normalized -> string -> Desc.Type.t option -> t
 
   val declare : Origin.t -> Ident.t -> t
 
@@ -423,11 +295,10 @@ end = struct
     let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
-  let child md name hidden desc =
+  let child md name desc =
     let origin = Module.raw_origin md in
     let sort = Module.raw_sort md in
-    let parent = Module.raw_path md in
-    let path = Path.Pdot { parent; name; hidden } in
+    let path = Path.Pdot(Module.raw_path md, name, 0) in
     let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
@@ -514,8 +385,7 @@ and Module_type : sig
 
   val base : Origin.t -> Ident.t -> Desc.Module_type.t option -> t
 
-  val child :
-    Module.normalized -> string -> bool -> Desc.Module_type.t option -> t
+  val child : Module.normalized -> string -> Desc.Module_type.t option -> t
 
   val declare : Origin.t -> Ident.t -> t
 
@@ -569,11 +439,10 @@ end = struct
     in
     Definition { origin; path; sort; definition }
 
-  let child md name hidden desc =
+  let child md name desc =
     let origin = Module.raw_origin md in
     let sort = Module.raw_sort md in
-    let parent = Module.raw_path md in
-    let path = Path.Pdot { parent; name; hidden } in
+    let path = Path.Pdot (Module.raw_path md, name, 0) in
     let definition =
       match desc with
       | None -> Unknown
@@ -646,7 +515,7 @@ and Module : sig
 
   val base : Origin.t -> Ident.t -> Desc.Module.t option -> t
 
-  val child : normalized -> string -> bool -> Desc.Module.t option -> t
+  val child : normalized -> string -> Desc.Module.t option -> t
 
   val application : normalized -> t -> Desc.Module.t option -> t
 
@@ -660,17 +529,17 @@ and Module : sig
 
   val sort : Graph.t -> t -> Sort.t
 
-  val types : Graph.t -> t -> (Type.t * bool) String_map.t option
+  val types : Graph.t -> t -> Type.t String_map.t option
 
-  val module_types : Graph.t -> t -> (Module_type.t * bool) String_map.t option
+  val module_types : Graph.t -> t -> Module_type.t String_map.t option
 
-  val modules : Graph.t -> t -> (Module.t * bool) String_map.t option
+  val modules : Graph.t -> t -> Module.t String_map.t option
 
-  val find_type : Graph.t -> t -> string -> bool -> Type.t
+  val find_type : Graph.t -> t -> string -> Type.t
 
-  val find_module_type : Graph.t -> t -> string -> bool -> Module_type.t
+  val find_module_type : Graph.t -> t -> string -> Module_type.t
 
-  val find_module : Graph.t -> t -> string -> bool -> Module.t
+  val find_module : Graph.t -> t -> string -> Module.t
 
   val find_application : Graph.t -> t -> Path.t -> Module.t
 
@@ -691,9 +560,9 @@ end = struct
   type components =
     | Unforced of Desc.Module.components Lazy.t
     | Forced of
-        { types : (Type.t * bool)String_map.t;
-          module_types : (Module_type.t * bool)String_map.t;
-          modules : (t * bool) String_map.t; }
+        { types : Type.t String_map.t;
+          module_types : Module_type.t String_map.t;
+          modules : t String_map.t; }
 
   and definition =
     | Indirection of Path.t
@@ -731,11 +600,10 @@ end = struct
     in
     Definition { origin; path; sort; definition }
 
-  let child md name hidden desc =
+  let child md name desc =
     let origin = Module.raw_origin md in
     let sort = Module.raw_sort md in
-    let parent = Module.raw_path md in
-    let path = Path.Pdot { parent; name; hidden } in
+    let path = Path.Pdot(Module.raw_path md, name, 0) in
     let definition =
       match desc with
       | None -> Unknown
@@ -757,9 +625,9 @@ end = struct
     let func_sort = Module.raw_sort func in
     let arg_sort = Module.raw_sort arg in
     let sort = Sort.application func_sort arg_sort in
-    let func = Module.raw_path func in
-    let arg = Module.raw_path arg in
-    let path = Path.Papply { func; arg; } in
+    let func_path = Module.raw_path func in
+    let arg_path = Module.raw_path arg in
+    let path = Path.Papply(func_path, arg_path) in
     let definition =
       match desc with
       | None -> Unknown
@@ -843,17 +711,17 @@ end = struct
     | Signature ({ components = Unforced components; _} as r) -> begin
         let rec loop types module_types modules = function
           | [] -> Forced { types; module_types; modules }
-          | Type { name; hidden; desc } :: rest ->
-              let typ = Type.child t name hidden (Some desc) in
-              let types = String_map.add name (typ, hidden) types in
+          | Type(name, desc) :: rest ->
+              let typ = Type.child t name (Some desc) in
+              let types = String_map.add name typ types in
               loop types module_types modules rest
-          | Module_type { name; hidden; desc } :: rest ->
-              let mty = Module_type.child t name hidden (Some desc) in
-              let module_types = String_map.add name (mty, hidden) module_types in
+          | Module_type(name, desc) :: rest ->
+              let mty = Module_type.child t name (Some desc) in
+              let module_types = String_map.add name mty module_types in
               loop types module_types modules rest
-          | Module { name; hidden; desc } :: rest ->
-              let md = Module.child t name hidden (Some desc) in
-              let modules = String_map.add name (md, hidden) modules in
+          | Module(name, desc) :: rest ->
+              let md = Module.child t name (Some desc) in
+              let modules = String_map.add name md modules in
               loop types module_types modules rest
         in
         let empty = String_map.empty in
@@ -892,47 +760,44 @@ end = struct
     | Signature { components = Forced { modules; _ } } ->
         Some modules
 
-  let find_type root t name hidden =
+  let find_type root t name =
     let t = force root t in
     match definition t with
     | Indirection _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Type.child t name hidden None
+        Type.child t name None
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { types; _ }; _ } ->
-        let typ, _ = String_map.find name types in
-        typ
+        String_map.find name types
 
-  let find_module_type root t name hidden =
+  let find_module_type root t name =
     let t = force root t in
     match definition t with
     | Indirection _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Module_type.child t name hidden None
+        Module_type.child t name None
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { module_types; _ }; _ } ->
-        let mty, _ = String_map.find name module_types in
-        mty
+        String_map.find name module_types
 
-  let find_module root t name hidden =
+  let find_module root t name =
     let t = force root t in
     match definition t with
     | Indirection _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Module.child t name hidden None
+        Module.child t name None
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { modules; _ }; _ } ->
-        let md, _ = String_map.find name modules in
-        md
+        String_map.find name modules
 
   let find_application root t path =
     let t = Module.normalize root t in
@@ -1003,13 +868,25 @@ end = struct
 
 end
 
+and Component : sig
+
+  type t =
+    | Type of Origin.t * Ident.t * Desc.Type.t * bool
+    | Module_type of Origin.t * Ident.t * Desc.Module_type.t * bool
+    | Module of Origin.t * Ident.t * Desc.Module.t * bool
+    | Declare_type of Origin.t * Ident.t
+    | Declare_module_type of Origin.t * Ident.t
+    | Declare_module of Origin.t * Ident.t
+
+end = Component
+
 and Graph : sig
 
   type t
 
   val empty : t
 
-  val add : t -> Desc.t list -> t * Diff.t
+  val add : t -> Component.t list -> t * Diff.t
 
   val merge : t -> Diff.t -> t
 
@@ -1104,7 +981,7 @@ end = struct
   let add t descs =
     let rec loop acc diff declarations = function
       | [] -> loop_declarations acc diff declarations
-      | Desc.Type(origin, id, desc, concrete) :: rest ->
+      | Component.Type(origin, id, desc, concrete) :: rest ->
           let prev = previous_type acc concrete id in
           let typ = Type.base origin id (Some desc) in
           let types = Ident_map.add id typ acc.types in
@@ -1113,7 +990,7 @@ end = struct
           let diff = item :: diff in
           let acc = { acc with types; type_names } in
           loop acc diff declarations rest
-      | Desc.Module_type(origin,id, desc, concrete) :: rest ->
+      | Component.Module_type(origin,id, desc, concrete) :: rest ->
           let prev = previous_module_type acc concrete id in
           let mty = Module_type.base origin id (Some desc) in
           let module_types = Ident_map.add id mty acc.module_types in
@@ -1122,7 +999,7 @@ end = struct
           let diff = item :: diff in
           let acc = { acc with module_types; module_type_names } in
           loop acc diff declarations rest
-      | Desc.Module(origin,id, desc, concrete) :: rest ->
+      | Component.Module(origin,id, desc, concrete) :: rest ->
           let prev = previous_module acc concrete id in
           let md = Module.base origin id (Some desc) in
           let modules = Ident_map.add id md acc.modules in
@@ -1131,24 +1008,24 @@ end = struct
           let diff = item :: diff in
           let acc = { acc with modules; module_names } in
           loop acc diff declarations rest
-      | Desc.Declare_type(_, id) as decl :: rest ->
+      | Component.Declare_type(_, id) as decl :: rest ->
           let declarations = decl :: declarations in
           let type_names = add_name true id acc.type_names in
           let acc = { acc with type_names } in
           loop acc diff declarations rest
-      | Desc.Declare_module_type(_, id) as decl :: rest ->
+      | Component.Declare_module_type(_, id) as decl :: rest ->
           let declarations = decl :: declarations in
           let module_type_names = add_name true id acc.module_type_names in
           let acc = { acc with module_type_names } in
           loop acc diff declarations rest
-      | Desc.Declare_module(_, id) as decl :: rest ->
+      | Component.Declare_module(_, id) as decl :: rest ->
           let declarations = decl :: declarations in
           let module_names = add_name true id acc.module_names in
           let acc = { acc with module_names } in
           loop acc diff declarations rest
     and loop_declarations acc diff = function
       | [] -> acc, diff
-      | Desc.Declare_type(origin, id) :: rest ->
+      | Component.Declare_type(origin, id) :: rest ->
           if Ident_map.mem id acc.types then begin
             loop_declarations acc diff rest
           end else begin
@@ -1157,7 +1034,7 @@ end = struct
             let acc = { acc with types } in
             loop_declarations acc diff rest
           end
-      | Desc.Declare_module_type(origin, id) :: rest ->
+      | Component.Declare_module_type(origin, id) :: rest ->
           if Ident_map.mem id acc.module_types then begin
             loop_declarations acc diff rest
           end else begin
@@ -1166,7 +1043,7 @@ end = struct
             let acc = { acc with module_types } in
             loop_declarations acc diff rest
           end
-      | Desc.Declare_module(origin, id) :: rest ->
+      | Component.Declare_module(origin, id) :: rest ->
           if Ident_map.mem id acc.modules then begin
             loop_declarations acc diff rest
           end else begin
@@ -1175,9 +1052,9 @@ end = struct
             let acc = { acc with modules } in
             loop_declarations acc diff rest
           end
-      | ( Desc.Type _
-        | Desc.Module_type _
-        | Desc.Module _) :: _ -> assert false
+      | ( Component.Type _
+        | Component.Module_type _
+        | Component.Module _) :: _ -> assert false
     in
     loop t [] [] descs
 
@@ -1206,20 +1083,20 @@ end = struct
     match path with
     | Path.Pident id ->
         Ident_map.find id t.modules
-    | Path.Pdot { parent; name; hidden } ->
-        let md = find_module t parent in
-        Module.find_module t md name hidden
-    | Path.Papply { func; arg } ->
-        let md = find_module t func in
+    | Path.Pdot(p, name, _) ->
+        let md = find_module t p in
+        Module.find_module t md name
+    | Path.Papply(p, arg) ->
+        let md = find_module t p in
         Module.find_application t md arg
 
   let find_type t path =
     match path with
     | Path.Pident id ->
         Ident_map.find id t.types
-    | Path.Pdot { parent; name; hidden } ->
-        let md = find_module t parent in
-        Module.find_type t md name hidden
+    | Path.Pdot(p, name, _) ->
+        let md = find_module t p in
+        Module.find_type t md name
     | Path.Papply _ ->
         raise Not_found
 
@@ -1227,9 +1104,9 @@ end = struct
     match path with
     | Path.Pident id ->
         Ident_map.find id t.module_types
-    | Path.Pdot { parent; name; hidden } ->
-        let md = find_module t parent in
-        Module.find_module_type t md name hidden
+    | Path.Pdot(p, name, _) ->
+        let md = find_module t p in
+        Module.find_module_type t md name
     | Path.Papply _ ->
         raise Not_found
 
@@ -1263,11 +1140,11 @@ end = struct
             List.for_all (Path.equal path) paths
           end
       end
-    | Path.Pdot { parent; _ } ->
-        is_module_path_visible t parent
-    | Path.Papply { func; arg } ->
-        is_module_path_visible t func
-        && is_module_path_visible t arg
+    | Path.Pdot(path, _, _) ->
+        is_module_path_visible t path
+    | Path.Papply(path1, path2) ->
+        is_module_path_visible t path1
+        && is_module_path_visible t path2
 
   let is_type_path_visible t = function
     | Path.Pident id -> begin
@@ -1284,7 +1161,7 @@ end = struct
             List.for_all (Path.equal path) paths
           end
       end
-    | Path.Pdot { parent; _ } -> is_module_path_visible t parent
+    | Path.Pdot(path, _, _) -> is_module_path_visible t path
     | Path.Papply _ ->
         failwith
           "Short_paths_graph.Graph.is_type_path_visible: \
@@ -1305,7 +1182,7 @@ end = struct
             List.for_all (Path.equal path) paths
           end
       end
-    | Path.Pdot { parent; _ } -> is_module_path_visible t parent
+    | Path.Pdot(path, _, _) -> is_module_path_visible t path
     | Path.Papply _ ->
         failwith
           "Short_paths_graph.Graph.is_module_type_path_visible: \
