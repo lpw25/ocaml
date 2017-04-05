@@ -358,7 +358,7 @@ module rec Type : sig
 
   val base : Origin.t -> Ident.t -> Desc.Type.t option -> t
 
-  val child : Graph.t -> Module.t -> string -> bool -> Desc.Type.t option -> t
+  val child : Module.normalized -> string -> bool -> Desc.Type.t option -> t
 
   val declare : Origin.t -> Ident.t -> t
 
@@ -369,6 +369,18 @@ module rec Type : sig
   val path : Graph.t -> t -> Path.t
 
   val sort : Graph.t -> t -> Sort.t
+
+  type normalized
+
+  val normalize : Graph.t -> t -> normalized
+
+  val unnormalize : normalized -> t
+
+  val raw_origin : normalized -> Origin.t
+
+  val raw_path : normalized -> Path.t
+
+  val raw_sort : normalized -> Sort.t
 
   type resolved =
     | Nth of int
@@ -411,10 +423,10 @@ end = struct
     let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
-  let child root md name hidden desc =
-    let origin = Module.origin root md in
-    let sort = Module.sort root md in
-    let parent = Module.path root md in
+  let child md name hidden desc =
+    let origin = Module.raw_origin md in
+    let sort = Module.raw_sort md in
+    let parent = Module.raw_path md in
     let path = Path.Pdot { parent; name; hidden } in
     let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
@@ -427,10 +439,22 @@ end = struct
     | Definition _ -> None
     | Declaration { origin; _} -> Some origin
 
+  let raw_origin t =
+    match t with
+    | Declaration { origin; _ }
+    | Definition { origin; _ } -> origin
+
   let raw_path t =
     match t with
-    | Definition { path; _ } -> path
     | Declaration { id; _ } -> Path.Pident id
+    | Definition { path; _ } -> path
+
+  let raw_sort t =
+    match t with
+    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
+    | Definition { sort; _ } -> sort
+
+  type normalized = t
 
   let normalize root t =
     let rec loop root t =
@@ -450,20 +474,16 @@ end = struct
         | exception Not_found -> loop root t
         | t -> loop root t
 
+  let unnormalize t = t
+
   let origin root t =
-    match normalize root t with
-    | Declaration { origin; _ }
-    | Definition { origin; _ } -> origin
+    raw_origin (normalize root t)
 
   let path root t =
-    match normalize root t with
-    | Declaration { id; _ } -> Path.Pident id
-    | Definition { path; _ } -> path
+    raw_path (normalize root t)
 
   let sort root t =
-    match normalize root t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
-    | Definition { sort; _ } -> sort
+    raw_sort (normalize root t)
 
   type resolved =
     | Nth of int
@@ -498,7 +518,7 @@ and Module_type : sig
   val base : Origin.t -> Ident.t -> Desc.Module_type.t option -> t
 
   val child :
-    Graph.t -> Module.t -> string -> bool -> Desc.Module_type.t option -> t
+    Module.normalized -> string -> bool -> Desc.Module_type.t option -> t
 
   val declare : Origin.t -> Ident.t -> t
 
@@ -509,6 +529,18 @@ and Module_type : sig
   val path : Graph.t -> t -> Path.t
 
   val sort : Graph.t -> t -> Sort.t
+
+  type normalized
+
+  val normalize : Graph.t -> t -> normalized
+
+  val unnormalize : normalized -> t
+
+  val raw_origin : normalized -> Origin.t
+
+  val raw_path : normalized -> Path.t
+
+  val raw_sort : normalized -> Sort.t
 
 end = struct
 
@@ -540,10 +572,10 @@ end = struct
     in
     Definition { origin; path; sort; definition }
 
-  let child root md name hidden desc =
-    let origin = Module.origin root md in
-    let sort = Module.sort root md in
-    let parent = Module.path root md in
+  let child md name hidden desc =
+    let origin = Module.raw_origin md in
+    let sort = Module.raw_sort md in
+    let parent = Module.raw_path md in
     let path = Path.Pdot { parent; name; hidden } in
     let definition =
       match desc with
@@ -561,10 +593,22 @@ end = struct
     | Definition _ -> None
     | Declaration { origin; _} -> Some origin
 
+  let raw_origin t =
+    match t with
+    | Declaration { origin; _ } | Definition { origin; _ } ->
+        origin
+
   let raw_path t =
     match t with
-    | Definition { path; _ } -> path
     | Declaration { id; _ } -> Path.Pident id
+    | Definition { path; _ } -> path
+
+  let raw_sort t =
+    match t with
+    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
+    | Definition { sort; _ } -> sort
+
+  type normalized = t
 
   let normalize root t =
     let rec loop root t =
@@ -584,20 +628,16 @@ end = struct
         | exception Not_found -> loop root t
         | t -> loop root t
 
+  let unnormalize t = t
+
   let origin root t =
-    match normalize root t with
-    | Declaration { origin; _ } | Definition { origin; _ } ->
-        origin
+    raw_origin (normalize root t)
 
   let path root t =
-    match normalize root t with
-    | Declaration { id; _ } -> Path.Pident id
-    | Definition { path; _ } -> path
+    raw_path (normalize root t)
 
   let sort root t =
-    match normalize root t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
-    | Definition { sort; _ } -> sort
+    raw_sort (normalize root t)
 
 end
 
@@ -605,11 +645,13 @@ and Module : sig
 
   type t
 
+  type normalized
+
   val base : Origin.t -> Ident.t -> Desc.Module.t option -> t
 
-  val child : Graph.t -> t -> string -> bool -> Desc.Module.t option -> t
+  val child : normalized -> string -> bool -> Desc.Module.t option -> t
 
-  val application : Graph.t -> t -> t -> Desc.Module.t option -> t
+  val application : normalized -> t -> Desc.Module.t option -> t
 
   val declare : Origin.t -> Ident.t -> t
 
@@ -634,6 +676,16 @@ and Module : sig
   val find_module : Graph.t -> t -> string -> bool -> Module.t
 
   val find_application : Graph.t -> t -> Path.t -> Module.t
+
+  val normalize : Graph.t -> t -> normalized
+
+  val unnormalize : normalized -> t
+
+  val raw_origin : normalized -> Origin.t
+
+  val raw_path : normalized -> Path.t
+
+  val raw_sort : normalized -> Sort.t
 
 end = struct
 
@@ -682,10 +734,10 @@ end = struct
     in
     Definition { origin; path; sort; definition }
 
-  let child root md name hidden desc =
-    let origin = Module.origin root md in
-    let sort = Module.sort root md in
-    let parent = Module.path root md in
+  let child md name hidden desc =
+    let origin = Module.raw_origin md in
+    let sort = Module.raw_sort md in
+    let parent = Module.raw_path md in
     let path = Path.Pdot { parent; name; hidden } in
     let definition =
       match desc with
@@ -701,15 +753,15 @@ end = struct
     in
     Definition { origin; path; sort; definition }
 
-  let application root func arg desc =
-    let func_origin = Module.origin root func in
-    let arg_origin = Module.origin root arg in
+  let application func arg desc =
+    let func_origin = Module.raw_origin func in
+    let arg_origin = Module.raw_origin arg in
     let origin = Origin.application func_origin arg_origin in
-    let func_sort = Module.sort root func in
-    let arg_sort = Module.sort root arg in
+    let func_sort = Module.raw_sort func in
+    let arg_sort = Module.raw_sort arg in
     let sort = Sort.application func_sort arg_sort in
-    let func = Module.path root func in
-    let arg = Module.path root arg in
+    let func = Module.raw_path func in
+    let arg = Module.raw_path arg in
     let path = Path.Papply { func; arg; } in
     let definition =
       match desc with
@@ -733,10 +785,22 @@ end = struct
     | Definition _ -> None
     | Declaration { origin; _} -> Some origin
 
+  let raw_origin t =
+    match t with
+    | Declaration { origin; _ } | Definition { origin; _ } ->
+        origin
+
   let raw_path t =
     match t with
-    | Definition { path; _ } -> path
     | Declaration { id; _ } -> Path.Pident id
+    | Definition { path; _ } -> path
+
+  let raw_sort t =
+    match t with
+    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
+    | Definition { sort; _ } -> sort
+
+  type normalized = t
 
   let normalize root t =
     let rec loop root t =
@@ -756,28 +820,24 @@ end = struct
         | exception Not_found -> loop root t
         | t -> loop root t
 
+  let unnormalize t = t
+
   let origin root t =
-    match normalize root t with
-    | Declaration { origin; _ } | Definition { origin; _ } ->
-        origin
+    raw_origin (normalize root t)
 
   let path root t =
-    match normalize root t with
-    | Declaration { id; _ } -> Path.Pident id
-    | Definition { path; _ } -> path
+    raw_path (normalize root t)
 
   let sort root t =
-    match normalize root t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
-    | Definition { sort; _ } -> sort
+    raw_sort (normalize root t)
 
   let definition t =
-    match t with
+    match Module.unnormalize t with
     | Declaration _ -> Unknown
     | Definition { definition; _ } -> definition
 
   let force root t =
-    let t = normalize root t in
+    let t = Module.normalize root t in
     match definition t with
     | Indirection _ -> assert false
     | Unknown
@@ -787,15 +847,15 @@ end = struct
         let rec loop types module_types modules = function
           | [] -> Forced { types; module_types; modules }
           | Type { name; hidden; desc } :: rest ->
-              let typ = Type.child root t name hidden (Some desc) in
+              let typ = Type.child t name hidden (Some desc) in
               let types = String_map.add name (typ, hidden) types in
               loop types module_types modules rest
           | Module_type { name; hidden; desc } :: rest ->
-              let mty = Module_type.child root t name hidden (Some desc) in
+              let mty = Module_type.child t name hidden (Some desc) in
               let module_types = String_map.add name (mty, hidden) module_types in
               loop types module_types modules rest
           | Module { name; hidden; desc } :: rest ->
-              let md = Module.child root t name hidden (Some desc) in
+              let md = Module.child t name hidden (Some desc) in
               let modules = String_map.add name (md, hidden) modules in
               loop types module_types modules rest
         in
@@ -842,7 +902,7 @@ end = struct
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Type.child root t name hidden None
+        Type.child t name hidden None
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { types; _ }; _ } ->
@@ -856,7 +916,7 @@ end = struct
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Module_type.child root t name hidden None
+        Module_type.child t name hidden None
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { module_types; _ }; _ } ->
@@ -870,7 +930,7 @@ end = struct
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Module.child root t name hidden None
+        Module.child t name hidden None
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { modules; _ }; _ } ->
@@ -878,20 +938,20 @@ end = struct
         md
 
   let find_application root t path =
-    let t = normalize root t in
+    let t = Module.normalize root t in
     match definition t with
     | Indirection _ -> assert false
     | Signature _ -> raise Not_found
     | Unknown ->
         let arg = Graph.find_module root path in
-        Module.application root t arg None
+        Module.application t arg None
     | Functor ({ apply; applications } as r)->
         let arg = Graph.find_module root path in
         let arg_path = Module.path root arg in
         match Path_map.find arg_path applications with
         | md -> md
         | exception Not_found ->
-            let md = Module.application root t arg (Some (apply arg_path)) in
+            let md = Module.application t arg (Some (apply arg_path)) in
             r.applications <- Path_map.add arg_path md applications;
             md
 
