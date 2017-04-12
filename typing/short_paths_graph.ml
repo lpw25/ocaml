@@ -1,4 +1,10 @@
 
+let tracing = false
+
+let trace fmt =
+  if tracing then Format.fprintf Format.err_formatter fmt
+  else Format.ifprintf Format.err_formatter fmt
+
 module String_map = Map.Make(String)
 
 module Ident = struct
@@ -25,10 +31,27 @@ module Ident = struct
   let global name =
     Ident.create_persistent name
 
+  (* TODO remove when tracing goes *)
+  let print ppf t =
+    Format.fprintf ppf "%s"
+      (Ident.unique_toplevel_name t)
+
+  (* TODO remove when tracing goes *)
+  let output oc t =
+    Printf.fprintf oc "%s"
+      (Ident.unique_toplevel_name t)
+
+  (* TODO remove when tracing goes *)
+  let hash = Hashtbl.hash
+
 end
 
-module Ident_map = Map.Make(Ident)
-module Ident_set = Set.Make(Ident)
+(* TODO Switch back to ordinary map *)
+(* module Ident_map = Map.Make(Ident) *)
+(* module Ident_set = Set.Make(Ident) *)
+module IdentId = Identifiable.Make(Ident)
+module Ident_map = IdentId.Map
+module Ident_set = IdentId.Set
 
 module Path = struct
 
@@ -73,10 +96,35 @@ module Path = struct
         if c <> 0 then c
         else compare arg1 arg2
 
+  (* TODO remove this when you remove tracing *)
+  let rec output oc = function
+    | Pident id ->
+        Printf.fprintf oc "%a" Ident.output id
+    | Pdot(parent, name, _) ->
+        Printf.fprintf oc "%a.%s" output parent name
+    | Papply(parent, name) ->
+        Printf.fprintf oc "%a(%a)" output parent output parent
+
+  (* TODO remove this when you remove tracing *)
+  let rec print ppf = function
+    | Pident id ->
+        Format.fprintf ppf "%a" Ident.print id
+    | Pdot(parent, name, _) ->
+        Format.fprintf ppf "%a.%s" print parent name
+    | Papply(parent, name) ->
+        Format.fprintf ppf "%a(%a)" print parent print parent
+
+  (* TODO remove this when you remove tracing *)
+  let hash = Hashtbl.hash
+
 end
 
-module Path_map = Map.Make(Path)
-module Path_set = Set.Make(Path)
+(* TODO Switch back to ordinary map *)
+(* module Path_map = Map.Make(Path) *)
+(* module Path_set = Set.Make(Path) *)
+module PathId = Identifiable.Make(Path)
+module Path_map = PathId.Map
+module Path_set = PathId.Set
 
 module Desc = struct
 
@@ -219,6 +267,15 @@ module Origin = struct
     | Environment env1, Environment env2 -> Age.equal env1 env2
 
   let hash = Hashtbl.hash
+
+  let pp ppf = function
+    | Dependency dep ->
+        Format.fprintf ppf "Dep(%a)" Dependency.pp dep
+    | Dependencies deps ->
+        Format.fprintf ppf "Deps(%a)"
+          (Format.pp_print_list Dependency.pp) deps
+    | Environment age ->
+        Format.fprintf ppf "Env(%a)" Age.pp age
 
 end
 
@@ -989,6 +1046,8 @@ end = struct
           let item = Diff.Item.Type(id, typ, prev) in
           let diff = item :: diff in
           let acc = { acc with types; type_names } in
+          trace "Adding type %a to graph\n%!"
+            Ident.print id;
           loop acc diff declarations rest
       | Component.Module_type(origin,id, desc, concrete) :: rest ->
           let prev = previous_module_type acc concrete id in
@@ -998,6 +1057,8 @@ end = struct
           let item = Diff.Item.Module_type(id, mty, prev) in
           let diff = item :: diff in
           let acc = { acc with module_types; module_type_names } in
+          trace "Adding module type %a to graph\n%!"
+            Ident.print id;
           loop acc diff declarations rest
       | Component.Module(origin,id, desc, concrete) :: rest ->
           let prev = previous_module acc concrete id in
@@ -1007,6 +1068,8 @@ end = struct
           let item = Diff.Item.Module(id, md, prev) in
           let diff = item :: diff in
           let acc = { acc with modules; module_names } in
+          trace "Adding module %a to graph\n%!"
+            Ident.print id;
           loop acc diff declarations rest
       | Component.Declare_type(_, id) as decl :: rest ->
           let declarations = decl :: declarations in
@@ -1032,6 +1095,8 @@ end = struct
             let typ = Type.declare origin id in
             let types = Ident_map.add id typ acc.types in
             let acc = { acc with types } in
+            trace "Declaring type %a in graph\n%!"
+              Ident.print id;
             loop_declarations acc diff rest
           end
       | Component.Declare_module_type(origin, id) :: rest ->
@@ -1041,6 +1106,8 @@ end = struct
             let mty = Module_type.declare origin id in
             let module_types = Ident_map.add id mty acc.module_types in
             let acc = { acc with module_types } in
+            trace "Declaring module type %a\n%!"
+              Ident.print id;
             loop_declarations acc diff rest
           end
       | Component.Declare_module(origin, id) :: rest ->
@@ -1050,6 +1117,8 @@ end = struct
             let md = Module.declare origin id in
             let modules = Ident_map.add id md acc.modules in
             let acc = { acc with modules } in
+            trace "Declaring module %a in graph\n%!"
+              Ident.print id;
             loop_declarations acc diff rest
           end
       | ( Component.Type _
