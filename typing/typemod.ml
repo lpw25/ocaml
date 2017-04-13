@@ -1473,13 +1473,18 @@ let has_no_aliases_attribute smod =
   | None -> false
   | Some _ -> true
 
+let has_weak_attribute smod =
+  let weak =
+    Attr_helper.get_no_payload_attribute
+      ["weak"; "ocaml.weak"] smod.pmod_attributes
+  in
+  match weak with
+  | None -> false
+  | Some _ -> true
+
 (* Extract the module type of a module expression *)
 let type_module_type_of env smod =
-  let sttn =
-    match smod.pmod_desc with
-    | Pmod_ident _ -> false
-    | _ -> true
-  in
+  let sttn = not (has_weak_attribute smod) in
   let tmty = type_module sttn false None env smod in
   let mty = tmty.mod_type in
   (* PR#6307: expand aliases at root and submodules *)
