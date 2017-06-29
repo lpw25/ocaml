@@ -39,12 +39,6 @@ val diff: t -> t -> Ident.t list
 type type_descriptions =
     constructor_description list * label_description list
 
-(* For short-paths *)
-type iter_cont
-val iter_types:
-    (Path.t -> Path.t * (type_declaration * type_descriptions) -> unit) ->
-    t -> iter_cont
-val run_iter_cont: iter_cont list -> (Path.t * iter_cont) list
 val same_types: t -> t -> bool
 val used_persistent: unit -> Concr.t
 val find_shadowed_types: Path.t -> t -> Path.t list
@@ -265,6 +259,8 @@ val strengthen:
     (aliasable:bool -> t -> module_type -> Path.t -> module_type) ref
 (* Forward declaration to break mutual recursion with Ctype. *)
 val same_constr: (t -> type_expr -> type_expr -> bool) ref
+(* Forward delcaration to break mutual recursion with Printtyp. *)
+val shorten_module_path : (t -> Path.t -> Path.t) ref
 
 (** Folding over all identifiers (for analysis purpose) *)
 

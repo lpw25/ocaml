@@ -220,9 +220,11 @@ and functor_components = {
 
 and short_paths_addition =
   | Type of Ident.t * type_declaration
+  | Class_type of Ident.t * class_type_declaration
   | Module_type of Ident.t * modtype_declaration
   | Module of Ident.t * module_declaration * module_components
   | Type_open of Ident.t * Path.t
+  | Class_type_open of Ident.t * Path.t
   | Module_type_open of Ident.t * Path.t
   | Module_open of Ident.t * Path.t
 
@@ -326,6 +328,12 @@ let strengthen =
   (* to be filled with Mtype.strengthen *)
   ref ((fun ~aliasable:_ _env _mty _path -> assert false) :
          aliasable:bool -> t -> module_type -> Path.t -> module_type)
+
+let shorten_module_path =
+  (* to be filled with Printtyp.shorten_module_path *)
+  ref ((fun env path -> assert false) :
+         t -> Path.t -> Path.t)
+
 
 let md md_type =
   {md_type; md_attributes=[]; md_loc=Location.none}
@@ -1116,65 +1124,6 @@ let lookup_cltype ?loc lid env =
   mark_type_path env desc.clty_path;
   r
 
-(* Iter on an environment (ignoring the body of functors and
-   not yet evaluated structures) *)
-
-type iter_cont = unit -> unit
-let iter_env_cont = ref []
-
-let rec scrape_alias_for_visit env mty =
-  match mty with
-  | Mty_alias(_, Pident id)
-    when Ident.persistent id
-      && not (Hashtbl.mem persistent_structures (Ident.name id)) -> false
-  | Mty_alias(_, path) -> (* PR#6600: find_module may raise Not_found *)
-      begin try scrape_alias_for_visit env (find_module path env).md_type
-      with Not_found -> false
-      end
-  | _ -> true
-
-let iter_env proj1 proj2 f env () =
-  Ident.iter (fun id (x,_) -> f (Pident id) x) (proj1 env);
-  let rec iter_components path path' mcomps =
-    let cont () =
-      let visit =
-        match EnvLazy.get_arg mcomps.comps with
-        | None -> true
-        | Some (env, sub, path, mty) -> scrape_alias_for_visit env mty
-      in
-      if not visit then () else
-      match get_components mcomps with
-        Structure_comps comps ->
-          Tbl.iter
-            (fun s (d, n) -> f (Pdot (path, s, n)) (Pdot (path', s, n), d))
-            (proj2 comps);
-          Tbl.iter
-            (fun s (c, n) ->
-              iter_components (Pdot (path, s, n)) (Pdot (path', s, n)) c)
-            comps.comp_components
-      | Functor_comps _ -> ()
-    in iter_env_cont := (path, cont) :: !iter_env_cont
-  in
-  Hashtbl.iter
-    (fun s pso ->
-      match pso with None -> ()
-      | Some ps ->
-          let id = Pident (Ident.create_persistent s) in
-          iter_components id id ps.ps_comps)
-    persistent_structures;
-  Ident.iter
-    (fun id ((path, comps), _) -> iter_components (Pident id) path comps)
-    env.components
-
-let run_iter_cont l =
-  iter_env_cont := [];
-  List.iter (fun c -> c ()) l;
-  let cont = List.rev !iter_env_cont in
-  iter_env_cont := [];
-  cont
-
-let iter_types f = iter_env (fun env -> env.types) (fun sc -> sc.comp_types) f
-
 let same_types env1 env2 =
   env1.types == env2.types && env1.components == env2.components
 
@@ -1391,6 +1340,17 @@ let short_paths_type predef id path decl old =
       match path with
       | Pident id' when Ident.same id id' -> Type(id, decl)
       | _ -> Type_open(id, path)
+    in
+    addition :: old
+  end
+
+let short_paths_class_type id path decl old =
+  if !Clflags.real_paths then old
+  else begin
+    let addition =
+      match path with
+      | Pident id' when Ident.same id id' -> Class_type(id, decl)
+      | _ -> Class_type_open(id, path)
     in
     addition :: old
   end
@@ -1689,7 +1649,9 @@ and store_cltype slot id path desc env renv =
   { env with
     cltypes = EnvTbl.add slot (fun x -> `Class_type x) id (path, desc)
         env.cltypes renv.cltypes;
-    summary = Env_cltype(env.summary, id, desc) }
+    summary = Env_cltype(env.summary, id, desc);
+    short_paths_additions =
+      short_paths_class_type id path desc env.short_paths_additions; }
 
 (* Compute the components of a functor application in a path. *)
 
@@ -1759,16 +1721,13 @@ let add_local_constraint id info elv env =
       { env with local_constraints = true }
   | _ -> assert false
 
-let store_type ~check slot id path info env renv =
-  store_type ~check ~predef:false slot id path info env renv
-
 (* Insertion of bindings by name *)
 
 let enter store_fun name data env =
   let id = Ident.create name in (id, store_fun None id (Pident id) data env env)
 
 let enter_value ?check = enter (store_value ?check)
-and enter_type = enter (store_type ~check:true)
+and enter_type = enter (store_type ~check:true ~predef:false)
 and enter_extension = enter (store_extension ~check:true)
 and enter_module_declaration ?arg id md env =
   add_module_declaration ?arg id md env
@@ -1815,7 +1774,8 @@ let open_signature slot root sg env0 =
           Sig_value(id, decl) ->
             store_value slot (Ident.hide id) p decl env env0
         | Sig_type(id, decl, _) ->
-            store_type ~check:false slot (Ident.hide id) p decl env env0
+            store_type ~check:false ~predef:false
+              slot (Ident.hide id) p decl env env0
         | Sig_typext(id, ext, _) ->
             store_extension ~check:false slot (Ident.hide id) p ext env env0
         | Sig_module(id, mty, _) ->
@@ -1846,8 +1806,10 @@ let open_signature ?(loc = Location.none) ?(toplevel = false) ovf root sg env =
     let used = ref false in
     !add_delayed_check_forward
       (fun () ->
-        if not !used then
+        if not !used then begin
+          let root = !shorten_module_path env root in
           Location.prerr_warning loc (Warnings.Unused_open (Path.name root))
+        end
       );
     let shadowed = ref [] in
     let slot s b =
@@ -2036,43 +1998,64 @@ and fold_cltypes f =
 
 (* Update short paths *)
 
+let rec index l x =
+  match l with
+    [] -> raise Not_found
+  | a :: l -> if x == a then 0 else 1 + index l x
+
+let rec uniq = function
+    [] -> true
+  | a :: l -> not (List.memq a l) && uniq l
+
 let short_paths_type_desc decl =
-  let rec index l x =
-    match l with
-      [] -> raise Not_found
-    | a :: l -> if x == a then 0 else 1 + index l x
-  in
-  let rec uniq = function
-      [] -> true
-    | a :: l -> not (List.memq a l) && uniq l
-  in
   let open Short_paths.Desc.Type in
   match decl.type_manifest with
   | None -> Fresh
   | Some ty ->
-    match decl.type_private, decl.type_kind with
-    | Private, Type_abstract -> Fresh
-    | _, _ -> begin
-      let params = List.map repr decl.type_params in
-      match repr ty with
-      | {desc = Tconstr (path, args, _)} ->
-          let args = List.map repr args in
-          if List.length params = List.length args
-             && List.for_all2 (==) params args
-          then Alias path
-          else if List.length params <= List.length args
-                  || not (uniq args) then Fresh
-          else begin
-            match List.map (index params) args with
+    if ty.level <> generic_level then Fresh
+    else begin
+      match decl.type_private, decl.type_kind with
+      | Private, Type_abstract -> Fresh
+      | _, _ -> begin
+        let params = List.map repr decl.type_params in
+        match repr ty with
+        | {desc = Tconstr (path, args, _)} ->
+            let args = List.map repr args in
+            if List.length params = List.length args
+               && List.for_all2 (==) params args
+            then Alias path
+            else if List.length params <= List.length args
+                    || not (uniq args) then Fresh
+            else begin
+              match List.map (index params) args with
+              | exception Not_found -> Fresh
+              | ns -> Subst(path, ns)
+            end
+        | ty -> begin
+            match index params ty with
             | exception Not_found -> Fresh
-            | ns -> Subst(path, ns)
+            | n -> Nth n
           end
-      | ty -> begin
-          match index params ty with
-          | exception Not_found -> Fresh
-          | n -> Nth n
-        end
+      end
     end
+
+let short_paths_class_type_desc clty =
+  let open Short_paths.Desc.Class_type in
+  match clty.clty_type with
+  | Cty_signature _ | Cty_arrow _ -> Fresh
+  | Cty_constr(path, args, _) ->
+      let params = List.map repr clty.clty_params in
+      let args = List.map repr args in
+      if List.length params = List.length args
+      && List.for_all2 (==) params args
+      then Alias path
+      else if List.length params <= List.length args
+             || not (uniq args) then Fresh
+      else begin
+        match List.map (index params) args with
+        | exception Not_found -> Fresh
+        | ns -> Subst(path, ns)
+      end
 
 let short_paths_module_type_desc mty =
   let open Short_paths.Desc.Module_type in
@@ -2113,6 +2096,14 @@ and short_paths_module_components_desc env mpath comp =
              let item = Short_paths.Desc.Module.Type(name, desc) in
              item :: acc)
           c.comp_types []
+      in
+       let comps =
+         Tbl.fold
+          (fun name (clty, _) acc ->
+             let desc = short_paths_class_type_desc clty in
+             let item = Short_paths.Desc.Module.Class_type(name, desc) in
+             item :: acc)
+          c.comp_cltypes comps
       in
       let comps =
         Tbl.fold
@@ -2165,6 +2156,9 @@ let short_paths_additions_desc env additions =
       | Type(id, decl) ->
           let desc = short_paths_type_desc decl in
           Short_paths.Desc.Type(id, desc, true)
+      | Class_type(id, clty) ->
+          let desc = short_paths_class_type_desc clty in
+          Short_paths.Desc.Class_type(id, desc, true)
       | Module_type(id, mtd) ->
           let desc = short_paths_module_type_desc mtd.mtd_type in
           Short_paths.Desc.Module_type(id, desc, true)
@@ -2175,6 +2169,10 @@ let short_paths_additions_desc env additions =
           let id = Ident.rename id in
           let desc = Short_paths.Desc.Type.Alias path in
           Short_paths.Desc.Type(id, desc, false)
+      | Class_type_open(id, path) ->
+          let id = Ident.rename id in
+          let desc = Short_paths.Desc.Class_type.Alias path in
+          Short_paths.Desc.Class_type(id, desc, false)
       | Module_type_open(id, path) ->
           let id = Ident.rename id in
           let desc = Short_paths.Desc.Module_type.Alias path in
