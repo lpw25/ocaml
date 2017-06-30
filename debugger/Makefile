@@ -37,6 +37,7 @@ OTHEROBJS=\
   $(UNIXDIR)/unix.cma \
   ../utils/config.cmo ../utils/tbl.cmo ../utils/misc.cmo \
   ../utils/identifiable.cmo ../utils/numbers.cmo \
+  ../utils/natural.cmo \
   ../utils/arg_helper.cmo ../utils/clflags.cmo \
   ../utils/consistbl.cmo ../utils/warnings.cmo \
   ../utils/terminfo.cmo \
@@ -48,6 +49,7 @@ OTHEROBJS=\
   ../typing/ident.cmo ../typing/path.cmo ../typing/types.cmo \
   ../typing/btype.cmo ../typing/primitive.cmo ../typing/typedtree.cmo \
   ../typing/subst.cmo ../typing/predef.cmo \
+  ../typing/short_paths_graph.cmo ../typing/short_paths.cmo \
   ../typing/datarepr.cmo ../typing/cmi_format.cmo ../typing/env.cmo \
   ../typing/oprint.cmo \
   ../typing/ctype.cmo ../typing/printtyp.cmo ../typing/mtype.cmo \

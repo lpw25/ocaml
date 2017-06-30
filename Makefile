@@ -88,7 +88,7 @@ UTILS=utils/config.cmo utils/misc.cmo \
   utils/terminfo.cmo utils/ccomp.cmo utils/warnings.cmo \
   utils/consistbl.cmo \
   utils/strongly_connected_components.cmo \
-  utils/targetint.cmo
+  utils/natural.cmo utils/targetint.cmo
 
 PARSING=parsing/location.cmo parsing/longident.cmo \
   parsing/docstrings.cmo parsing/syntaxerr.cmo \
@@ -102,6 +102,7 @@ TYPING=typing/ident.cmo typing/path.cmo \
   typing/primitive.cmo typing/types.cmo \
   typing/btype.cmo typing/oprint.cmo \
   typing/subst.cmo typing/predef.cmo \
+  typing/short_paths_graph.cmo typing/short_paths.cmo \
   typing/datarepr.cmo typing/cmi_format.cmo typing/env.cmo \
   typing/typedtree.cmo typing/printtyped.cmo typing/ctype.cmo \
   typing/printtyp.cmo typing/includeclass.cmo \

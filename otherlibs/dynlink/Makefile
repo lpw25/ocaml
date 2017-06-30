@@ -40,6 +40,7 @@ OBJS=dynlinkaux.cmo dynlink.cmo
 COMPILEROBJS=\
   ../../utils/misc.cmo ../../utils/config.cmo \
   ../../utils/identifiable.cmo ../../utils/numbers.cmo \
+  ../../utils/natural.cmo \
   ../../utils/arg_helper.cmo ../../utils/clflags.cmo \
   ../../utils/tbl.cmo ../../utils/consistbl.cmo \
   ../../utils/terminfo.cmo ../../utils/warnings.cmo \
@@ -53,6 +54,7 @@ COMPILEROBJS=\
   ../../typing/ident.cmo ../../typing/path.cmo \
   ../../typing/primitive.cmo ../../typing/types.cmo \
   ../../typing/btype.cmo ../../typing/subst.cmo ../../typing/predef.cmo \
+  ../../typing/short_paths_graph.cmo ../../typing/short_paths.cmo \
   ../../typing/datarepr.cmo ../../typing/cmi_format.cmo ../../typing/env.cmo \
   ../../bytecomp/lambda.cmo ../../bytecomp/instruct.cmo \
   ../../bytecomp/cmo_format.cmi ../../bytecomp/opcodes.cmo \

@@ -6,13 +6,6 @@
   let () = f (module N);;
                      ^
 Error: Signature mismatch:
-       Modules do not match:
-         sig type 'a t = 'a end
-       is not included in
-         sig type t = N.t end
-       Type declarations do not match:
-         type 'a t = 'a
-       is not included in
-         type t = N.t
-       They have different arities.
+       Modules do not match: sig type 'a t = 'a end is not included in S
+       Type t has a different arity.
 # 
