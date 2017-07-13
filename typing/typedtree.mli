@@ -331,6 +331,7 @@ and module_expr_desc =
     (** ME          (constraint = Tmodtype_implicit)
         (ME : MT)   (constraint = Tmodtype_explicit MT)
      *)
+  | Tmod_tconstraint of module_expr * module_type * module_coercion
   | Tmod_unpack of expression * Types.module_type
 
 and structure = {

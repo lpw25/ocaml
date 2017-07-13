@@ -793,13 +793,20 @@ class texi =
       let resolve_alias_name = function
         | { m_kind = Module_alias { ma_name = name } } -> name
         | { m_name = name } -> name in
+      let constr = match m.m_kind with
+        | Module_alias { ma_constraint = Some mty } ->
+          Raw (" <: " ^ Odoc_info.string_of_module_type mty)
+        | _ -> Raw ""
+      in
       let t =
         [ [ self#fixedblock
               [ Newline ; minus ; Raw "module " ;
                 Raw (Name.simple m.m_name) ;
                 Raw (if is_alias m
                 then " = " ^ (resolve_alias_name m)
-                else "" ) ] ] ;
+                else "" );
+                constr
+              ] ] ;
           ( if is_alias_there m
           then [ Ref (resolve_alias_name m, Some RK_module, None) ;
                  Newline ; ]

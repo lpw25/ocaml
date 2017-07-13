@@ -522,14 +522,18 @@ class virtual to_text =
     method text_of_module_kind ?(with_def_syntax=true) k =
       match k with
         Module_alias m_alias ->
-          (match m_alias.ma_module with
+        let alias_name = (match m_alias.ma_module with
             None ->
               [Code ((if with_def_syntax then " = " else "")^m_alias.ma_name)]
           | Some (Mod m) ->
               [Code ((if with_def_syntax then " = " else "")^m.m_name)]
           | Some (Modtype mt) ->
               [Code ((if with_def_syntax then " = " else "")^mt.mt_name)]
-          )
+        ) in
+        let constr = (match m_alias.ma_constraint with
+          | None -> []
+          | Some mty -> [Code " <: "] @ self#text_of_module_type mty
+        ) in alias_name @ constr
       | Module_apply (k1, k2) ->
           (if with_def_syntax then [Code " = "] else []) @
           (self#text_of_module_kind ~with_def_syntax: false k1) @

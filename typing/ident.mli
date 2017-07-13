@@ -59,6 +59,7 @@ type 'a tbl
         (* Association tables from identifiers to type 'a. *)
 
 val empty: 'a tbl
+val is_empty : 'a tbl -> bool
 val add: t -> 'a -> 'a tbl -> 'a tbl
 val find_same: t -> 'a tbl -> 'a
 val find_name: string -> 'a tbl -> t * 'a

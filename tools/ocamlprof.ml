@@ -384,6 +384,7 @@ and rewrite_mod iflag smod =
   | Pmod_functor(_param, _smty, sbody) -> rewrite_mod iflag sbody
   | Pmod_apply(smod1, smod2) -> rewrite_mod iflag smod1; rewrite_mod iflag smod2
   | Pmod_constraint(smod, _smty) -> rewrite_mod iflag smod
+  | Pmod_tconstraint(smod, _smty) -> rewrite_mod iflag smod
   | Pmod_unpack(sexp) -> rewrite_exp iflag sexp
   | Pmod_extension _ -> ()
 

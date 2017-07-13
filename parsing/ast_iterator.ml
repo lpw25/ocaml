@@ -281,6 +281,8 @@ module M = struct
         sub.module_expr sub m1; sub.module_expr sub m2
     | Pmod_constraint (m, mty) ->
         sub.module_expr sub m; sub.module_type sub mty
+    | Pmod_tconstraint (m, mty) ->
+        sub.module_expr sub m; sub.module_type sub mty
     | Pmod_unpack e -> sub.expr sub e
     | Pmod_extension x -> sub.extension sub x
 

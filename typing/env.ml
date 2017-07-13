@@ -617,7 +617,11 @@ let check_modtype_inclusion =
 let strengthen =
   (* to be filled with Mtype.strengthen *)
   ref ((fun ~aliasable:_ _env _mty _path -> assert false) :
-         aliasable:bool -> t -> module_type -> Path.t -> module_type)
+       aliasable:[`Aliasable | `Aliasable_with_constraints | `Not_aliasable] ->
+       t -> module_type -> Path.t -> module_type)
+
+let realize_value_path = ref ((fun ~loc:_ ~env:_ _ -> assert false) :
+                                (loc:Location.t -> env:t -> Path.t -> Path.t))
 
 let md md_type =
   {md_type; md_attributes=[]; md_loc=Location.none}
@@ -1017,6 +1021,17 @@ let find_module_with_addr ~alias path env =
           raise Not_found
       end
 
+let find_module_alias = find_module ~alias:true
+let find_module = find_module ~alias:false
+
+let may_find_modtype path env = try
+    (find_modtype path env).mtd_type
+  with Not_found -> None
+
+let may_find_module path env = try
+    Some (find_module path env)
+  with Not_found -> None
+
 let required_globals = ref []
 let reset_required_globals () = required_globals := []
 let get_required_globals () = !required_globals
@@ -1050,9 +1065,7 @@ let rec normalize_path ~only_absent ~lax env path =
           path'
     end
   | _ -> path
-  with Not_found when lax
-  || (match path with Pident id -> not (Ident.persistent id) | _ -> true) ->
-      path
+  | exception Not_found -> path
 
 let normalize_path_prefix ~only_absent ~lax env path =
   match path with
@@ -1560,10 +1573,11 @@ let iter_env_cont = ref []
 
 let rec scrape_alias_for_visit env mty =
   match mty with
-  | Mty_alias (Pident id)
+  | Mty_alias (Pident id, _)
     when Ident.persistent id
       && not (Hashtbl.mem persistent_structures (Ident.name id)) -> false
-  | Mty_alias path -> (* PR#6600: find_module may raise Not_found *)
+  | Mty_alias(_, Some _) -> true
+  | Mty_alias(path, _) -> (* PR#6600: find_module may raise Not_found *)
       begin try scrape_alias_for_visit env (find_module path env).md_type
       with Not_found -> false
       end
@@ -1656,27 +1670,36 @@ let find_shadowed_types path env =
 
 (* Expand manifest module type names at the top of the given module type *)
 
-let rec scrape_alias env ?path mty =
-  match mty, path with
-    Mty_ident p, _ ->
-      begin try
-        scrape_alias env (find_modtype_expansion p env) ?path
-      with Not_found ->
-        mty
+let rec scrape_ident env mty = match mty with
+  | Mty_ident p -> begin
+      match may_find_modtype p env with
+        | Some found_mty -> scrape_ident env found_mty
+        | None -> mty
       end
-  | Mty_alias path, _ ->
-      begin try
-        scrape_alias env (find_module path env).md_type ~path
-      with Not_found ->
-        (*Location.prerr_warning Location.none
-          (Warnings.No_cmi_file (Path.name path));*)
-        mty
-      end
-  | mty, Some path ->
-      !strengthen ~aliasable:true env mty path
   | _ -> mty
 
-let scrape_alias env mty = scrape_alias env mty
+let rec scrape_only_alias env ?(strengthened=true) ?path mty =
+  match mty, path, strengthened with
+  | Mty_alias(_, alias_path, None), _, _ -> begin
+      match may_find_module alias_path env with
+        | Some { md_type } ->
+          scrape_only_alias ~strengthened env md_type ~path:alias_path
+        | None -> mty
+      end
+  | Mty_alias(_, alias_path, Some cmty), _, true ->
+      !strengthen ~aliasable:`Aliasable_with_constraints env cmty alias_path
+  | Mty_alias(_, _, Some cmty), _, false ->
+      cmty
+  | mty, Some path, true ->
+      !strengthen ~aliasable:`Aliasable env mty path
+  | _ -> mty
+;;
+
+(* Hide optional argument, add utility function *)
+let scrape_only_alias ?strengthened env mty =
+  scrape_only_alias ?strengthened env mty
+let scrape_alias ?strengthened env mty = scrape_ident env
+      (scrape_only_alias ?strengthened env mty)
 
 (* Given a signature and a root path, prefix all idents in the signature
    by the root path and build the corresponding substitution. *)

@@ -17,6 +17,12 @@
 
 open Types
 
+type aliasable = [
+  | `Aliasable
+  | `Aliasable_with_constraints
+  | `Not_aliasable
+]
+
 val scrape: Env.t -> module_type -> module_type
         (* Expand toplevel module type abbreviations
            till hitting a "hard" module type (signature, functor,
@@ -27,11 +33,12 @@ val scrape_for_type_of:
 val freshen: module_type -> module_type
         (* Return an alpha-equivalent copy of the given module type
            where bound identifiers are fresh. *)
-val strengthen: aliasable:bool -> Env.t -> module_type -> Path.t -> module_type
+val strengthen: aliasable:aliasable -> Env.t -> module_type
+  -> Path.t -> module_type
         (* Strengthen abstract type components relative to the
            given path. *)
-val strengthen_decl:
-  aliasable:bool -> Env.t -> module_declaration -> Path.t -> module_declaration
+val strengthen_decl: aliasable:aliasable -> Env.t -> module_declaration -> Path.t
+  -> module_declaration
 val nondep_supertype: Env.t -> Ident.t -> module_type -> module_type
         (* Return the smallest supertype of the given type
            in which the given ident does not appear.

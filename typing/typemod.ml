@@ -78,14 +78,14 @@ let rec path_concat head p =
 let extract_sig env loc mty =
   match Env.scrape_alias env mty with
     Mty_signature sg -> sg
-  | Mty_alias path ->
+  | Mty_alias(path, _) ->
       raise(Error(loc, env, Cannot_scrape_alias path))
   | _ -> raise(Error(loc, env, Signature_expected))
 
 let extract_sig_open env loc mty =
   match Env.scrape_alias env mty with
     Mty_signature sg -> sg
-  | Mty_alias path ->
+  | Mty_alias(path, _) ->
       raise(Error(loc, env, Cannot_scrape_alias path))
   | mty -> raise(Error(loc, env, Structure_expected mty))
 
@@ -282,7 +282,7 @@ let check_usage_of_path_of_substituted_item paths env signature ~loc ~lid =
     let env, super = iterator_with_env env in
     { super with
       Btype.it_signature_item = (fun self -> function
-      | Sig_module (id, _, { md_type = Mty_alias aliased_path; _ }, _)
+      | Sig_module (id, _, { md_type = Mty_alias(aliased_path, _); _ }, _)
         when List.exists
                (fun path -> path_is_strict_prefix path ~prefix:aliased_path)
                paths
@@ -605,7 +605,7 @@ let rec approx_modtype env smty =
       Mty_ident path
   | Pmty_alias lid ->
       let path = Typetexp.lookup_module env smty.pmty_loc lid.txt in
-      Mty_alias path
+      Mty_alias(path, None)
   | Pmty_signature ssg ->
       Mty_signature(approx_sig env ssg)
   | Pmty_functor(param, sarg, sres) ->
@@ -815,7 +815,7 @@ and transl_modtype_aux env smty =
         smty.pmty_attributes
   | Pmty_alias lid ->
       let path = transl_module_alias loc env lid.txt in
-      mkmty (Tmty_alias (path, lid)) (Mty_alias path) env loc
+      mkmty (Tmty_alias (path, lid)) (Mty_alias(path, None)) env loc
         smty.pmty_attributes
   | Pmty_signature ssg ->
       let sg = transl_signature env ssg in
@@ -1164,7 +1164,7 @@ let path_of_module mexp =
 
 let rec closed_modtype env = function
     Mty_ident _ -> true
-  | Mty_alias _ -> true
+  | Mty_alias (_, _, _) -> true
   | Mty_signature sg ->
       let env = Env.add_signature sg env in
       List.for_all (closed_signature_item env) sg
@@ -1240,7 +1240,7 @@ let check_recmodule_inclusion env bindings =
      the number of mutually recursive declarations. *)
 
   let subst_and_strengthen env s id mty =
-    Mtype.strengthen ~aliasable:false env (Subst.modtype s mty)
+    Mtype.strengthen ~aliasable:`Not_aliasable env (Subst.modtype s mty)
       (Subst.module_path s (Pident id)) in
 
   let rec check_incl first_time n env s =
@@ -1381,36 +1381,43 @@ let rec type_module ?(alias=false) sttn funct_body anchor env smod =
 
 and type_module_aux ~alias sttn funct_body anchor env smod =
   match smod.pmod_desc with
-    Pmod_ident lid ->
+  | Pmod_ident lid ->
       let path =
         Typetexp.lookup_module ~load:(not alias) env smod.pmod_loc lid.txt in
-      let md = { mod_desc = Tmod_ident (path, lid);
-                 mod_type = Mty_alias path;
-                 mod_env = env;
-                 mod_attributes = smod.pmod_attributes;
-                 mod_loc = smod.pmod_loc } in
+      let base_desc = Tmod_ident (path, lid) in
+      let base_type = Mty_alias(path, None) in
+      let loc = smod.pmod_loc in
       let aliasable = not (Env.is_functor_arg path env) in
-      let md =
-        if alias && aliasable then
-          (Env.add_required_global (Path.head path); md)
-        else match (Env.find_module path env).md_type with
-        | Mty_alias p1 when not alias ->
-            let p1 = Env.normalize_path (Some smod.pmod_loc) env p1 in
-            let mty = Includemod.expand_module_alias env [] p1 in
-            { md with
-              mod_desc =
-                Tmod_constraint (md, mty, Tmodtype_implicit,
-                                 Tcoerce_alias (env, path, Tcoerce_none));
-              mod_type =
-                if sttn then Mtype.strengthen ~aliasable:true env mty p1
-                else mty }
-        | mty ->
-            let mty =
-              if sttn then Mtype.strengthen ~aliasable env mty path
-              else mty
-            in
-            { md with mod_type = mty }
-      in rm md
+      if alias && aliasable then begin
+        Env.add_required_global (Path.head path);
+        rm {
+          mod_desc = base_desc; mod_type = base_type; mod_env = env;
+          mod_attributes = smod.pmod_attributes; mod_loc = loc
+        }
+      end else begin match (Env.find_module path env).md_type with
+      | Mty_alias(p1, _) as mty when not alias ->
+          let p1', cc = Includemod.realize_module_path_with_coercion
+                          ~stop_on_present:false ~loc ~env p1
+          in let cc = Tcoerce_alias(p1', cc)
+          in let mty = Env.scrape_only_alias ~strengthened:sttn env mty
+          in rm {
+            mod_desc = Tmod_constraint({
+              mod_desc = base_desc; mod_type = base_type; mod_env = env;
+              mod_attributes = smod.pmod_attributes; mod_loc = loc
+            }, mty, Tmodtype_implicit, cc);
+            mod_type = mty;
+            mod_env = env; mod_attributes = smod.pmod_attributes; mod_loc = loc
+          }
+      | mty ->
+          let aliasable = if aliasable then `Aliasable else `Not_aliasable in
+          let mty =
+            if sttn then Mtype.strengthen ~aliasable env mty path else mty
+          in
+          rm {
+            mod_desc = base_desc; mod_type = mty; mod_env = env;
+            mod_attributes = smod.pmod_attributes; mod_loc = loc
+          }
+      end
   | Pmod_structure sstr ->
       let (str, sg, _finalenv) =
         type_structure funct_body anchor env sstr smod.pmod_loc in
@@ -1500,7 +1507,7 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
                mod_env = env;
                mod_attributes = smod.pmod_attributes;
                mod_loc = smod.pmod_loc }
-      | Mty_alias path ->
+      | Mty_alias(path, _) ->
           raise(Error(sfunct.pmod_loc, env, Cannot_scrape_alias path))
       | _ ->
           raise(Error(sfunct.pmod_loc, env, Cannot_apply funct.mod_type))
@@ -1515,7 +1522,30 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
           mod_loc = smod.pmod_loc;
           mod_attributes = smod.pmod_attributes;
          }
-
+  | Pmod_tconstraint(sarg, smty) ->
+      let arg = type_module ~alias:true true funct_body anchor env sarg in
+      let mty = transl_modtype env smty in
+      let cmty = mty.mty_type in
+      let coercion = try
+          Includemod.modtypes ~loc:arg.mod_loc env arg.mod_type cmty
+        with Includemod.Error msg ->
+          raise(Error(arg.mod_loc, env, Not_included msg))
+      in let new_type = begin match arg.mod_type with
+        | Mty_ident p -> Mty_alias(Mta_absent, p, Some cmty)
+        | Mty_alias(_pres, p, _cmty) -> Mty_alias(Mta_absent, p, Some cmty)
+        | _ ->
+          let tmp_name = Ident.create "#module#" in
+          let tmp_env = Env.add_module tmp_name arg.mod_type env in
+          let cmty_st = !Env.strengthen ~aliasable:`Aliasable_with_constraints
+                                        tmp_env cmty (Pident tmp_name) in
+          Mtype.nondep_supertype tmp_env tmp_name cmty_st
+      end in
+      { mod_desc = Tmod_tconstraint(arg, mty, coercion);
+        mod_type = new_type;
+        mod_env = env;
+        mod_loc = smod.pmod_loc;
+        mod_attributes = smod.pmod_attributes;
+      }
   | Pmod_unpack sexp ->
       if !Clflags.principal then Ctype.begin_def ();
       let exp = Typecore.type_exp env sexp in
@@ -1849,7 +1879,8 @@ let type_structure = type_structure false None
 
 let rec normalize_modtype env = function
     Mty_ident _
-  | Mty_alias _ -> ()
+  | Mty_alias (_, _, None) -> ()
+  | Mty_alias (_, _, Some mty) -> normalize_modtype env mty
   | Mty_signature sg -> normalize_signature env sg
   | Mty_functor(_id, _param, body) -> normalize_modtype env body
 
@@ -2037,7 +2068,7 @@ let rec package_signatures subst = function
                          md_loc=Location.none;
                         },
                  Trec_not) ::
-      package_signatures (Subst.add_module oldid (Pident newid) subst) rem
+      package_signatures (Subst.add_module oldid (Pident newid) subst) rem (* TODO This substitution has Tcoerce_none coercion *)
 
 let package_units initial_env objfiles cmifile modulename =
   (* Read the signatures of the units *)

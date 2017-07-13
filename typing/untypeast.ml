@@ -597,6 +597,9 @@ let module_expr sub mexpr =
                 sub.module_type sub mtype)
           | Tmod_constraint (_mexpr, _, Tmodtype_implicit, _) ->
               assert false
+          | Tmod_tconstraint (mexpr, mtype, _) ->
+              Pmod_tconstraint (sub.module_expr sub mexpr,
+                sub.module_type sub mtype)
           | Tmod_unpack (exp, _pack) ->
               Pmod_unpack (sub.expr sub exp)
               (* TODO , sub.package_type sub pack) *)

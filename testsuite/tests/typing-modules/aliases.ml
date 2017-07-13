@@ -857,3 +857,421 @@ module M :
 module N : sig val s : string end
 val s : string = "hello"
 |}]
+
+module type ABC = sig
+  type t
+  val a : t
+  val b : t
+  val c : t
+end
+
+module type AB = sig
+  type t
+  val a : t
+  val b : t
+end
+
+module type A = sig
+  type t
+  val a : t
+end
+
+module type B = sig
+  type t
+  val b : t
+end
+
+module type BA = sig
+  type t
+  val b : t
+  val a : t
+end
+
+module M : AB = struct
+  type t = ()
+  let a = ()
+  let b = ()
+end
+
+let f (x : M.t) : M.t = x
+
+module N = (M <: A)
+
+let _ = f N.a
+let _ = f M.b
+
+let _ = f N.b
+[%%expect{|
+module type ABC = sig type t val a : t val b : t val c : t end
+module type AB = sig type t val a : t val b : t end
+module type A = sig type t val a : t end
+module type B = sig type t val b : t end
+module type BA = sig type t val b : t val a : t end
+module M : AB
+val f : M.t -> M.t = <fun>
+module N <: A = M
+- : M.t = <abstr>
+- : M.t = <abstr>
+Line _, characters 10-13:
+  let _ = f N.b
+            ^^^
+Error: Unbound value N.b
+|}]
+
+module M : ABC = struct
+  type t = ()
+  let a = ()
+  let b = ()
+  let c = ()
+end
+
+let f (x : M.t) : M.t = x
+
+module N = (M <: AB)
+module O = (N <: A)
+
+module P = ((M <: AB) <: A)
+
+let _ = f O.a
+let _ = f P.a
+let _ = f P.b
+[%%expect{|
+module M : ABC
+val f : M.t -> M.t = <fun>
+module N <: AB = M
+module O <: A = N
+module P <: A = M
+- : M.t = <abstr>
+- : M.t = <abstr>
+Line _, characters 10-13:
+  let _ = f P.b
+            ^^^
+Error: Unbound value P.b
+|}]
+
+let _ = f O.b
+[%%expect{|
+Line _, characters 10-13:
+  let _ = f O.b
+            ^^^
+Error: Unbound value O.b
+|}]
+
+module M : AB = struct
+  type t = ()
+  let a = ()
+  let b = ()
+end
+
+module G = functor (X : A) -> struct type t end
+
+module N = (M <: A)
+module O = (M : A)
+
+module GM = G(M)
+module GN = G(N)
+module GO = G(O)
+
+let f : (GM.t -> GM.t) = (fun (x : GN.t) -> x)
+let bad : (GM.t -> GM.t) = (fun (x : GO.t) -> x)
+
+[%%expect{|
+module M : AB
+module G : functor (X : A) -> sig type t end
+module N <: A = M
+module O : A
+module GM : sig type t = G(M).t end
+module GN : sig type t = G(N).t end
+module GO : sig type t = G(O).t end
+val f : GM.t -> GM.t = <fun>
+Line _, characters 32-42:
+  let bad : (GM.t -> GM.t) = (fun (x : GO.t) -> x)
+                                  ^^^^^^^^^^
+Error: This pattern matches values of type GO.t = G(O).t
+       but a pattern was expected which matches values of type GM.t = G(M).t
+|}]
+
+module M : AB = struct
+  type t = ()
+  let a = ()
+  let b = ()
+end
+
+module N = (M <: A)
+
+module F = functor (X : AB) -> struct end
+module Bad = F(N)
+[%%expect {|
+module M : AB
+module N <: A = M
+module F : functor (X : AB) -> sig  end
+Line _, characters 15-16:
+  module Bad = F(N)
+                 ^
+Error: Signature mismatch:
+       Modules do not match:
+         sig type t = M.t val a : t end
+       is not included in
+         AB
+       The value `b' is required but not provided
+|}]
+
+module type M_A = sig
+  module Inner : A
+end
+
+module type M_AB = sig
+  module Inner : AB
+end
+
+module M : M_AB = struct
+  module Inner = struct
+    type t = ()
+    let a = ()
+    let b = ()
+  end
+end
+
+module N = (M <: M_A)
+module O = N.Inner
+
+let _ : M.Inner.t = O.a
+let _ = O.b
+
+[%%expect {|
+module type M_A = sig module Inner : A end
+module type M_AB = sig module Inner : AB end
+module M : M_AB
+module N <: M_A = M
+module O = N.Inner
+- : O.t = <abstr>
+Line _, characters 8-11:
+  let _ = O.b
+          ^^^
+Error: Unbound value O.b
+|}]
+
+module M : AB = struct
+  type t = ()
+  let a = ()
+  let b = ()
+end
+
+module N = M
+module O = (N <: A)
+module P = O
+
+let _ : M.t = P.a
+let _ = P.b
+
+[%%expect {|
+module M : AB
+module N = M
+module O <: A = N
+module P = O
+- : P.t = <abstr>
+Line _, characters 8-11:
+  let _ = P.b
+          ^^^
+Error: Unbound value P.b
+|}]
+
+module M = struct
+  type t = int
+  let a = 1
+  let b = 2
+end
+
+module N = M
+module O = (N <: B)
+module P = O
+module Q = (N <: A)
+
+let x : M.t = Q.a
+let y : M.t = P.b
+
+[%%expect {|
+module M : sig type t = int val a : int val b : int end
+module N = M
+module O <: B = N
+module P = O
+module Q <: A = N
+val x : M.t = 1
+val y : M.t = 2
+|}]
+
+module M = struct
+  module X = struct
+    type t = int
+    let a = 1
+    let b = 2
+  end
+  module Y = (X <: BA)
+end
+
+module type Mrev = sig
+  module X : AB
+  module Y : AB
+end
+
+module N = (M <: Mrev)
+
+let _ = M.Y.a
+let _ = N.Y.a
+let _ = M.Y.b
+let _ = N.Y.b
+
+[%%expect {|
+module M :
+  sig
+    module X : sig type t = int val a : int val b : int end
+    module Y <: BA = X
+  end
+module type Mrev = sig module X : AB module Y : AB end
+module N <: Mrev = M
+- : M.Y.t = 1
+- : N.Y.t = 1
+- : M.Y.t = 2
+- : N.Y.t = 2
+|}]
+
+module M = struct
+  end
+
+module N = struct
+  let a = 3
+end
+
+module O = (N <: (module type of M))
+
+[%%expect {|
+module M : sig  end
+module N : sig val a : int end
+module O <: sig  end = N
+|}]
+
+module type AB = sig
+ val a : int
+ val b : int
+end
+
+module type BA = sig
+ val a : int
+ val b : int
+end
+
+module G(X:AB) = struct
+  module M = ((X <: BA) <: AB)
+end
+module M = G(struct let a = 1 and b = 2 end)
+
+let _ = M.M.a
+
+[%%expect {|
+module type AB = sig val a : int val b : int end
+module type BA = sig val a : int val b : int end
+module G :
+  functor (X : AB) -> sig module M : sig val a : int val b : int end end
+module M : sig module M : sig val a : int val b : int end end
+- : int = 1
+|}]
+
+module type A = sig
+  type t
+  val a : t
+end
+
+module P = ((struct
+  type t = int
+  let a = 1
+  let b = 1
+  end)
+  <: A)
+
+let _ = P.a
+let _ = P.b
+
+[%%expect {|
+module type A = sig type t val a : t end
+module P : sig type t = int val a : t end
+- : P.t = 1
+Line _, characters 8-11:
+  let _ = P.b
+          ^^^
+Error: Unbound value P.b
+|}]
+
+module O = struct
+ let a = 1
+ let b = 2
+end
+
+module M = struct
+  module N = O
+end
+
+module P = struct
+  include M
+end
+
+module Q = P.N
+
+module F(X:AB) = X
+
+module L = F(Q)
+
+let _ = L.a
+let _ = L.b
+
+[%%expect {|
+module O : sig val a : int val b : int end
+module M : sig module N = O end
+module P : sig module N = O end
+module Q = P.N
+module F : functor (X : AB) -> sig val a : int val b : int end
+module L : sig val a : int val b : int end
+- : int = 1
+- : int = 2
+|}]
+
+module type S = sig
+  module M : sig
+    module A : sig end
+    module B : sig end
+  end
+  module N = M.A
+end
+
+module Foo = struct
+  module B = struct let x = 0 end
+  module A = struct let x = "hello" end
+end
+
+module Bar : S with module M := Foo = struct module N = Foo.A end
+
+let () = print_string Bar.N.x
+[%%expect {|
+segfault
+|}]
+
+
+module M : sig
+  module N : sig
+    module A : sig val x : string end
+    module B : sig val x : int end
+  end
+  module F (X : sig module A = N.A end) : sig end
+end = struct
+  module N = struct
+    module B = struct let x = 0 end
+    module A = struct let x = "hello" end
+  end
+  module F (X : sig module A : sig val x : string end end) = struct
+    let () = print_endline X.A.x
+  end
+end
+
+module N = M.F(struct module A = M.N.A end)
+[%%expect {|
+segfault
+|}]

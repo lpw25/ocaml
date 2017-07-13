@@ -793,9 +793,15 @@ class latex =
           self#latex_of_text fmt [Latex "\\begin{ocamldocsigend}\n"];
           List.iter (self#latex_of_module_element fmt father) eles;
           self#latex_of_text fmt [Latex "\\end{ocamldocsigend}\n"]
-      | Module_alias a ->
+      | Module_alias { ma_name; ma_constraint = None; _ } ->
           self#latex_of_text fmt
-            [Code (self#relative_module_idents father a.ma_name)]
+            [Code (self#relative_module_idents father ma_name)]
+      | Module_alias { ma_name; ma_constraint = Some mty; _ } ->
+          self#latex_of_text fmt (
+            [Code (self#relative_module_idents father ma_name);
+             Code " <: ";
+             Code (Odoc_info.string_of_module_type mty)
+            ])
       | Module_functor (p, k) ->
           self#latex_of_module_parameter fmt father p;
           self#latex_of_module_kind fmt father k

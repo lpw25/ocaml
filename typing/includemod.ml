@@ -137,13 +137,6 @@ let expand_module_alias env cxt path =
   with Not_found ->
     raise(Error[cxt, env, Unbound_module_path path])
 
-(*
-let rec normalize_module_path env cxt path =
-  match expand_module_alias env cxt path with
-    Mty_alias path' -> normalize_module_path env cxt path'
-  | _ -> path
-*)
-
 (* Extract name, kind and ident from a signature item *)
 
 type field_desc =
@@ -191,6 +184,40 @@ let is_runtime_component = function
   | Sig_module(_,Mta_present,_,_)
   | Sig_class(_, _,_) -> true
 
+(* Compose two coercions
+   apply_coercion c1 (apply_coercion c2 e) behaves like
+   apply_coercion (compose_coercions c1 c2) e. *)
+
+let rec compose_coercions c1 c2 =
+  match (c1, c2) with
+    (Tcoerce_none, c2) -> c2
+  | (c1, Tcoerce_none) -> c1
+  | (Tcoerce_structure (pc1, ids1), Tcoerce_structure (pc2, ids2)) ->
+      let v2 = Array.of_list pc2 in
+      let ids1 =
+        List.map (fun (id,pos1,c1) ->
+          let (pos2,c2) = v2.(pos1) in (id, pos2, compose_coercions c1 c2))
+          ids1
+      in
+      Tcoerce_structure
+        (List.map (fun (p1, c1) ->
+           let (p2, c2) = v2.(p1) in (p2, compose_coercions c1 c2))
+           pc1,
+         ids1 @ ids2)
+  | (Tcoerce_functor(arg1, res1), Tcoerce_functor(arg2, res2)) ->
+      Tcoerce_functor(compose_coercions arg2 arg1,
+                      compose_coercions res1 res2)
+  | (c1, Tcoerce_alias (path, c2)) ->
+      Tcoerce_alias (path, compose_coercions c1 c2)
+  | (_, _) ->
+      fatal_error "Includemod.compose_coercions"
+(*
+let compose_coercions c1 c2 =
+  let c3 = compose_coercions c1 c2 in
+  Format.eprintf "@[<2>compose_coercions@ (%a)@ (%a) =@ %a@]@."
+    print_coercion c1 print_coercion c2 print_coercion c3;
+  c3
+*)
 (* Print a coercion *)
 
 let rec print_list pr ppf = function
@@ -254,26 +281,31 @@ let rec modtypes ~loc env ~mark cxt subst mty1 mty2 =
 
 and try_modtypes ~loc env ~mark cxt subst mty1 mty2 =
   match mty1, mty2 with
-  | Mty_alias p1, Mty_alias p2 ->
+  | Mty_alias(p1, omty1, inner_cc), Mty_alias(p2, omty2) -> begin
       if Env.is_functor_arg p2 env then
         raise (Error[cxt, env, Invalid_module_alias p2]);
       if not (Path.same p1 p2) then begin
-        let p1 = Env.normalize_path None env p1
-        and p2 = Env.normalize_path None env (Subst.module_path subst p2) in
+        let p1 = Env.normalize_module_path ~env p1
+        and p2 = Env.normalize_module_path ~env (Subst.module_path subst p2) in
         if not (Path.same p1 p2) then raise Dont_match
       end;
-      Tcoerce_none
-  | (Mty_alias p1, _) -> begin
-      let p1 = try
-        Env.normalize_path (Some Location.none) env p1
-      with Env.Error (Env.Missing_module (_, _, path)) ->
-        raise (Error[cxt, env, Unbound_module_path path])
-      in
-      let mty1 =
-        Mtype.strengthen ~aliasable:true env
-          (expand_module_alias env cxt p1) p1
-      in
-      modtypes ~loc env ~mark cxt subst mty1 mty2
+      match omty1, omty2, pres2 with
+        | None, None, Mta_absent -> Tcoerce_none
+        | _ -> begin
+          let mty1 = Env.scrape_alias ~strengthened:false env mty1 in
+          let mty2 = Env.scrape_alias ~strengthened:false env
+                       (Subst.modtype subst mty2)
+          in
+          let cc = modtypes ~loc env cxt subst mty1 mty2 in
+          match pres2 with
+          | Mta_absent -> Tcoerce_none
+          | Mta_present -> compose_coercions cc inner_cc
+      end
+    end
+  | (Mty_alias(pres1, p1, omty1, inner_cc), _) -> begin
+      let mty1 = Env.scrape_alias env mty1 in
+      let cc = modtypes ~loc env cxt subst mty1 mty2 in
+      compose_coercions cc inner_cc
     end
   | (Mty_ident p1, _) when may_expand_module_path env p1 ->
       try_modtypes ~loc env ~mark cxt subst
@@ -312,8 +344,8 @@ and try_modtypes2 ~loc env ~mark cxt mty1 mty2 =
   (* mty2 is an identifier *)
   match (mty1, mty2) with
     (Mty_ident p1, Mty_ident p2)
-    when Path.same (Env.normalize_path_prefix None env p1)
-                   (Env.normalize_path_prefix None env p2) ->
+    when Path.same (Env.normalize_modtype_path ~env p1)
+                   (Env.normalize_modtype_path ~env p2) ->
       Tcoerce_none
   | (_, Mty_ident p2) when may_expand_module_path env p2 ->
       try_modtypes ~loc env ~mark cxt Subst.identity
@@ -502,6 +534,36 @@ and check_modtype_equiv ~loc env ~mark cxt mty1 mty2 =
         print_coercion _c1 print_coercion _c2; *)
       raise(Error [cxt, env, Modtype_permutation])
 
+(* realize path *)
+
+and realize_module_path_with_coercion ?(stop_on_present=true) ~loc ~env path =
+  match (Env.find_module_alias path env).md_type with
+  | Mty_alias(pres, alias_path, omty, cc)
+      when pres == Mta_absent || not stop_on_present ->
+    let path, inner_cc, subst =
+      realize_module_path_with_coercion ~loc ~env alias_path
+    in
+    path, compose_coercions cc inner_cc, subst
+  | _ ->
+    realize_value_path_with_coercion ~loc ~env path
+  | exception Not_found ->
+    let norm_path = Env.normalize_module_path ~env path in
+    raise (Env.Error (Env.Missing_module(loc, path, norm_path)))
+
+and realize_value_path_with_coercion ~loc ~env path =
+  match path with
+  | Pident _ -> path, Tcoerce_none, Subst.identity
+  | Papply _ -> assert false
+  | Pdot (ppath, s, pos) ->
+    let ppath, cc, subst = realize_module_path_with_coercion ~loc ~env ppath
+    in coerce_position ~cc ~subst (ppath, s, pos)
+
+let realize_module_path_with_coercion ?(stop_on_present=true) ~loc ~env path =
+  (* We apply subst as we build the coercion, it's not needed anymore *)
+  let path, cc, _subst = realize_module_path_with_coercion ~stop_on_present
+                           ~loc ~env path
+  in path, cc
+
 (* Simplified inclusion check between module types (for Env) *)
 
 let can_alias env path =
@@ -521,6 +583,9 @@ let () =
   Env.check_modtype_inclusion := (fun ~loc a b c d ->
     try (check_modtype_inclusion ~loc a b c d : unit)
     with Error _ -> raise Not_found)
+
+let () = Env.realize_value_path := fun ~loc ~env path ->
+  fst3 (realize_value_path_with_coercion ~loc ~env path)
 
 (* Check that an implementation of a compilation unit meets its
    interface. *)

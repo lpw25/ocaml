@@ -223,6 +223,7 @@ let iter_expression f e =
     | Pmod_ident _ -> ()
     | Pmod_structure str -> List.iter structure_item str
     | Pmod_constraint (me, _)
+    | Pmod_tconstraint (me, _)
     | Pmod_functor (_, _, me) -> module_expr me
     | Pmod_apply (me1, me2) -> module_expr me1; module_expr me2
     | Pmod_unpack e -> expr e
@@ -665,22 +666,22 @@ let split_cases env cases =
 
 (* Type paths *)
 
-let rec expand_path env p =
+let rec expand_type_path env p =
   let decl =
     try Some (Env.find_type p env) with Not_found -> None
   in
   match decl with
     Some {type_manifest = Some ty} ->
       begin match repr ty with
-        {desc=Tconstr(p,_,_)} -> expand_path env p
+        {desc=Tconstr(p,_,_)} -> expand_type_path env p
       | _ -> assert false
       end
   | _ ->
-      let p' = Env.normalize_path None env p in
-      if Path.same p p' then p else expand_path env p'
+      let p' = Env.normalize_type_path ~env p in
+      if Path.same p p' then p else expand_type_path env p'
 
 let compare_type_path env tpath1 tpath2 =
-  Path.same (expand_path env tpath1) (expand_path env tpath2)
+  Path.same (expand_type_path env tpath1) (expand_type_path env tpath2)
 
 (* Records *)
 let label_of_kind kind =
@@ -800,12 +801,12 @@ end) = struct
           lbl
         with Not_found ->
           if lbls = [] then unbound_name_error env lid else
-          let tp = (tpath0, expand_path env tpath) in
+          let tp = (tpath0, expand_type_path env tpath) in
           let tpl =
             List.map
               (fun (lbl, _) ->
                 let tp0 = get_type_path lbl in
-                let tp = expand_path env tp0 in
+                let tp = expand_type_path env tp0 in
                   (tp0, tp))
               lbls
           in
@@ -1773,6 +1774,7 @@ and is_nonexpansive_mod mexp =
   | Tmod_functor _ -> true
   | Tmod_unpack (e, _) -> is_nonexpansive e
   | Tmod_constraint (m, _, _, _) -> is_nonexpansive_mod m
+  | Tmod_tconstraint (m, _, _) -> is_nonexpansive_mod m
   | Tmod_structure str ->
       List.for_all
         (fun item -> match item.str_desc with
@@ -2200,10 +2202,6 @@ and type_expect_
                   ))
                 else
                   raise Typetexp.(Error (loc, env, Unbound_value lid.txt))
-            (*| Val_prim _ ->
-                let p = Env.normalize_path (Some loc) env path in
-                Env.add_required_global (Path.head p);
-                Texp_ident(path, lid, desc)*)
             | _ ->
                 Texp_ident(path, lid, desc)
           end;

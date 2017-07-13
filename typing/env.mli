@@ -68,6 +68,7 @@ val find_value: Path.t -> t -> value_description
 val find_type: Path.t -> t -> type_declaration
 val find_type_descrs: Path.t -> t -> type_descriptions
 val find_module: Path.t -> t -> module_declaration
+val find_module_alias: Path.t -> t -> module_declaration
 val find_modtype: Path.t -> t -> modtype_declaration
 val find_class: Path.t -> t -> class_declaration
 val find_cltype: Path.t -> t -> class_type_declaration
@@ -87,13 +88,30 @@ val find_constructor_address: Location.t -> Path.t -> t -> address
 
 val add_functor_arg: Ident.t -> t -> t
 val is_functor_arg: Path.t -> t -> bool
-val normalize_path: Location.t option -> t -> Path.t -> Path.t
-(* Normalize the path to a concrete value or module.
-   If the option is None, allow returning dangling paths.
-   Otherwise raise a Missing_module error, and may add forgotten
-   head as required global. *)
-val normalize_path_prefix: Location.t option -> t -> Path.t -> Path.t
-(* Only normalize the prefix part of the path *)
+
+(* Normalize path - unroll all aliases on the path.
+   Versions for modules, module types and types.
+   Warning: it breaks positions in Pdot, therefore should not be used on
+            anything with runtime representation.
+*)
+val normalize_module_path: env:t -> Path.t -> Path.t
+val normalize_modtype_path: env:t -> Path.t -> Path.t
+val normalize_type_path: env:t -> Path.t -> Path.t
+
+val normalize_package_path: env:t -> Path.t -> Path.t
+
+(*
+   Get a real path by which objects may be accessed.
+   Treat last part as a value, do not modify it
+
+   Unrolls aliases until a present one is found. May raise if some module is
+   unavailable.
+
+   Forward declarations, defined in includemod
+*)
+
+val realize_value_path: (loc:Location.t -> env:t -> Path.t -> Path.t) ref
+
 val reset_required_globals: unit -> unit
 val get_required_globals: unit -> Ident.t list
 val add_required_global: Ident.t -> unit
@@ -310,7 +328,9 @@ val check_well_formed_module:
 val add_delayed_check_forward: ((unit -> unit) -> unit) ref
 (* Forward declaration to break mutual recursion with Mtype. *)
 val strengthen:
-    (aliasable:bool -> t -> module_type -> Path.t -> module_type) ref
+   (aliasable:[`Aliasable | `Aliasable_with_constraints | `Not_aliasable]
+    -> t -> module_type -> Path.t
+    -> module_type) ref
 (* Forward declaration to break mutual recursion with Ctype. *)
 val same_constr: (t -> type_expr -> type_expr -> bool) ref
 
@@ -345,7 +365,8 @@ val fold_cltypes:
   Longident.t option -> t -> 'a -> 'a
 
 (** Utilities *)
-val scrape_alias: t -> module_type -> module_type
+val scrape_alias: ?strengthened:bool -> t -> module_type -> module_type
+val scrape_only_alias: ?strengthened:bool -> t -> module_type -> module_type
 val check_value_name: string -> Location.t -> unit
 
 module Persistent_signature : sig

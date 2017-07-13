@@ -1401,7 +1401,7 @@ module Analyser =
       | Parsetree.Pmty_alias longident ->
           let name =
             match sig_module_type with
-              Types.Mty_alias path -> Name.from_path path
+              Types.Mty_alias(path, _) -> Name.from_path path
             | _ -> Name.from_longident longident.txt
           in
           (* Wrong naming... *)
@@ -1490,10 +1490,10 @@ module Analyser =
       | Parsetree.Pmty_alias _longident ->
           begin
             match sig_module_type with
-              Types.Mty_alias path ->
+              Types.Mty_alias(path, omty) ->
                 let alias_name = Odoc_env.full_module_name env (Name.from_path path) in
-                let ma = { ma_name = alias_name ; ma_module = None } in
-                Module_alias ma
+                Module_alias { ma_name = alias_name ; ma_module = None;
+                               ma_constraint = omty }
             | _ ->
               raise (Failure "Parsetree.Pmty_alias _ but not Types.Mty_alias _")
            end

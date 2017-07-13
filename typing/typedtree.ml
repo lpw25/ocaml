@@ -205,9 +205,11 @@ and module_expr_desc =
     Tmod_ident of Path.t * Longident.t loc
   | Tmod_structure of structure
   | Tmod_functor of Ident.t * string loc * module_type option * module_expr
-  | Tmod_apply of module_expr * module_expr * module_coercion
+  | Tmod_apply of module_expr * module_expr * Path.module_coercion
   | Tmod_constraint of
-      module_expr * Types.module_type * module_type_constraint * module_coercion
+      module_expr * Types.module_type
+      * module_type_constraint * Path.module_coercion
+  | Tmod_tconstraint of module_expr * module_type * Path.module_coercion
   | Tmod_unpack of expression * Types.module_type
 
 and structure = {
@@ -255,13 +257,6 @@ and value_binding =
     vb_attributes: attributes;
     vb_loc: Location.t;
   }
-
-and module_coercion =
-    Tcoerce_none
-  | Tcoerce_structure of (int * module_coercion) list *
-                         (Ident.t * int * module_coercion) list
-  | Tcoerce_functor of module_coercion * module_coercion
-  | Tcoerce_alias of Env.t * Path.t * module_coercion
 
 and module_type =
   { mty_desc: module_type_desc;

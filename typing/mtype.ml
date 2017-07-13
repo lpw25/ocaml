@@ -19,6 +19,11 @@ open Asttypes
 open Path
 open Types
 
+type aliasable = [
+  | `Aliasable
+  | `Aliasable_with_constraints
+  | `Not_aliasable
+]
 
 let rec scrape env mty =
   match mty with
@@ -40,7 +45,7 @@ let rec strengthen ~aliasable env mty p =
   | Mty_functor(param, arg, res)
     when !Clflags.applicative_functors && Ident.name param <> "*" ->
       Mty_functor(param, arg,
-        strengthen ~aliasable:false env res (Papply(p, Pident param)))
+        strengthen ~aliasable:`Not_aliasable env res (Papply(p, Pident param)))
   | mty ->
       mty
 
@@ -97,7 +102,10 @@ and strengthen_sig ~aliasable env sg p =
 and strengthen_decl ~aliasable env md p =
   match md.md_type with
   | Mty_alias _ -> md
-  | _ when aliasable -> {md with md_type = Mty_alias p}
+  | mty when aliasable = `Aliasable_with_constraints ->
+    {md with md_type = Mty_alias(p, Some mty)}
+  | _mty when aliasable = `Aliasable ->
+    {md with md_type = Mty_alias(p, None)}
   | mty -> {md with md_type = strengthen ~aliasable env mty p}
 
 let () = Env.strengthen := strengthen
@@ -152,9 +160,13 @@ let nondep_supertype env mid mty =
         if Path.isfree mid p then
           nondep_mty env va (Env.find_modtype_expansion p env)
         else mty
-    | Mty_alias p ->
+    | Mty_alias(p, omty) ->
         if Path.isfree mid p then
-          nondep_mty env va (Env.find_module p env).md_type
+          let mty, aliasable = match omty with
+            | None -> (Env.find_module p env).md_type, `Aliasable
+            | Some cmty -> cmty, `Aliasable_with_constraints
+          in
+          nondep_mty env va (strengthen ~aliasable env mty p)
         else mty
     | Mty_signature sg ->
         Mty_signature(nondep_sig env va sg)
@@ -392,7 +404,7 @@ let collect_arg_paths mty =
   and it_signature_item it si =
     type_iterators.it_signature_item it si;
     match si with
-    | Sig_module (id, _, {md_type=Mty_alias p}, _) ->
+    | Sig_module (id, _, {md_type=Mty_alias(p, _)}, _) ->
         bindings := Ident.add id p !bindings
     | Sig_module (id, _, {md_type=Mty_signature sg}, _) ->
         List.iter

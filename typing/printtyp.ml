@@ -600,7 +600,7 @@ let rec normalize_type_path ?(cache=false) env p =
         (p, Nth (index params ty))
   with
     Not_found ->
-      (Env.normalize_path None env p, Id)
+      (Env.normalize_type_path ~env p, Id)
 
 let penalty s =
   if s <> "" && s.[0] = '_' then
@@ -1581,8 +1581,10 @@ let rec tree_of_modtype ?(ellipsis=false) = function
       in
       Omty_functor (Ident.name param,
                     may_map (tree_of_modtype ~ellipsis:false) ty_arg, res)
-  | Mty_alias p ->
-      Omty_alias (tree_of_path Module p)
+  | Mty_alias(p, None) ->
+      Omty_alias (tree_of_path Module p, None)
+  | Mty_alias(p, Some mty) ->
+      Omty_alias (tree_of_path Module p, Some (tree_of_modtype mty))
 
 and tree_of_signature sg =
   wrap_env (fun env -> env) (tree_of_signature_rec !printing_env false) sg

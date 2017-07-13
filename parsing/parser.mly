@@ -494,6 +494,7 @@ let package_type_of_module_type pmty =
 %token LBRACKETPERCENT
 %token LBRACKETPERCENTPERCENT
 %token LESS
+%token LESSCOLON
 %token LESSMINUS
 %token LET
 %token <string> LIDENT
@@ -739,6 +740,8 @@ module_expr:
 paren_module_expr:
     LPAREN module_expr COLON module_type RPAREN
       { mkmod(Pmod_constraint($2, $4)) }
+  | LPAREN module_expr LESSCOLON module_type RPAREN
+      { mkmod(Pmod_tconstraint($2, $4)) }
   | LPAREN module_expr COLON module_type error
       { unclosed "(" 1 ")" 5 }
   | LPAREN module_expr RPAREN
@@ -826,6 +829,8 @@ module_binding_body:
       { $2 }
   | COLON module_type EQUAL module_expr
       { mkmod(Pmod_constraint($4, $2)) }
+  | LESSCOLON module_type EQUAL module_expr
+      { mkmod(Pmod_tconstraint($4, $2)) }
   | functor_arg module_binding_body
       { mkmod(Pmod_functor(fst $1, snd $1, $2)) }
 ;

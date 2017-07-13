@@ -682,22 +682,6 @@ let forward_try_expand_once = (* Forward declaration *)
 let get_path_scope p =
   Path.binding_time p
 
-let rec normalize_package_path env p =
-  let t =
-    try (Env.find_modtype p env).mtd_type
-    with Not_found -> None
-  in
-  match t with
-  | Some (Mty_ident p) -> normalize_package_path env p
-  | Some (Mty_signature _ | Mty_functor _ | Mty_alias _) | None ->
-      match p with
-        Path.Pdot (p1, s) ->
-          (* For module aliases *)
-          let p1' = Env.normalize_path None env p1 in
-          if Path.same p1 p1' then p else
-          normalize_package_path env (Path.Pdot (p1', s))
-      | _ -> p
-
 let check_scope_escape level ty =
   let rec aux ty =
     let ty = repr ty in
@@ -757,7 +741,7 @@ let rec update_level env level expand ty =
           iter_type_expr (update_level env level expand) ty
         end
     | Tpackage (p, nl, tl) when level < Path.binding_time p ->
-        let p' = normalize_package_path env p in
+        let p' = Env.normalize_package_path ~env p in
         if Path.same p p' then raise (Unify [(ty, newvar2 level)]);
         log_type ty; ty.desc <- Tpackage (p', nl, tl);
         update_level env level expand ty
@@ -1428,7 +1412,7 @@ let expand_abbrev_gen kind find_type_expansion env ty =
           match find_type_expansion path env with
           | exception Not_found ->
             (* another way to expand is to normalize the path itself *)
-            let path' = Env.normalize_path None env path in
+            let path' = Env.normalize_type_path ~env path in
             if Path.same path path' then raise Cannot_expand
             else newty2 level (Tconstr (path', args, abbrev))
           | (params, body, lv) ->
@@ -2267,7 +2251,8 @@ let add_type_equality t1 t2 =
 
 let eq_package_path env p1 p2 =
   Path.same p1 p2 ||
-  Path.same (normalize_package_path env p1) (normalize_package_path env p2)
+  Path.same (Env.normalize_package_path ~env p1)
+    (Env.normalize_package_path ~env p2)
 
 let nondep_type' = ref (fun _ _ _ -> assert false)
 let package_subtype = ref (fun _ _ _ _ _ _ _ -> assert false)
@@ -4388,7 +4373,7 @@ let rec nondep_type_rec ?(expand_private=false) env id ty =
           else
             Tconstr(p, List.map (nondep_type_rec env id) tl, ref Mnil)
       | Tpackage(p, nl, tl) when Path.isfree id p ->
-          let p' = normalize_package_path env p in
+          let p' = Env.normalize_package_path ~env p in
           if Path.isfree id p' then raise Not_found;
           Tpackage (p', nl, List.map (nondep_type_rec env id) tl)
       | Tobject (t1, name) ->

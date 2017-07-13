@@ -798,6 +798,8 @@ and module_expr_desc =
         (* ME1(ME2) *)
   | Pmod_constraint of module_expr * module_type
         (* (ME : MT) *)
+  | Pmod_tconstraint of module_expr * module_type
+        (* (ME <: MT) *)
   | Pmod_unpack of expression
         (* (val E) *)
   | Pmod_extension of extension

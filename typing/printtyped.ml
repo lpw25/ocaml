@@ -778,6 +778,10 @@ and module_expr i ppf x =
       module_expr i ppf me;
       module_type i ppf mt;
   | Tmod_constraint (me, _, Tmodtype_implicit, _) -> module_expr i ppf me
+  | Tmod_tconstraint (me, mt, _) ->
+      line i ppf "Tmod_tconstraint\n";
+      module_expr i ppf me;
+      module_type i ppf mt;
   | Tmod_unpack (e, _) ->
       line i ppf "Tmod_unpack\n";
       expression i ppf e;

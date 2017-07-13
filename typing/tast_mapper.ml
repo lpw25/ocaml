@@ -476,6 +476,12 @@ let module_expr sub x =
           Tmodtype_explicit (sub.module_type sub mtype),
           sub.module_coercion sub c
         )
+    | Tmod_tconstraint (mexpr, mtype, c) ->
+        Tmod_tconstraint (
+          sub.module_expr sub mexpr,
+          sub.module_type sub mtype,
+          sub.module_coercion sub c
+        )
     | Tmod_unpack (exp, mty) ->
         Tmod_unpack
           (

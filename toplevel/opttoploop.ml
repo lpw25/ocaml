@@ -109,7 +109,7 @@ let rec eval_path = function
       fatal_error "Toploop.eval_path"
 
 let eval_path env path =
-  eval_path (Env.normalize_path (Some Location.none) env path)
+  eval_path (!Env.realize_value_path ~loc:Location.none ~env path)
 
 (* To print values *)
 

@@ -481,6 +481,9 @@ module MakeIterator(Iter : IteratorArgument) : sig
         | Tmod_constraint (mexpr, _, Tmodtype_explicit mtype, _) ->
             iter_module_expr mexpr;
             iter_module_type mtype
+        | Tmod_tconstraint (mexpr, mtype, _) ->
+            iter_module_expr mexpr;
+            iter_module_type mtype
         | Tmod_unpack (exp, _mty) ->
             iter_expression exp
 (*          iter_module_type mty *)

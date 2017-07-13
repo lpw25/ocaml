@@ -48,6 +48,7 @@ and included_module = {
 and module_alias = {
     ma_name : Name.t ;
     mutable ma_module : mmt option ; (** the real module or module type if we could associate it *)
+    ma_constraint : Types.module_type option ;
   }
 
 and module_parameter = {

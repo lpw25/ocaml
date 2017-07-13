@@ -1365,9 +1365,15 @@ class html =
                bp b " <a href=\"%s\">..</a> " html_file
           );
           self#html_of_text b [Code "end"]
-      | Module_alias a ->
+      | Module_alias {ma_name; ma_constraint = None; _ } ->
           bs b "<code class=\"type\">";
-          bs b (self#create_fully_qualified_module_idents_links father a.ma_name);
+          bs b (self#create_fully_qualified_module_idents_links father ma_name);
+          bs b "</code>"
+      | Module_alias {ma_name; ma_constraint = Some mty; _ } ->
+          bs b "<code class=\"type\">";
+          bs b (self#create_fully_qualified_module_idents_links father ma_name);
+          self#html_of_text b [Code " <: "];
+          self#html_of_module_type b father mty;
           bs b "</code>"
       | Module_functor (p, k) ->
           if !html_short_functors then
