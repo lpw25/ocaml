@@ -555,19 +555,8 @@ let field_address ptr n dbg =
   then ptr
   else Cop(Cadda, [ptr; Cconst_int(n * size_addr)], dbg)
 
-let get_field env ptr n dbg =
-  let mut =
-    match env.environment_param with
-    | None -> Mutable
-    | Some environment_param ->
-      match ptr with
-      | Cvar ptr ->
-        (* Loads from the current function's closure are immutable. *)
-        if Ident.same environment_param ptr then Immutable
-        else Mutable
-      | _ -> Mutable
-  in
-  Cop(Cload (Word_val, mut), [field_address ptr n dbg], dbg)
+let get_field base n mut dbg =
+  Cop(Cload (Word_val, mut), [field_address base n dbg], dbg)
 
 let set_field ptr n newval init dbg =
   Cop(Cstore (Word_val, init), [field_address ptr n dbg; newval], dbg)
@@ -709,8 +698,8 @@ let lookup_tag obj tag dbg =
 
 let lookup_label obj lab dbg =
   bind "lab" lab (fun lab ->
-    let table = Cop (Cload (Word_val, Mutable), [obj], dbg) in
-    addr_array_ref table lab dbg)
+    let table = get_field obj 0 Mutable dbg in
+    addr_array_ref table lab)
 
 let call_cached_method obj tag cache pos args dbg =
   let arity = List.length args in
@@ -1680,7 +1669,7 @@ let rec transl env e =
       Cop(Capply typ_val, Cconst_symbol lbl :: List.map (transl env) args, dbg)
   | Ugeneric_apply(clos, [arg], dbg) ->
       bind "fun" (transl env clos) (fun clos ->
-        Cop(Capply typ_val, [get_field env clos 0 dbg; transl env arg; clos],
+        Cop(Capply typ_val, [get_field clos 0 Immutable dbg; transl env arg; clos],
           dbg))
   | Ugeneric_apply(clos, args, dbg) ->
       let arity = List.length args in
@@ -1965,8 +1954,8 @@ and transl_prim_1 env p arg dbg =
   | Pignore ->
       return_unit(remove_unit (transl env arg))
   (* Heap operations *)
-  | Pfield n ->
-      get_field env (transl env arg) n dbg
+  | Pfield(n, is_ptr, mut) ->
+      get_field env (transl env arg) n mut dbg
   | Pfloatfield n ->
       let ptr = transl env arg in
       box_float dbg (
@@ -3161,13 +3150,13 @@ let send_function arity =
     let cache = Cvar cache and obj = Cvar obj and tag = Cvar tag in
     let meths = Ident.create "meths" and cached = Ident.create "cached" in
     let real = Ident.create "real" in
-    let mask = get_field env (Cvar meths) 1 dbg in
+    let mask = get_field env (Cvar meths) 1 Mutable dbg in
     let cached_pos = Cvar cached in
     let tag_pos = Cop(Cadda, [Cop (Cadda, [cached_pos; Cvar meths], dbg);
                               Cconst_int(3*size_addr-1)], dbg) in
     let tag' = Cop(Cload (Word_int, Mutable), [tag_pos], dbg) in
     Clet (
-    meths, Cop(Cload (Word_val, Mutable), [obj], dbg),
+    meths, get_field obj 0 Mutable dbg,
     Clet (
     cached,
       Cop(Cand, [Cop(Cload (Word_int, Mutable), [cache], dbg); mask], dbg),
@@ -3176,10 +3165,12 @@ let send_function arity =
     Cifthenelse(Cop(Ccmpa Cne, [tag'; tag], dbg),
                 cache_public_method (Cvar meths) tag cache dbg,
                 cached_pos),
-    Cop(Cload (Word_val, Mutable),
-      [Cop(Cadda, [Cop (Cadda, [Cvar real; Cvar meths], dbg);
-       Cconst_int(2*size_addr-1)], dbg)], dbg))))
-
+    get_field_computed
+      (Cvar meths)
+      (Cop(Casr, [Cop (Cadda, [Cvar real; Cconst_int(2*size_addr - 1)]);
+                 Cconst_int log2_size_addr]))
+      Mutable
+      dbg
   in
   let body = Clet(clos', clos, body) in
   let cache = cache in
