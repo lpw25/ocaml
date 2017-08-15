@@ -618,9 +618,13 @@ let prepare_to_simplify_set_of_closures ~env
           Var_within_closure.Map.add (Var_within_closure.wrap id) desc map)
         free_vars Var_within_closure.Map.empty
     in
+    let free_vars = Variable.Map.map fst free_vars in
+    let function_decls =
+      A.function_declarations_of_flambda function_decls
+    in
     A.create_value_set_of_closures ~function_decls ~bound_vars
       ~invariant_params:(lazy Variable.Map.empty) ~specialised_args
-      ~freshening ~direct_call_surrogates
+      ~freshening ~direct_call_surrogates ~free_vars
   in
   (* Populate the environment with the approximation of each closure.
      This part of the environment is shared between all of the closures in
@@ -692,3 +696,40 @@ let prepare_to_simplify_closure ~(function_decl : Flambda.function_declaration)
   in
   add_projections ~closure_env ~which_variables:free_vars
     ~map:(fun (spec_to, _approx) -> spec_to)
+
+let should_use_classic_mode (fun_decls : Flambda.function_declarations) =
+  let should_use_classic_mode
+        (function_decl : Flambda.function_declaration) =
+    match function_decl.inline with
+    | Default_inline ->
+      if !Clflags.classic_inlining && not function_decl.stub then
+        (* In classic-inlining mode, the inlining decision is taken at
+           definition site (here). If the function is small enough
+           (below the -inline threshold) it will always be inlined. *)
+        let inlining_threshold = initial_inlining_threshold ~round:0 in
+        not (Inlining_cost.can_inline
+               function_decl.body inlining_threshold ~bonus:0)
+      else begin false end
+    | _ -> false
+  in
+  Variable.Map.exists
+    (fun _key func_decl -> should_use_classic_mode func_decl)
+    fun_decls.funs
+
+let approximate_function_declarations
+      (function_decls : Flambda.function_declarations) =
+  if should_use_classic_mode function_decls
+  then A.create_classic_function_declarations function_decls
+  else A.create_normal_function_declarations function_decls
+
+let create_value_set_of_closures
+      ~(function_decls : Flambda.function_declarations)
+      ~bound_vars ~free_vars ~invariant_params ~specialised_args ~freshening
+      ~direct_call_surrogates =
+  let create =
+    if should_use_classic_mode function_decls
+    then A.create_classic_value_set_of_closures
+    else A.create_normal_value_set_of_closures
+  in
+  create ~function_decls ~bound_vars ~free_vars ~invariant_params
+    ~specialised_args ~freshening ~direct_call_surrogates

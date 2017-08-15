@@ -343,6 +343,7 @@ and describe_set_of_closures env (set : Flambda.set_of_closures)
       { Export_info.
         set_of_closures_id = set.function_decls.set_of_closures_id;
         bound_vars = Var_within_closure.wrap_map bound_vars_approx;
+        free_vars = set.free_vars;
         results =
           Closure_id.wrap_map
             (Variable.Map.map (fun _ -> Export_info.Value_unknown)
@@ -372,6 +373,7 @@ and describe_set_of_closures env (set : Flambda.set_of_closures)
   in
   { set_of_closures_id = set.function_decls.set_of_closures_id;
     bound_vars = Var_within_closure.wrap_map bound_vars_approx;
+    free_vars = set.free_vars;
     results = Closure_id.wrap_map results;
     aliased_symbol = None;
   }
@@ -502,11 +504,16 @@ let build_export_info ~(backend : (module Backend_intf.S))
     let _global_symbol, env =
       describe_program (Env.Global.create_empty ()) program
     in
+    let approx_func_decl =
+      Inline_and_simplify_aux.approximate_function_declarations
+    in
     let sets_of_closures =
       Flambda_utils.all_function_decls_indexed_by_set_of_closures_id program
+      |> Set_of_closures_id.Map.map approx_func_decl
     in
     let closures =
       Flambda_utils.all_function_decls_indexed_by_closure_id program
+      |> Closure_id.Map.map approx_func_decl
     in
     let invariant_params =
       Set_of_closures_id.Map.map

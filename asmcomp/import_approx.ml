@@ -19,11 +19,11 @@
 module A = Simple_value_approx
 
 let import_set_of_closures =
-  let import_function_declarations (clos : Flambda.function_declarations)
-        : Flambda.function_declarations =
+  let import_function_declarations (clos : A.function_declarations)
+        : A.function_declarations =
     (* CR-soon mshinwell for pchambart: Do we still need to do this
        rewriting?  I'm wondering if maybe we don't have to any more. *)
-    let sym_to_fun_var_map (clos : Flambda.function_declarations) =
+    let sym_to_fun_var_map (clos : A.function_declarations) =
       Variable.Map.fold (fun fun_var _ acc ->
            let closure_id = Closure_id.wrap fun_var in
            let sym = Compilenv.closure_symbol closure_id in
@@ -40,19 +40,15 @@ let import_set_of_closures =
       | named -> named
     in
     let funs =
-      Variable.Map.map (fun (function_decl : Flambda.function_declaration) ->
-          let body =
-            Flambda_iterators.map_toplevel_named f_named function_decl.body
-          in
-          Flambda.create_function_declaration ~params:function_decl.params
-            ~body ~stub:function_decl.stub ~dbg:function_decl.dbg
-            ~inline:function_decl.inline
-            ~specialise:function_decl.specialise
-            ~is_a_functor:function_decl.is_a_functor
-            ~closure_origin:function_decl.closure_origin)
+      Variable.Map.map (fun (function_decl : A.function_declaration) ->
+          match function_decl.function_body with
+          | None -> function_decl
+          | Some _ ->
+            A.update_function_decl_body function_decl
+              (Flambda_iterators.map_toplevel_named f_named))
         clos.funs
     in
-    Flambda.update_function_declarations clos ~funs
+    A.update_function_declarations clos ~funs
   in
   let aux set_of_closures_id =
     ignore (Compilenv.approx_for_global
@@ -75,7 +71,7 @@ let import_set_of_closures =
 let rec import_ex ex =
   ignore (Compilenv.approx_for_global (Export_id.get_compilation_unit ex));
   let ex_info = Compilenv.approx_env () in
-  let import_value_set_of_closures ~set_of_closures_id ~bound_vars
+  let import_value_set_of_closures ~set_of_closures_id ~bound_vars ~free_vars
         ~(ex_info : Export_info.t) ~what : A.value_set_of_closures option =
     let bound_vars = Var_within_closure.Map.map import_approx bound_vars in
     match
@@ -91,9 +87,10 @@ let rec import_ex ex =
       match import_set_of_closures set_of_closures_id with
       | None -> None
       | Some function_decls ->
-        Some (A.create_value_set_of_closures
+        Some (A.import_value_set_of_closures
           ~function_decls
           ~bound_vars
+          ~free_vars
           ~invariant_params:(lazy invariant_params)
           ~specialised_args:Variable.Map.empty
           ~freshening:Freshening.Project_var.empty
@@ -129,9 +126,13 @@ let rec import_ex ex =
     A.value_block tag (Array.map import_approx fields)
   | Value_closure { closure_id;
         set_of_closures =
-          { set_of_closures_id; bound_vars; aliased_symbol } } ->
+          { set_of_closures_id;
+            bound_vars;
+            free_vars;
+            aliased_symbol } } ->
     let value_set_of_closures =
-      import_value_set_of_closures ~set_of_closures_id ~bound_vars ~ex_info
+      import_value_set_of_closures
+        ~set_of_closures_id ~bound_vars ~free_vars ~ex_info
         ~what:(Format.asprintf "Value_closure %a" Closure_id.print closure_id)
     in
     begin match value_set_of_closures with
@@ -140,10 +141,11 @@ let rec import_ex ex =
       A.value_closure ?set_of_closures_symbol:aliased_symbol
         value_set_of_closures closure_id
     end
-  | Value_set_of_closures { set_of_closures_id; bound_vars; aliased_symbol } ->
+  | Value_set_of_closures
+      { set_of_closures_id; bound_vars; free_vars; aliased_symbol } ->
     let value_set_of_closures =
-      import_value_set_of_closures ~set_of_closures_id ~bound_vars ~ex_info
-        ~what:"Value_set_of_closures"
+      import_value_set_of_closures ~set_of_closures_id ~bound_vars
+        ~free_vars ~ex_info ~what:"Value_set_of_closures"
     in
     match value_set_of_closures with
     | None ->
