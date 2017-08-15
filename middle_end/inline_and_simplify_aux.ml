@@ -619,9 +619,14 @@ let prepare_to_simplify_set_of_closures ~env
         free_vars Var_within_closure.Map.empty
     in
     let free_vars = Variable.Map.map fst free_vars in
+    let function_decls =
+      A.function_declarations_approx function_decls
+    in
     A.create_value_set_of_closures ~function_decls ~bound_vars
-      ~invariant_params:(lazy Variable.Map.empty) ~specialised_args
-      ~free_vars ~freshening ~direct_call_surrogates
+      ~invariant_params:(lazy Variable.Map.empty)
+      ~recursive:(lazy (Variable.Map.keys function_decls.funs))
+      ~specialised_args
+      ~freshening ~direct_call_surrogates ~free_vars
   in
   (* Populate the environment with the approximation of each closure.
      This part of the environment is shared between all of the closures in

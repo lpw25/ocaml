@@ -506,15 +506,26 @@ let build_export_info ~(backend : (module Backend_intf.S))
     in
     let sets_of_closures =
       Flambda_utils.all_function_decls_indexed_by_set_of_closures_id program
+      |> Set_of_closures_id.Map.map
+           Simple_value_approx.function_declarations_approx
     in
     let closures =
       Flambda_utils.all_function_decls_indexed_by_closure_id program
+      |> Closure_id.Map.map
+           Simple_value_approx.function_declarations_approx
     in
     let invariant_params =
       Set_of_closures_id.Map.map
         (fun { Flambda. function_decls; _ } ->
            Invariant_params.invariant_params_in_recursion
              ~backend function_decls)
+        (Flambda_utils.all_sets_of_closures_map program)
+    in
+    let recursive =
+      Set_of_closures_id.Map.map
+        (fun { Flambda. function_decls; _ } ->
+          Find_recursive_functions.in_function_declarations
+            ~backend function_decls)
         (Flambda_utils.all_sets_of_closures_map program)
     in
     let unnested_values =
@@ -541,6 +552,27 @@ let build_export_info ~(backend : (module Backend_intf.S))
             invariant_params)
         unnested_values invariant_params
     in
+    let recursive =
+      let export = Compilenv.approx_env () in
+      Export_id.Map.fold (fun _eid (descr:Export_info.descr)
+                           (recursive) ->
+          match descr with
+          | Value_closure { set_of_closures }
+          | Value_set_of_closures set_of_closures ->
+            let { Export_info.set_of_closures_id } = set_of_closures in
+            begin match
+              Set_of_closures_id.Map.find set_of_closures_id
+                export.recursive
+            with
+            | exception Not_found ->
+              recursive
+            | (set:Variable.Set.t) ->
+              Set_of_closures_id.Map.add set_of_closures_id set recursive
+            end
+          | _ ->
+            recursive)
+        unnested_values recursive
+    in
     let values =
       Export_info.nest_eid_map unnested_values
     in
@@ -551,3 +583,4 @@ let build_export_info ~(backend : (module Backend_intf.S))
       ~sets_of_closures ~closures
       ~constant_sets_of_closures:Set_of_closures_id.Set.empty
       ~invariant_params
+      ~recursive

@@ -567,6 +567,13 @@ val create_function_declarations
    : funs:function_declaration Variable.Map.t
   -> function_declarations
 
+(** Create a set of function declarations with a given set of closures
+    origin. *)
+val create_function_declarations_with_origin
+   : funs:function_declaration Variable.Map.t
+  -> set_of_closures_origin:Set_of_closures_origin.t
+  -> function_declarations
+
 (** Create a set of function declarations based on another set of function
     declarations. *)
 val update_function_declarations

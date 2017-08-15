@@ -1029,6 +1029,14 @@ let create_function_declarations ~funs =
     funs;
   }
 
+let create_function_declarations_with_origin ~funs ~set_of_closures_origin =
+  let compilation_unit = Compilation_unit.get_current_exn () in
+  let set_of_closures_id = Set_of_closures_id.create compilation_unit in
+  { set_of_closures_id;
+    set_of_closures_origin;
+    funs;
+  }
+
 let update_function_declarations function_decls ~funs =
   let compilation_unit = Compilation_unit.get_current_exn () in
   let set_of_closures_id = Set_of_closures_id.create compilation_unit in

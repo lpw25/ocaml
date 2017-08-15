@@ -143,14 +143,33 @@ and value_closure = {
   closure_id : Closure_id.t;
 }
 
+and function_declarations = private {
+  set_of_closures_id : Set_of_closures_id.t;
+  set_of_closures_origin : Set_of_closures_origin.t;
+  funs : function_declaration Variable.Map.t;
+}
+
+and function_declaration = private {
+  params : Parameter.t list;
+  body : Flambda.t;
+  free_variables : Variable.Set.t;
+  free_symbols : Symbol.Set.t;
+  stub : bool;
+  dbg : Debuginfo.t;
+  inline : Lambda.inline_attribute;
+  specialise : Lambda.specialise_attribute;
+  is_a_functor : bool;
+}
+
 (* CR-soon mshinwell: add support for the approximations of the results, so we
    can do all of the tricky higher-order cases. *)
 and value_set_of_closures = private {
-  function_decls : Flambda.function_declarations;
+  function_decls : function_declarations;
   bound_vars : t Var_within_closure.Map.t;
   free_vars : Flambda.specialised_to Variable.Map.t;
-  invariant_params : Variable.Set.t Variable.Map.t lazy_t;
-  size : int option Variable.Map.t lazy_t;
+  invariant_params : Variable.Set.t Variable.Map.t Lazy.t;
+  recursive : Variable.Set.t Lazy.t;
+  size : int option Variable.Map.t Lazy.t;
   (** For functions that are very likely to be inlined, the size of the
       function's body. *)
   specialised_args : Flambda.specialised_to Variable.Map.t;
@@ -179,12 +198,20 @@ val print_value_set_of_closures
    : Format.formatter
   -> value_set_of_closures
   -> unit
+val print_function_declarations
+  : Format.formatter
+  -> function_declarations
+  -> unit
+
+val function_declarations_approx
+   : Flambda.function_declarations -> function_declarations
 
 val create_value_set_of_closures
-   : function_decls:Flambda.function_declarations
+   : function_decls:function_declarations
   -> bound_vars:t Var_within_closure.Map.t
-  -> free_vars:Flambda.specialised_to Variable.Map.t
+  -> free_vars: Flambda.specialised_to Variable.Map.t
   -> invariant_params:Variable.Set.t Variable.Map.t lazy_t
+  -> recursive:Variable.Set.t Lazy.t
   -> specialised_args:Flambda.specialised_to Variable.Map.t
   -> freshening:Freshening.Project_var.t
   -> direct_call_surrogates:Closure_id.t Closure_id.Map.t
@@ -428,3 +455,29 @@ type switch_branch_selection =
 (** Check that the branch is compatible with the approximation *)
 val potentially_taken_const_switch_branch : t -> int -> switch_branch_selection
 val potentially_taken_block_switch_branch : t -> int -> switch_branch_selection
+
+val function_arity : function_declaration -> int
+
+(** Create a set of function declarations based on another set of function
+    declarations. *)
+val update_function_declarations
+   : function_declarations
+  -> funs:function_declaration Variable.Map.t
+  -> function_declarations
+
+val import_function_declarations_for_pack
+   : function_declarations
+  -> (Set_of_closures_id.t -> Set_of_closures_id.t)
+  -> (Set_of_closures_origin.t -> Set_of_closures_origin.t)
+  -> function_declarations
+
+val update_function_declaration_body
+    : function_declaration
+   -> (Flambda.t -> Flambda.t)
+   -> function_declaration
+
+(** Creates a map from closure IDs to function declarations by iterating over
+    all sets of closures in the given map. *)
+val make_closure_map
+   : function_declarations Set_of_closures_id.Map.t
+  -> function_declarations Closure_id.Map.t

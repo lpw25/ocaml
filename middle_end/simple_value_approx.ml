@@ -66,12 +66,31 @@ and value_closure = {
   closure_id : Closure_id.t;
 }
 
+and function_declarations = {
+  set_of_closures_id : Set_of_closures_id.t;
+  set_of_closures_origin : Set_of_closures_origin.t;
+  funs : function_declaration Variable.Map.t;
+}
+
+and function_declaration = {
+  params : Parameter.t list;
+  body : Flambda.t;
+  free_variables : Variable.Set.t;
+  free_symbols : Symbol.Set.t;
+  stub : bool;
+  dbg : Debuginfo.t;
+  inline : Lambda.inline_attribute;
+  specialise : Lambda.specialise_attribute;
+  is_a_functor : bool;
+}
+
 and value_set_of_closures = {
-  function_decls : Flambda.function_declarations;
+  function_decls : function_declarations;
   bound_vars : t Var_within_closure.Map.t;
-  free_vars : Flambda.specialised_to Variable.Map.t;
-  invariant_params : Variable.Set.t Variable.Map.t lazy_t;
-  size : int option Variable.Map.t lazy_t;
+  free_vars  : Flambda.specialised_to Variable.Map.t;
+  invariant_params : Variable.Set.t Variable.Map.t Lazy.t;
+  recursive : Variable.Set.t Lazy.t;
+  size : int option Variable.Map.t Lazy.t;
   specialised_args : Flambda.specialised_to Variable.Map.t;
   freshening : Freshening.Project_var.t;
   direct_call_surrogates : Closure_id.t Closure_id.Map.t;
@@ -100,6 +119,36 @@ let print_unresolved_value ppf = function
     Format.fprintf ppf "Set_of_closures_id %a" Set_of_closures_id.print set
   | Symbol symbol ->
     Format.fprintf ppf "Symbol %a" Symbol.print symbol
+
+let print_function_declaration ppf var (f : function_declaration) =
+  let param ppf p = Variable.print ppf (Parameter.var p) in
+  let params ppf = List.iter (Format.fprintf ppf "@ %a" param) in
+  let stub = if f.stub then " *stub*" else "" in
+  let is_a_functor = if f.is_a_functor then " *functor*" else "" in
+  let inline =
+    match f.inline with
+    | Always_inline -> " *inline*"
+    | Never_inline -> " *never_inline*"
+    | Unroll _ -> " *unroll*"
+    | Default_inline -> ""
+  in
+  let specialise =
+    match f.specialise with
+    | Always_specialise -> " *specialise*"
+    | Never_specialise -> " *never_specialise*"
+    | Default_specialise -> ""
+  in
+  let print_body ppf _ =
+    Format.fprintf ppf "<Function Body>"
+  in
+  Format.fprintf ppf "@[<2>(%a%s%s%s%s@ =@ fun@[<2>%a@] ->@ @[<2><%a>@])@]@ "
+    Variable.print var stub is_a_functor inline specialise
+    params f.params
+    print_body f.body
+
+let print_function_declarations ppf (fd : function_declarations) =
+  let funs ppf = Variable.Map.iter (print_function_declaration ppf) in
+  Format.fprintf ppf "@[<2>(%a)@]" funs fd.funs
 
 let rec print_descr ppf = function
   | Value_int i -> Format.pp_print_int ppf i
@@ -237,13 +286,13 @@ let value_closure ?closure_var ?set_of_closures_var ?set_of_closures_symbol
   }
 
 let create_value_set_of_closures
-      ~(function_decls : Flambda.function_declarations) ~bound_vars
-      ~free_vars ~invariant_params ~specialised_args ~freshening
+      ~(function_decls : function_declarations) ~bound_vars ~free_vars
+      ~invariant_params ~recursive ~specialised_args ~freshening
       ~direct_call_surrogates =
   let size =
     lazy (
       let functions = Variable.Map.keys function_decls.funs in
-      Variable.Map.map (fun (function_decl : Flambda.function_declaration) ->
+      Variable.Map.map (fun (function_decl : function_declaration) ->
           let params = Parameter.Set.vars function_decl.params in
           let free_vars =
             Variable.Set.diff
@@ -262,6 +311,7 @@ let create_value_set_of_closures
     bound_vars;
     free_vars;
     invariant_params;
+    recursive;
     size;
     specialised_args;
     freshening;
@@ -662,15 +712,17 @@ let freshen_and_check_closure_id
       value_set_of_closures.freshening closure_id
   in
   try
-    ignore (Flambda_utils.find_declaration closure_id
-      value_set_of_closures.function_decls);
+    ignore (
+      Variable.Map.find (Closure_id.unwrap closure_id)
+        value_set_of_closures.function_decls.funs
+    );
     closure_id
   with Not_found ->
     Misc.fatal_error (Format.asprintf
       "Function %a not found in the set of closures@ %a@.%a@."
       Closure_id.print closure_id
       print_value_set_of_closures value_set_of_closures
-      Flambda.print_function_declarations value_set_of_closures.function_decls)
+      print_function_declarations value_set_of_closures.function_decls)
 
 type checked_approx_for_set_of_closures =
   | Wrong
@@ -861,3 +913,72 @@ let potentially_taken_block_switch_branch t tag =
     Cannot_be_taken
   | Value_bottom ->
     Cannot_be_taken
+
+let function_arity (fun_decl : function_declaration) =
+  List.length fun_decl.params
+
+let create_function_declaration
+      ~params ~body ~free_variables ~free_symbols ~stub ~dbg
+      ~inline ~specialise ~is_a_functor =
+  { params; body; free_variables;
+    free_symbols; stub; dbg; inline; specialise; is_a_functor; }
+
+let function_declaration_approx (fun_decl : Flambda.function_declaration) =
+  create_function_declaration
+    ~params:fun_decl.params
+    ~body:fun_decl.body
+    ~free_variables:fun_decl.free_variables
+    ~free_symbols:fun_decl.free_symbols
+    ~stub:fun_decl.stub
+    ~dbg:fun_decl.dbg
+    ~inline:fun_decl.inline
+    ~specialise:fun_decl.specialise
+    ~is_a_functor:fun_decl.is_a_functor
+
+let create_function_declarations
+  ~set_of_closures_id ~set_of_closures_origin ~funs =
+  { set_of_closures_id ; set_of_closures_origin ; funs }
+
+let function_declarations_approx (fun_decls : Flambda.function_declarations) =
+  let funs = Variable.Map.map function_declaration_approx fun_decls.funs in
+  create_function_declarations
+    ~set_of_closures_id:fun_decls.set_of_closures_id
+    ~set_of_closures_origin:fun_decls.set_of_closures_origin
+    ~funs
+
+let update_function_declarations function_decls ~funs =
+  let compilation_unit = Compilation_unit.get_current_exn () in
+  let set_of_closures_id = Set_of_closures_id.create compilation_unit in
+  let set_of_closures_origin = function_decls.set_of_closures_origin in
+  { set_of_closures_id;
+    set_of_closures_origin;
+    funs;
+  }
+
+let import_function_declarations_for_pack function_decls
+    import_set_of_closures_id import_set_of_closures_origin =
+  { set_of_closures_id =
+      import_set_of_closures_id function_decls.set_of_closures_id;
+    set_of_closures_origin =
+      import_set_of_closures_origin function_decls.set_of_closures_origin;
+    funs = function_decls.funs;
+  }
+
+let update_function_declaration_body
+      (function_decl : function_declaration)
+      (f : Flambda.t -> Flambda.t) =
+  let body = f function_decl.body in
+  let free_variables = Flambda.free_variables body in
+  let free_symbols = Flambda.free_symbols body in
+  { function_decl with body; free_variables; free_symbols }
+
+let make_closure_map input =
+  let map = ref Closure_id.Map.empty in
+  let add_set_of_closures _ (function_decls : function_declarations) =
+    Variable.Map.iter (fun var _ ->
+        let closure_id = Closure_id.wrap var in
+        map := Closure_id.Map.add closure_id function_decls !map)
+      function_decls.funs
+  in
+  Set_of_closures_id.Map.iter add_set_of_closures input;
+  !map
