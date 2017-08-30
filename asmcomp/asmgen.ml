@@ -198,11 +198,11 @@ let end_gen_implementation ?toplevel ppf
 
 let flambda_gen_implementation ?toplevel ~backend ppf
     (program:Flambda.program) =
-  let export = Build_export_info.build_export_info ~backend program in
+  let export = Build_export_info.build_transient ~backend program in
   let (clambda, preallocated, constants) =
     Profile.record_call "backend" (fun () ->
       (program, export)
-      ++ Flambda_to_clambda.convert ~backend
+      ++ Flambda_to_clambda.convert
       ++ flambda_raw_clambda_dump_if ppf
       ++ (fun { Flambda_to_clambda. expr; preallocated_blocks;
                 structured_constants; exported; } ->

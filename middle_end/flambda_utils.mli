@@ -134,6 +134,8 @@ val all_lifted_constant_sets_of_closures
    : Flambda.program
   -> Set_of_closures_id.Set.t
 
+val all_lifted_constant_closures : Flambda.program -> Closure_id.Set.t
+
 (** All sets of closures in the given program (whether or not bound to a
     symbol.) *)
 val all_sets_of_closures : Flambda.program -> Flambda.set_of_closures list
@@ -141,14 +143,6 @@ val all_sets_of_closures : Flambda.program -> Flambda.set_of_closures list
 val all_sets_of_closures_map
    : Flambda.program
   -> Flambda.set_of_closures Set_of_closures_id.Map.t
-
-val all_function_decls_indexed_by_set_of_closures_id
-   : Flambda.program
-  -> Flambda.function_declarations Set_of_closures_id.Map.t
-
-val all_function_decls_indexed_by_closure_id
-   : Flambda.program
-  -> Flambda.function_declarations Closure_id.Map.t
 
 (* CR-someday pchambart: A more general version of this function might
    take a [named] instead of a symbol and be called with
