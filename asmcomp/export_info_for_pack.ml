@@ -20,10 +20,7 @@ module A = Simple_value_approx
 
 let rename_id_state = Export_id.Tbl.create 100
 let rename_set_of_closures_id_state = Set_of_closures_id.Tbl.create 10
-let imported_flambda_function_declarations_table =
-  (Set_of_closures_id.Tbl.create 10
-   : Flambda.function_declarations Set_of_closures_id.Tbl.t)
-let imported_a_function_declarations_table =
+let imported_function_declarations_table =
   (Set_of_closures_id.Tbl.create 10
    : A.function_declarations Set_of_closures_id.Tbl.t)
 
@@ -130,7 +127,7 @@ let rec import_code_for_pack units pack expr =
             ~specialised_args:set_of_closures.specialised_args
             ~direct_call_surrogates:set_of_closures.direct_call_surrogates
             ~function_decls:
-              (import_function_declarations_for_pack units pack
+              (import_function_declarations_for_pack_aux units pack
                  set_of_closures.function_decls)
         in
         Set_of_closures set_of_closures
@@ -155,23 +152,7 @@ and import_function_declarations_for_pack_aux units pack
     (import_set_of_closures_id_for_pack units pack)
     (import_set_of_closures_origin_for_pack units pack)
 
-and import_function_declarations_for_pack units pack
-    (function_decls:Flambda.function_declarations) =
-  let original_set_of_closures_id = function_decls.set_of_closures_id in
-  try
-    Set_of_closures_id.Tbl.find imported_flambda_function_declarations_table
-      original_set_of_closures_id
-  with Not_found ->
-    let function_decls =
-      import_function_declarations_for_pack_aux units pack function_decls
-    in
-    Set_of_closures_id.Tbl.add
-      imported_flambda_function_declarations_table
-      original_set_of_closures_id
-      function_decls;
-    function_decls
-
-let import_function_declarations_approx_for_pack_aux units pack
+let import_function_declarations_for_pack_aux units pack
       (function_decls : A.function_declarations) : A.function_declarations =
   let funs =
     Variable.Map.map
@@ -189,14 +170,14 @@ let import_function_declarations_approx_for_pack units pack
       (function_decls: A.function_declarations) =
   let original_set_of_closures_id = function_decls.set_of_closures_id in
   try
-    Set_of_closures_id.Tbl.find imported_a_function_declarations_table
+    Set_of_closures_id.Tbl.find imported_function_declarations_table
       original_set_of_closures_id
   with Not_found ->
     let function_decls =
-      import_function_declarations_approx_for_pack_aux units pack function_decls
+      import_function_declarations_for_pack_aux units pack function_decls
     in
     Set_of_closures_id.Tbl.add
-      imported_a_function_declarations_table
+      imported_function_declarations_table
       original_set_of_closures_id
       function_decls;
     function_decls
@@ -229,15 +210,12 @@ let import_for_pack ~pack_units ~pack (exp : Export_info.t) =
          exp.sets_of_closures)
   in
   Export_info.create ~sets_of_closures
-    ~closures:(A.make_closure_map sets_of_closures)
     ~offset_fun:exp.offset_fun
     ~offset_fv:exp.offset_fv
     ~values:(import_eidmap import_descr exp.values)
     ~symbol_id:(Symbol.Map.map_keys import_sym
       (Symbol.Map.map import_eid exp.symbol_id))
-    ~constant_sets_of_closures:
-      (Set_of_closures_id.Set.map import_set_of_closures_id
-         exp.constant_sets_of_closures)
+    ~constant_closures:exp.constant_closures
     ~invariant_params:
       (Set_of_closures_id.Map.map_keys import_set_of_closures_id
          exp.invariant_params)
@@ -246,7 +224,6 @@ let import_for_pack ~pack_units ~pack (exp : Export_info.t) =
          exp.recursive)
 
 let clear_import_state () =
-  Set_of_closures_id.Tbl.clear imported_flambda_function_declarations_table;
-  Set_of_closures_id.Tbl.clear imported_a_function_declarations_table;
+  Set_of_closures_id.Tbl.clear imported_function_declarations_table;
   Set_of_closures_id.Tbl.clear rename_set_of_closures_id_state;
   Export_id.Tbl.clear rename_id_state
