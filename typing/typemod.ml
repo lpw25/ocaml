@@ -1464,6 +1464,34 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
     (Cmt_format.Partial_structure str :: previous_saved_types);
   str, sg, final_env
 
+let has_no_aliases_attribute smod =
+  let no_aliases =
+    Attr_helper.get_no_payload_attribute
+      ["no_aliases"; "ocaml.no_aliases"] smod.pmod_attributes
+  in
+  match no_aliases with
+  | None -> false
+  | Some _ -> true
+
+(* Extract the module type of a module expression *)
+let type_module_type_of env smod =
+  let sttn =
+    match smod.pmod_desc with
+    | Pmod_ident _ -> false
+    | _ -> true
+  in
+  let tmty = type_module sttn false None env smod in
+  let mty = tmty.mod_type in
+  (* PR#6307: expand aliases at root and submodules *)
+  let mty =
+    if not (has_no_aliases_attribute smod) then mty
+    else Mtype.remove_aliases env mty
+  in
+  (* PR#5036: must not contain non-generalized type variables *)
+  if not (closed_modtype env mty) then
+    raise(Error(smod.pmod_loc, env, Non_generalizable_module mty));
+  tmty, mty
+
 let type_toplevel_phrase env s =
   Env.reset_required_globals ();
   begin
@@ -1489,27 +1517,6 @@ and normalize_signature_item env = function
     Sig_value(id, desc) -> Ctype.normalize_type env desc.val_type
   | Sig_module(id, md, _) -> normalize_modtype env md.md_type
   | _ -> ()
-
-(* Extract the module type of a module expression *)
-
-let type_module_type_of env smod =
-  let tmty =
-    match smod.pmod_desc with
-    | Pmod_ident lid -> (* turn off strengthening in this case *)
-        let path, md = Typetexp.find_module env smod.pmod_loc lid.txt in
-        rm { mod_desc = Tmod_ident (path, lid);
-             mod_type = md.md_type;
-             mod_env = env;
-             mod_attributes = smod.pmod_attributes;
-             mod_loc = smod.pmod_loc }
-    | _ -> type_module env smod in
-  let mty = tmty.mod_type in
-  (* PR#6307: expand aliases at root and submodules *)
-  let mty = Mtype.remove_aliases env mty in
-  (* PR#5036: must not contain non-generalized type variables *)
-  if not (closed_modtype env mty) then
-    raise(Error(smod.pmod_loc, env, Non_generalizable_module mty));
-  tmty, mty
 
 (* For Typecore *)
 
