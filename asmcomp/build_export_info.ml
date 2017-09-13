@@ -113,13 +113,17 @@ end = struct
     if Compilenv.is_predefined_exception sym
     then None
     else
-      let export = Compilenv.approx_for_global (Symbol.compilation_unit sym) in
-      try
-        let id = Symbol.Map.find sym export.symbol_id in
-        let descr = Export_info.find_description export id in
-        Some descr
+      match
+        Compilenv.approx_for_global (Symbol.compilation_unit sym)
       with
-      | Not_found -> None
+      | None -> None
+      | Some export ->
+        try
+          let id = Symbol.Map.find sym export.symbol_id in
+          let descr = Export_info.find_description export id in
+          Some descr
+        with
+        | Not_found -> None
 
   let get_id_descr t export_id =
     try Some (Export_id.Map.find export_id !(t.ex_table))
@@ -514,7 +518,9 @@ let describe_program (env : Env.Global.t) (program : Flambda.program) =
 let build_transient ~(backend : (module Backend_intf.S))
       (program : Flambda.program) : Export_info.transient =
   if !Clflags.opaque then
-    Export_info.empty_transient
+    let compilation_unit = Compilenv.current_unit () in
+    let root_symbol = Compilenv.current_unit_symbol () in
+    Export_info.opaque_transient ~root_symbol ~compilation_unit
   else
     (* CR-soon pchambart: Should probably use that instead of the ident of
        the module as global identifier.
@@ -549,35 +555,36 @@ let build_transient ~(backend : (module Backend_intf.S))
                  ~backend function_decls
              end)
           (Flambda_utils.all_sets_of_closures_map program)
-        in
-        let export = Compilenv.approx_env () in
-        Export_id.Map.fold
-          (fun _eid (descr:Export_info.descr) (invariant_params) ->
-            match (descr : Export_info.descr) with
-            | Value_closure { set_of_closures }
-            | Value_set_of_closures set_of_closures ->
-              let { Export_info.set_of_closures_id } = set_of_closures in
-              begin match
-                Set_of_closures_id.Map.find set_of_closures_id
-                  export.invariant_params
-              with
-              | exception Not_found ->
-                invariant_params
-              | (set : Variable.Set.t Variable.Map.t) ->
-                Set_of_closures_id.Map.add
-                  set_of_closures_id set invariant_params
-              end
-            | Export_info.Value_boxed_int (_, _)
-            | Value_block _
-            | Value_mutable_block _
-            | Value_int _
-            | Value_char _
-            | Value_constptr _
-            | Value_float _
-            | Value_float_array _
-            | Value_string _ ->
-              invariant_params)
-          unnested_values invariant_params
+      in
+      let export = Compilenv.approx_env () in
+      Export_id.Map.fold
+        (fun _eid (descr:Export_info.descr) (invariant_params) ->
+          match (descr : Export_info.descr) with
+          | Value_closure { set_of_closures }
+          | Value_set_of_closures set_of_closures ->
+            let { Export_info.set_of_closures_id } = set_of_closures in
+            begin match
+              Set_of_closures_id.Map.find set_of_closures_id
+                export.invariant_params
+            with
+            | exception Not_found ->
+              invariant_params
+            | (set : Variable.Set.t Variable.Map.t) ->
+              Set_of_closures_id.Map.add
+                set_of_closures_id set invariant_params
+            end
+          | Export_info.Value_boxed_int (_, _)
+          | Value_block _
+          | Value_mutable_block _
+          | Value_int _
+          | Value_char _
+          | Value_constptr _
+          | Value_float _
+          | Value_float_array _
+          | Value_string _
+          | Value_unknown_descr ->
+            invariant_params)
+        unnested_values invariant_params
     in
     let values = Export_info.nest_eid_map unnested_values in
     let symbol_id = Env.Global.symbol_to_export_id_map env in
