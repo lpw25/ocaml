@@ -355,7 +355,7 @@ let name_of_primitive = function
   | Psetglobal _ -> "Psetglobal"
   | Pmakeblock _ -> "Pmakeblock"
   | Pfield _ -> "Pfield"
-  | Pfield_computed -> "Pfield_computed"
+  | Pfield_computed _ -> "Pfield_computed"
   | Psetfield _ -> "Psetfield"
   | Psetfield_computed _ -> "Psetfield_computed"
   | Pfloatfield _ -> "Pfloatfield"
