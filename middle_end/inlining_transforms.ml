@@ -265,7 +265,9 @@ let inline_by_copying_function_declaration ~env ~r
        approximations, rather than on all invariant arguments.) *)
     None
   else
-    let set_of_closures_var = new_var "dup_set_of_closures" in
+    let set_of_closures_var =
+      new_var Internal_variable_names.dup_set_of_closures
+    in
     (* The free variable map for the duplicated declaration(s) maps the
        "internal" names used within the function bodies to fresh names,
        which in turn are bound to projections from the set of closures being
@@ -276,7 +278,7 @@ let inline_by_copying_function_declaration ~env ~r
         ~lhs_of_application ~function_decls ~init:(Variable.Map.empty, [])
         ~f:(fun ~acc:(map, for_lets) ~var:internal_var ~expr ->
           let from_closure : Flambda.specialised_to =
-            { var = new_var "from_closure";
+            { var = new_var Internal_variable_names.from_closure;
               projection = None;
             }
           in
@@ -300,7 +302,7 @@ let inline_by_copying_function_declaration ~env ~r
          detailed comment below. *)
       Variable.Map.fold (fun fun_var _fun_decl
                 (free_vars, free_vars_for_lets, original_vars) ->
-          let var = Variable.create "closure" in
+          let var = Variable.create Internal_variable_names.closure in
           let original_closure : Flambda.named =
             Move_within_set_of_closures
               { closure = lhs_of_application;
@@ -308,7 +310,7 @@ let inline_by_copying_function_declaration ~env ~r
                 move_to = Closure_id.wrap fun_var;
               }
           in
-          let internal_var = Variable.rename ~append:"_original" fun_var in
+          let internal_var = Variable.rename fun_var in
           let free_vars =
             Variable.Map.add internal_var { Flambda. var; projection = None }
               free_vars
@@ -505,7 +507,7 @@ let inline_by_copying_function_declaration ~env ~r
           closure_id = closure_id_being_applied;
         }
       in
-      let func = new_var "dup_func" in
+      let func = new_var Internal_variable_names.dup_func in
       let body : Flambda.t =
         Flambda.create_let set_of_closures_var
           (Set_of_closures set_of_closures)
