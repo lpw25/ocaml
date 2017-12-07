@@ -600,31 +600,10 @@ and simplify_set_of_closures original_env r
         ~dbg:function_decl.dbg
         ~f:(fun body_env -> simplify body_env r function_decl.body)
     in
-    let inline : Lambda.inline_attribute =
-      match function_decl.inline with
-      | Default_inline ->
-        if !Clflags.classic_inlining && not function_decl.stub then
-          (* In classic-inlining mode, the inlining decision is taken at
-             definition site (here). If the function is small enough
-             (below the -inline threshold) it will always be inlined. *)
-          let inlining_threshold =
-            Inline_and_simplify_aux.initial_inlining_threshold
-              ~round:(E.round env)
-          in
-          if Inlining_cost.can_inline body inlining_threshold ~bonus:0
-          then
-            Always_inline
-          else
-            Default_inline
-        else
-          Default_inline
-      | inline ->
-        inline
-    in
     let function_decl =
       Flambda.create_function_declaration ~params:function_decl.params
         ~body ~stub:function_decl.stub ~dbg:function_decl.dbg
-        ~inline ~specialise:function_decl.specialise
+        ~inline:function_decl.inline ~specialise:function_decl.specialise
         ~is_a_functor:function_decl.is_a_functor
     in
     let used_params' = Flambda.used_params function_decl in
@@ -646,7 +625,13 @@ and simplify_set_of_closures original_env r
     lazy (Find_recursive_functions.in_function_declarations function_decls
       ~backend:(E.backend env))
   in
-  let function_decls_approx = A.function_declarations_approx function_decls in
+  let keep_body =
+    Inline_and_simplify_aux.keep_body_check
+      ~is_classic_mode:function_decls.is_classic_mode ~recursive
+  in
+  let function_decls_approx =
+    A.function_declarations_approx ~keep_body function_decls
+  in
   let value_set_of_closures =
     A.create_value_set_of_closures
       ~function_decls:function_decls_approx
@@ -839,6 +824,7 @@ and simplify_partial_application env r ~lhs_of_application
         (Closure_id.unwrap closure_id_being_applied)
     in
     Flambda_utils.make_closure_declaration ~id:closure_variable
+      ~is_classic_mode:false
       ~body
       ~params:remaining_args
       ~stub:true
@@ -1469,8 +1455,12 @@ let constant_defining_value_approx
         ~backend:(E.backend env))
     in
     let value_set_of_closures =
+      let keep_body =
+        Inline_and_simplify_aux.keep_body_check
+          ~is_classic_mode:function_decls.is_classic_mode ~recursive
+      in
       let function_decls =
-        A.function_declarations_approx function_decls
+        A.function_declarations_approx ~keep_body function_decls
       in
       A.create_value_set_of_closures ~function_decls
         ~bound_vars:Var_within_closure.Map.empty

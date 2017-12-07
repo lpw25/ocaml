@@ -504,34 +504,39 @@ let build_export_info ~(backend : (module Backend_intf.S))
     let _global_symbol, env =
       describe_program (Env.Global.create_empty ()) program
     in
+    let function_declarations_approx (fun_decls : Flambda.function_declarations) =
+      let recursive =
+        lazy (Find_recursive_functions.in_function_declarations fun_decls ~backend)
+      in
+      let keep_body =
+        Inline_and_simplify_aux.keep_body_check
+          ~is_classic_mode:fun_decls.is_classic_mode ~recursive
+      in
+      Simple_value_approx.function_declarations_approx ~keep_body fun_decls
+    in
     let sets_of_closures =
       Flambda_utils.all_function_decls_indexed_by_set_of_closures_id program
-      |> Set_of_closures_id.Map.map
-           Simple_value_approx.function_declarations_approx
+      |> Set_of_closures_id.Map.map function_declarations_approx
     in
     let closures =
       Flambda_utils.all_function_decls_indexed_by_closure_id program
-      |> Closure_id.Map.map
-           Simple_value_approx.function_declarations_approx
-    in
-    let invariant_params =
-      Set_of_closures_id.Map.map
-        (fun { Flambda. function_decls; _ } ->
-           Invariant_params.invariant_params_in_recursion
-             ~backend function_decls)
-        (Flambda_utils.all_sets_of_closures_map program)
-    in
-    let recursive =
-      Set_of_closures_id.Map.map
-        (fun { Flambda. function_decls; _ } ->
-          Find_recursive_functions.in_function_declarations
-            ~backend function_decls)
-        (Flambda_utils.all_sets_of_closures_map program)
+      |> Closure_id.Map.map function_declarations_approx
     in
     let unnested_values =
       Env.Global.export_id_to_descr_map env
     in
     let invariant_params =
+      let invariant_params =
+        Set_of_closures_id.Map.map
+          (fun { Flambda. function_decls; _ } ->
+             if function_decls.is_classic_mode then begin
+               Variable.Map.empty
+             end else begin
+               Invariant_params.invariant_params_in_recursion
+                 ~backend function_decls
+             end)
+          (Flambda_utils.all_sets_of_closures_map program)
+      in
       let export = Compilenv.approx_env () in
       Export_id.Map.fold (fun _eid (descr:Export_info.descr)
                            (invariant_params) ->
@@ -553,6 +558,17 @@ let build_export_info ~(backend : (module Backend_intf.S))
         unnested_values invariant_params
     in
     let recursive =
+      let recursive =
+        Set_of_closures_id.Map.map
+          (fun { Flambda. function_decls; _ } ->
+             if function_decls.is_classic_mode then begin
+               Variable.Set.empty
+             end else begin
+               Find_recursive_functions.in_function_declarations
+                 ~backend function_decls
+             end)
+          (Flambda_utils.all_sets_of_closures_map program)
+      in
       let export = Compilenv.approx_env () in
       Export_id.Map.fold (fun _eid (descr:Export_info.descr)
                            (recursive) ->

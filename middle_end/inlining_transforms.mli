@@ -72,6 +72,7 @@ val inline_by_copying_function_body
   -> specialise_requested:Lambda.specialise_attribute
   -> closure_id_being_applied:Closure_id.t
   -> function_decl:Simple_value_approx.function_declaration
+  -> function_body:Simple_value_approx.function_body
   -> fun_vars:Variable.Set.t
   -> args:Variable.t list
   -> dbg:Debuginfo.t

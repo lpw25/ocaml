@@ -53,7 +53,8 @@ let set_inline_attribute_on_all_apply body inline specialise =
 (** Assign fresh names for a function's parameters and rewrite the body to
     use these new names. *)
 let copy_of_function's_body_with_freshened_params env
-      ~(function_decl : A.function_declaration) =
+      ~(function_decl : A.function_declaration)
+      ~(function_body : A.function_body) =
   let params = function_decl.params in
   let param_vars = Parameter.List.vars params in
   (* We cannot avoid the substitution in the case where we are inlining
@@ -67,14 +68,14 @@ let copy_of_function's_body_with_freshened_params env
   if E.does_not_bind env param_vars
     && E.does_not_freshen env param_vars
   then
-    params, function_decl.body
+    params, function_body.body
   else
     let freshened_params = List.map (fun p -> Parameter.rename p) params in
     let subst =
       Variable.Map.of_list
         (List.combine param_vars (Parameter.List.vars freshened_params))
     in
-    let body = Flambda_utils.toplevel_substitution subst function_decl.body in
+    let body = Flambda_utils.toplevel_substitution subst function_body.body in
     freshened_params, body
 
 (* CR-soon mshinwell: Add a note somewhere to explain why "bound by the closure"
@@ -92,6 +93,7 @@ let inline_by_copying_function_body ~env ~r
       ~(specialise_requested : Lambda.specialise_attribute)
       ~closure_id_being_applied
       ~(function_decl : A.function_declaration)
+      ~(function_body : A.function_body)
       ~fun_vars
       ~args ~dbg ~simplify =
   assert (E.mem env lhs_of_application);
@@ -101,7 +103,8 @@ let inline_by_copying_function_body ~env ~r
     else R.map_benefit r B.remove_call
   in
   let freshened_params, body =
-    copy_of_function's_body_with_freshened_params env ~function_decl
+    copy_of_function's_body_with_freshened_params env
+      ~function_decl ~function_body
   in
   let body =
     if function_decl.stub &&
@@ -128,7 +131,7 @@ let inline_by_copying_function_body ~env ~r
     let bound_variables =
       let params = Parameter.Set.vars function_decl.params in
       Variable.Set.diff
-        (Variable.Set.diff function_decl.free_variables params)
+        (Variable.Set.diff function_body.free_variables params)
         fun_vars
     in
     fold_over_projections_of_vars_bound_by_closure ~closure_id_being_applied
@@ -144,7 +147,7 @@ let inline_by_copying_function_body ~env ~r
     Variable.Set.fold (fun another_closure_in_the_same_set expr ->
       let used =
         Variable.Set.mem another_closure_in_the_same_set
-           function_decl.free_variables
+           function_body.free_variables
       in
       if used then
         Flambda.create_let another_closure_in_the_same_set
@@ -158,7 +161,8 @@ let inline_by_copying_function_body ~env ~r
       fun_vars
       bindings_for_vars_bound_by_closure_and_params_to_args
   in
-  let env = E.activate_freshening (E.set_never_inline env) in
+  let env = E.set_never_inline env in
+  let env = E.activate_freshening env in
   let env = E.set_inline_debuginfo ~dbg env in
   simplify env r expr
 
@@ -363,36 +367,41 @@ let add_free_var ~free_vars ~state ~free_var =
   end
 
 (* Add a function to the new set of closures iff:
-   1) All it's specialised parameters are available in
+   1) It's function body is known
+   2) All it's specialised parameters are available in
       [old_outside_to_new_outside]
-   2) At least one more parameter will become specialised *)
+   3) At least one more parameter will become specialised *)
 let add_function ~specialised_args ~state ~fun_var ~function_decl =
-  let rec loop worth_specialising = function
-    | [] -> worth_specialising
-    | param :: params -> begin
-        let param = Parameter.var param in
-        match Variable.Map.find_opt param specialised_args with
-        | Some (spec : Flambda.specialised_to) ->
-            Variable.Map.mem spec.var state.old_outside_to_new_outside
-            && loop worth_specialising params
-        | None ->
-            let worth_specialising =
-              worth_specialising
-              || Variable.Map.mem param state.old_params_to_new_outside
-            in
-            loop worth_specialising params
-      end
-  in
-  let worth_specialising = loop false function_decl.A.params in
-  if not worth_specialising then None
-  else begin
-    let new_fun_var = Variable.rename ~append:"_copied" fun_var in
-    let old_fun_var_to_new_fun_var =
-      Variable.Map.add fun_var new_fun_var state.old_fun_var_to_new_fun_var
+  match function_decl.A.function_body with
+  | None -> None
+  | Some _ -> begin
+    let rec loop worth_specialising = function
+      | [] -> worth_specialising
+      | param :: params -> begin
+          let param = Parameter.var param in
+          match Variable.Map.find_opt param specialised_args with
+          | Some (spec : Flambda.specialised_to) ->
+              Variable.Map.mem spec.var state.old_outside_to_new_outside
+              && loop worth_specialising params
+          | None ->
+              let worth_specialising =
+                worth_specialising
+                || Variable.Map.mem param state.old_params_to_new_outside
+              in
+              loop worth_specialising params
+        end
     in
-    let to_copy = fun_var :: state.to_copy in
-    let state = { state with old_fun_var_to_new_fun_var; to_copy } in
-    Some (state, new_fun_var)
+    let worth_specialising = loop false function_decl.A.params in
+    if not worth_specialising then None
+    else begin
+      let new_fun_var = Variable.rename ~append:"_copied" fun_var in
+      let old_fun_var_to_new_fun_var =
+        Variable.Map.add fun_var new_fun_var state.old_fun_var_to_new_fun_var
+      in
+      let to_copy = fun_var :: state.to_copy in
+      let state = { state with old_fun_var_to_new_fun_var; to_copy } in
+      Some (state, new_fun_var)
+    end
   end
 
 (* Lookup a function in the new set of closures, trying to add it if
@@ -466,6 +475,11 @@ let rewrite_function ~lhs_of_application ~closure_id_being_applied
   let function_decl : A.function_declaration =
     Variable.Map.find fun_var funs
   in
+  let function_body =
+    match function_decl.function_body with
+    | None -> assert false
+    | Some function_body -> function_body
+  in
   let new_fun_var =
     Variable.Map.find fun_var state.old_fun_var_to_new_fun_var
   in
@@ -486,7 +500,7 @@ let rewrite_function ~lhs_of_application ~closure_id_being_applied
            add_free_var ~free_vars ~state ~free_var:var
          else
            state)
-      function_decl.free_variables state
+      function_body.free_variables state
   in
   let state_ref = ref state in
   let body =
@@ -504,7 +518,7 @@ let rewrite_function ~lhs_of_application ~closure_id_being_applied
                  expr
            end
          | _ -> expr)
-      function_decl.body
+      function_body.body
   in
   let body =
     Flambda_utils.toplevel_substitution state.old_inside_to_new_inside body
@@ -610,6 +624,7 @@ let inline_by_copying_function_declaration
         Flambda.create_function_declarations_with_origin
           ~funs:state.new_funs
           ~set_of_closures_origin:function_decls.set_of_closures_origin
+          ~is_classic_mode:function_decls.is_classic_mode
       in
       let free_vars =
         update_projections ~state

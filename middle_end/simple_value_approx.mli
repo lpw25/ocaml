@@ -144,16 +144,21 @@ and value_closure = {
 }
 
 and function_declarations = private {
+  is_classic_mode: bool;
   set_of_closures_id : Set_of_closures_id.t;
   set_of_closures_origin : Set_of_closures_origin.t;
   funs : function_declaration Variable.Map.t;
 }
 
-and function_declaration = private {
-  params : Parameter.t list;
-  body : Flambda.t;
+and function_body = private {
   free_variables : Variable.Set.t;
   free_symbols : Symbol.Set.t;
+  body : Flambda.t;
+}
+
+and function_declaration = private {
+  function_body : function_body option;
+  params : Parameter.t list;
   stub : bool;
   dbg : Debuginfo.t;
   inline : Lambda.inline_attribute;
@@ -161,8 +166,16 @@ and function_declaration = private {
   is_a_functor : bool;
 }
 
+
 (* CR-soon mshinwell: add support for the approximations of the results, so we
    can do all of the tricky higher-order cases. *)
+(* when [is_classic_mode] is [false], functions in [function_declarations]
+   are guranteed to have function bodies (ie:
+   [function_declaration.function_body] will be of the [Some] variant).
+
+   When it [is_classic_mode] is [true], however, no gurantees about the
+   function_bodies are given.
+*)
 and value_set_of_closures = private {
   function_decls : function_declarations;
   bound_vars : t Var_within_closure.Map.t;
@@ -204,7 +217,9 @@ val print_function_declarations
   -> unit
 
 val function_declarations_approx
-   : Flambda.function_declarations -> function_declarations
+   : keep_body:(Variable.t -> Flambda.function_declaration -> bool)
+  -> Flambda.function_declarations
+  -> function_declarations
 
 val create_value_set_of_closures
    : function_decls:function_declarations
