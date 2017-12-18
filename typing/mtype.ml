@@ -47,7 +47,7 @@ let rec strengthen ~aliasable env mty p =
 and strengthen_sig ~aliasable env sg p =
   match sg with
     [] -> []
-  | (Sig_value(_, _) as sigelt) :: rem ->
+  | (Sig_value _ as sigelt) :: rem ->
       sigelt :: strengthen_sig ~aliasable env rem p
   | Sig_type(id, {type_kind=Type_abstract}, _) ::
     (Sig_type(id', {type_private=Private}, _) :: _ as rem)
@@ -293,18 +293,13 @@ let rec no_code_needed_mod env pres mty =
 and no_code_needed_sig env sg =
   match sg with
     [] -> true
-  | Sig_value(_id, decl) :: rem ->
-      begin match decl.val_kind with
-      | Val_prim _ -> no_code_needed_sig env rem
-      | _ -> false
-      end
   | Sig_module(id, pres, md, _) :: rem ->
       no_code_needed_mod env pres md.md_type &&
       no_code_needed_sig
         (Env.add_module_declaration ~check:false id pres md env) rem
   | (Sig_type _ | Sig_modtype _ | Sig_class_type _) :: rem ->
       no_code_needed_sig env rem
-  | (Sig_typext _ | Sig_class _) :: _ ->
+  | (Sig_value _ | Sig_typext _ | Sig_class _) :: _ ->
       false
 
 let no_code_needed env mty = no_code_needed_mod env Mta_present mty

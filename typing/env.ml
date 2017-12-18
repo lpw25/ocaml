@@ -1783,11 +1783,7 @@ and components_of_module_maker (env, sub, path, addr, mty) =
         match item with
           Sig_value(id, decl) ->
             let decl' = Subst.value_description sub decl in
-            let addr =
-              match decl.val_kind with
-              | Val_prim _ -> None
-              | _ -> next_address ()
-            in
+            let addr = next_address () in
             c.comp_values <-
               NameMap.add (Ident.name id) (decl', addr) c.comp_values;
         | Sig_type(id, decl, _) ->
