@@ -243,8 +243,6 @@ module rec Type : sig
 
   val child : Module.normalized -> string -> Desc.Type.t option -> t
 
-  val declare : Origin.t -> Ident.t -> t
-
   val declaration : t -> Origin.t option
 
   val origin : Graph.t -> t -> Origin.t
@@ -271,9 +269,6 @@ end = struct
     | Unknown
 
   type t =
-    | Declaration of
-        { origin : Origin.t;
-          id : Ident.t; }
     | Definition of
         { origin : Origin.t;
           path : Path.t;
@@ -301,32 +296,24 @@ end = struct
     let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
-  let declare origin id =
-    Declaration { origin; id }
-
   let declaration t =
     match t with
     | Definition _ -> None
-    | Declaration { origin; _} -> Some origin
 
   let raw_origin t =
     match t with
-    | Declaration { origin; _ }
     | Definition { origin; _ } -> origin
 
   let raw_path t =
     match t with
-    | Declaration { id; _ } -> Path.Pident id
     | Definition { path; _ } -> path
 
   let raw_sort t =
     match t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
     | Definition { sort; _ } -> sort
 
   let rec normalize_loop root t =
     match t with
-    | Declaration _ -> t
     | Definition { definition = Defined | Unknown | Nth _ | Subst _ } -> t
     | Definition ({ definition = Indirection alias } as r) -> begin
         match Graph.find_type root alias with
@@ -337,7 +324,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } | Declaration _ ->
+    | Definition { sort = Sort.Declared _ } ->
         match Graph.find_type root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -362,7 +349,6 @@ end = struct
 
   let rec resolve root t =
     match normalize root t with
-    | Declaration _ -> Path(None, t)
     | Definition { definition = Defined | Unknown } -> Path(None, t)
     | Definition { definition = Nth n } -> Nth n
     | Definition { definition = Subst(p, ns) } -> begin
@@ -381,8 +367,6 @@ and Class_type : sig
   val base : Origin.t -> Ident.t -> Desc.Class_type.t option -> t
 
   val child : Module.normalized -> string -> Desc.Class_type.t option -> t
-
-  val declare : Origin.t -> Ident.t -> t
 
   val declaration : t -> Origin.t option
 
@@ -407,9 +391,6 @@ end = struct
     | Unknown
 
   type t =
-    | Declaration of
-        { origin : Origin.t;
-          id : Ident.t; }
     | Definition of
         { origin : Origin.t;
           path : Path.t;
@@ -436,32 +417,24 @@ end = struct
     let definition = definition_of_desc desc in
     Definition { origin; path; sort; definition }
 
-  let declare origin id =
-    Declaration { origin; id }
-
   let declaration t =
     match t with
     | Definition _ -> None
-    | Declaration { origin; _} -> Some origin
 
   let raw_origin t =
     match t with
-    | Declaration { origin; _ }
     | Definition { origin; _ } -> origin
 
   let raw_path t =
     match t with
-    | Declaration { id; _ } -> Path.Pident id
     | Definition { path; _ } -> path
 
   let raw_sort t =
     match t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
     | Definition { sort; _ } -> sort
 
   let rec normalize_loop root t =
     match t with
-    | Declaration _ -> t
     | Definition { definition = Defined | Unknown | Subst _ } -> t
     | Definition ({ definition = Indirection alias } as r) -> begin
         match Graph.find_class_type root alias with
@@ -472,7 +445,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } | Declaration _ ->
+    | Definition { sort = Sort.Declared _ } ->
         match Graph.find_class_type root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -494,7 +467,6 @@ end = struct
 
   let rec resolve root t =
     match normalize root t with
-    | Declaration _ -> (None, t)
     | Definition { definition = Defined | Unknown } -> (None, t)
     | Definition { definition = Subst(p, ns) } -> begin
         match Graph.find_class_type root p with
@@ -512,8 +484,6 @@ and Module_type : sig
   val base : Origin.t -> Ident.t -> Desc.Module_type.t option -> t
 
   val child : Module.normalized -> string -> Desc.Module_type.t option -> t
-
-  val declare : Origin.t -> Ident.t -> t
 
   val declaration : t -> Origin.t option
 
@@ -533,9 +503,6 @@ end = struct
     | Unknown
 
   type t =
-    | Declaration of
-        { origin : Origin.t;
-          id : Ident.t; }
     | Definition of
         { origin : Origin.t;
           path : Path.t;
@@ -565,32 +532,23 @@ end = struct
     in
     Definition { origin; path; sort; definition }
 
-  let declare origin id =
-    Declaration { origin; id }
-
   let declaration t =
     match t with
     | Definition _ -> None
-    | Declaration { origin; _} -> Some origin
 
   let raw_origin t =
-    match t with
-    | Declaration { origin; _ } | Definition { origin; _ } ->
-        origin
+    match t with Definition { origin; _ } -> origin
 
   let raw_path t =
     match t with
-    | Declaration { id; _ } -> Path.Pident id
     | Definition { path; _ } -> path
 
   let raw_sort t =
     match t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
     | Definition { sort; _ } -> sort
 
   let rec normalize_loop root t =
     match t with
-    | Declaration _ -> t
     | Definition { definition = Defined | Unknown } -> t
     | Definition ({ definition = Indirection alias } as r) -> begin
         match Graph.find_module_type root alias with
@@ -601,7 +559,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } | Declaration _ ->
+    | Definition { sort = Sort.Declared _ } ->
         match Graph.find_module_type root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -1027,9 +985,6 @@ and Component : sig
     | Class_type of Origin.t * Ident.t * Desc.Class_type.t * source
     | Module_type of Origin.t * Ident.t * Desc.Module_type.t * source
     | Module of Origin.t * Ident.t * Desc.Module.t * source
-    | Declare_type of Origin.t * Ident.t
-    | Declare_class_type of Origin.t * Ident.t
-    | Declare_module_type of Origin.t * Ident.t
     | Declare_module of Origin.t * Ident.t
 
 end = Component
@@ -1183,30 +1138,6 @@ end = struct
           let diff = item :: diff in
           let acc = { acc with modules; module_names } in
           loop acc diff declarations rest
-      | Component.Declare_type(_, id) as decl :: rest ->
-          let declarations = decl :: declarations in
-          let type_names =
-            (* CR lwhite: This should probably not always be [Global] *)
-            add_name Component.Global id acc.type_names
-          in
-          let acc = { acc with type_names } in
-          loop acc diff declarations rest
-      | Component.Declare_class_type(_, id) as decl :: rest ->
-          let declarations = decl :: declarations in
-          let class_type_names =
-            (* CR lwhite: This should probably not always be [Global] *)
-            add_name Component.Global id acc.class_type_names
-          in
-          let acc = { acc with class_type_names } in
-          loop acc diff declarations rest
-      | Component.Declare_module_type(_, id) as decl :: rest ->
-          let declarations = decl :: declarations in
-          let module_type_names =
-            (* CR lwhite: This should probably not always be [Global] *)
-            add_name Component.Global id acc.module_type_names
-          in
-          let acc = { acc with module_type_names } in
-          loop acc diff declarations rest
       | Component.Declare_module(_, id) as decl :: rest ->
           let declarations = decl :: declarations in
           let module_names =
@@ -1217,33 +1148,6 @@ end = struct
           loop acc diff declarations rest
     and loop_declarations acc diff = function
       | [] -> acc, diff
-      | Component.Declare_type(origin, id) :: rest ->
-          if Ident_map.mem id acc.types then begin
-            loop_declarations acc diff rest
-          end else begin
-            let typ = Type.declare origin id in
-            let types = Ident_map.add id typ acc.types in
-            let acc = { acc with types } in
-            loop_declarations acc diff rest
-          end
-      | Component.Declare_class_type(origin, id) :: rest ->
-          if Ident_map.mem id acc.class_types then begin
-            loop_declarations acc diff rest
-          end else begin
-            let clty = Class_type.declare origin id in
-            let class_types = Ident_map.add id clty acc.class_types in
-            let acc = { acc with class_types } in
-            loop_declarations acc diff rest
-          end
-      | Component.Declare_module_type(origin, id) :: rest ->
-          if Ident_map.mem id acc.module_types then begin
-            loop_declarations acc diff rest
-          end else begin
-            let mty = Module_type.declare origin id in
-            let module_types = Ident_map.add id mty acc.module_types in
-            let acc = { acc with module_types } in
-            loop_declarations acc diff rest
-          end
       | Component.Declare_module(origin, id) :: rest ->
           if Ident_map.mem id acc.modules then begin
             loop_declarations acc diff rest

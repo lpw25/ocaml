@@ -241,9 +241,6 @@ module Component : sig
     | Class_type of Origin.t * Ident.t * Desc.Class_type.t * source
     | Module_type of Origin.t * Ident.t * Desc.Module_type.t * source
     | Module of Origin.t * Ident.t * Desc.Module.t * source
-    | Declare_type of Origin.t * Ident.t
-    | Declare_class_type of Origin.t * Ident.t
-    | Declare_module_type of Origin.t * Ident.t
     | Declare_module of Origin.t * Ident.t
 
 end
