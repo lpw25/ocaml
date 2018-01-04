@@ -1,3 +1,4 @@
+(* Generic definitions *)
 
 module String_map = Map.Make(String)
 
@@ -78,6 +79,8 @@ end
 module Path_map = Map.Make(Path)
 module Path_set = Set.Make(Path)
 
+(* Subset of the type algebra that is relevant to short path *)
+
 module Desc = struct
 
   module Type = struct
@@ -90,19 +93,19 @@ module Desc = struct
 
   end
 
-  module Module_type = struct
-
-    type t =
-      | Fresh
-      | Alias of Path.t
-
-  end
-
   module Class_type = struct
 
     type t =
       | Fresh
       | Subst of Path.t * int list
+      | Alias of Path.t
+
+  end
+
+  module Module_type = struct
+
+    type t =
+      | Fresh
       | Alias of Path.t
 
   end
