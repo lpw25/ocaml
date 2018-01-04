@@ -144,6 +144,8 @@ module Sort = struct
     | Defined
     | Declared of Ident_set.t
 
+  (* Compute the sort of a functor application from the sort of the functor and
+     the sort of the argument. *)
   let application t1 t2 =
     match t1, t2 with
     | Defined, Defined -> Defined

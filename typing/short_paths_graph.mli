@@ -146,8 +146,8 @@ module Desc : sig
 
   end
 
-  (* CR lpw25: consider using inline records to make parameters more
-           intelligible. *)
+  (* CR def for lpw25: consider using inline records to make parameters more
+     intelligible. *)
 
   (** Description of environment entries.
       The [bool] parameter of each constructor indicates whether
@@ -163,12 +163,34 @@ end
 
 module Sort : sig
 
+  (** Each item (type, module, class type, ...) comes with a sort.
+      The sorts are used to compute updates in [Short_paths.Forward_path_map].
+  *)
   type t =
     | Defined
+    (** Environment entries (a top-level [type t]) have sort [Defined]. *)
     | Declared of Ident_set.t
-
+    (** Sub-entries of modules (such as [String.t]) have sort [Declared ids],
+        where [ids] is the set of identifiers of modules that participate in
+        the declaration of the entry.
+        In [String.t] it is the singleton [String], but it can grow in entries
+        that result from functor applications.  In [Map.Make(String).t] the
+        identifiers are {[String], [Map]}. *)
 end
 
+(** CR def for lpw25: unsure about that.
+    [Age] defines when an entry became available.
+
+    Somewhat counter-intuitively [Age] actually represents a point in time:
+    - global definitions have age [Age.zero]
+    - everytime an environment is extended, the age is incremented.
+    So older entries have lower [Age], most recent entries have the highest
+    [Age].
+
+    While [Age] values are stored in the [Graph], they are always introduced by
+    [Short_paths].
+    [Short_path_graphs] only ensure that the right [Age] is computed
+*)
 module Age : Natural.S
 
 module Dependency : Natural.S
