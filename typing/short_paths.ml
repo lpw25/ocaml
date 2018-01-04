@@ -1136,15 +1136,7 @@ module Shortest = struct
            | Desc.Module_type(id, desc, conc) ->
                Component.Module_type(origin, id, desc, local_or_open conc)
            | Desc.Module(id, desc, conc) ->
-               Component.Module(origin, id, desc, local_or_open conc)
-           | Desc.Declare_type id ->
-               Component.Declare_type(origin, id)
-           | Desc.Declare_class_type id ->
-               Component.Declare_class_type(origin, id)
-           | Desc.Declare_module_type id ->
-               Component.Declare_module_type(origin, id)
-           | Desc.Declare_module id ->
-               Component.Declare_module(origin, id))
+               Component.Module(origin, id, desc, local_or_open conc))
         desc
     in
     let graph, diff = Graph.add parent.graph components in

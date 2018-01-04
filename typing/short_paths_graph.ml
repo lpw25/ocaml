@@ -135,10 +135,6 @@ module Desc = struct
     | Class_type of Ident.t * Class_type.t * bool
     | Module_type of Ident.t * Module_type.t * bool
     | Module of Ident.t * Module.t * bool
-    | Declare_type of Ident.t
-    | Declare_class_type of Ident.t
-    | Declare_module_type of Ident.t
-    | Declare_module of Ident.t
 
 end
 
