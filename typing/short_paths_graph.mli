@@ -1,4 +1,4 @@
-(** [Short_path_graph] is a representation of the environment (as a graph,
+(** [Short_paths_graph] is a representation of the environment (as a graph,
     using [Graph.t]) that is more suitable to answer short path queries.
 
     The only structures shared with the typechecker are [Ident.t] and [Path.t].
@@ -45,67 +45,114 @@ module Path_map : Map.S with type key = Path.t
 
 module Path_set : Set.S with type elt = Path.t
 
-(* Subset of the type algebra that is relevant to short path *)
+(* Subset of the type algebra that is relevant to short path.
+
+   OCaml definitions are turned into short paths ones inside [Env]
+   (see [Env.short_paths_type_desc] for instance).
+   That way, [Short_path] is self contained and work on a specialy crafted
+   representation.
+*)
 
 module Desc : sig
 
   module Type : sig
 
+    (** Only the manifest part of a type is relevant to short-path.
+        If it is a type constructor or a type variable, it is post-processed in
+        one of the three cases below.
+        Other cases (no manifest, not a type constructor or variable) cannot
+        affect short-paths.
+    *)
     type t =
-      | Fresh
-      (** type t *)
       | Nth of int
-      (** The n'th projection of type parameters.
+      (** Manifest is the n'th type parameter.
           E.g. for n < m, [type ('x_0,'x_1,...,'x_m-1) t = 'x_n]
           is represented as [Nth n]. *)
       | Subst of Path.t * int list
-      (** An alias to some other type after substitution of type parameters.
+      (** Manifest is an alias to some other type after substitution of type
+          parameters.
           E.g. [type ('x_0, 'x_1', 'x_2, 'x_3) t = ('x_3, 'x_2) p]
           is represented as [Subst (p, [3,2])]. *)
       | Alias of Path.t
-      (** A direct alias to another type, preserving parameters.
+      (** Manifest is a direct alias to another type, preserving parameters.
           E.g [type t = p], [type 'a t = 'a p], ...
           are represented as [Alias p]. *)
+      | Fresh
+      (** Any other case. *)
 
   end
+
+  (** [Class_type] and [Module_type] descriptions are similar to [Type].
+      Cases that affect short-path are identified, other case are mapped to
+      [Fresh]. *)
 
   module Class_type : sig
 
     type t =
-      | Fresh
       | Subst of Path.t * int list
+      (** [class type ['a,'b] t = ['b, 'a] u] *)
       | Alias of Path.t
+      (** [class type t = u] or [class type ['a] t = ['a] u] *)
+      | Fresh
+      (** Any other case. *)
 
   end
 
   module Module_type : sig
 
     type t =
-      | Fresh
       | Alias of Path.t
+      (** [module type T = U] *)
+      | Fresh
+      (** Any other case. *)
 
   end
+
+  (** [Module] case is a bit more delicate.
+      The contents of a module has to be considered too for short-paths. *)
 
   module Module : sig
 
     type component =
       | Type of string * Type.t
+      (** [type name = <description>] *)
       | Class_type of string * Class_type.t
+      (** [class type name = <description>] *)
       | Module_type of string * Module_type.t
+      (** [module type name = <description>] *)
       | Module of string * t
+      (** [module name = <description>] *)
 
     and components = component list
+    (** a signature is a list of component *)
 
     and kind =
       | Signature of components Lazy.t
+      (** The contents of a signature are computed lazily, this allows to skip
+          a significant amount of computation. *)
       | Functor of (Path.t -> t)
+      (** "HOAS" encoding of functors.
+          In [Functor f], [f path_X] will give the module that results from
+          applying the functor to [X].
+          Consumer of this API don't have to deal with substitution manually
+          and variables don't have to be represented explicitly.
+          (however, not all [(Path.t -> t)] functions are admissible).  *)
 
     and t =
-      | Fresh of kind
       | Alias of Path.t
+      (** Alias to an existing module, [module U = V]. *)
+      | Fresh of kind
+      (** In other cases, the contents of the module is described *)
 
   end
 
+  (* CR lpw25: consider using inline records to make parameters more
+           intelligible. *)
+
+  (** Description of environment entries.
+      The [bool] parameter of each constructor indicates whether
+      the entry comes from a local definition (when [true]) or an open item
+      (when [false]).  *)
   type t =
     | Type of Ident.t * Type.t * bool
     | Class_type of Ident.t * Class_type.t * bool

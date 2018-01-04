@@ -86,27 +86,27 @@ module Desc = struct
   module Type = struct
 
     type t =
-      | Fresh
       | Nth of int
       | Subst of Path.t * int list
       | Alias of Path.t
+      | Fresh
 
   end
 
   module Class_type = struct
 
     type t =
-      | Fresh
       | Subst of Path.t * int list
       | Alias of Path.t
+      | Fresh
 
   end
 
   module Module_type = struct
 
     type t =
-      | Fresh
       | Alias of Path.t
+      | Fresh
 
   end
 
@@ -125,8 +125,8 @@ module Desc = struct
       | Functor of (Path.t -> t)
 
     and t =
-      | Fresh of kind
       | Alias of Path.t
+      | Fresh of kind
 
   end
 
