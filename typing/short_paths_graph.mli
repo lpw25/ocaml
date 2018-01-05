@@ -49,7 +49,7 @@ module Path_set : Set.S with type elt = Path.t
 
    OCaml definitions are turned into short paths ones inside [Env]
    (see [Env.short_paths_type_desc] for instance).
-   That way, [Short_path] is self contained and work on a specialy crafted
+   That way, [Short_path] is self-contained and works on a more appropriate
    representation.
 *)
 
@@ -189,18 +189,46 @@ end
 
     While [Age] values are stored in the [Graph], they are always introduced by
     [Short_paths].
-    [Short_path_graphs] only ensure that the right [Age] is computed
+    [Short_path_graphs] only ensure that the proper [Age] is computed for
+    results of functor applications.
 *)
 module Age : Natural.S
 
+(** Each global module used by the environment is given a [Dependency.t]
+    number.
+    The numbers are chosen such that their total ordering is compatible with
+    module dependency relation.  (If global modules A and B are loaded and B
+    depends on A, the dependency number of A will be inferior to the one of B).
+
+    Dependency numbers are computed during [Basis] update: each time a global
+    module is loaded, [Env] will append the module to the [Basis].
+    The updates are done lazily, next time the [Basis] is queried, dependency
+    numbers will be attributed.
+*)
 module Dependency : Natural.S
 
+(** Together, [Age] and [Dependencies] provide an approximation of the
+    dependency graph.
+    [Age] is for local definitions, [Dependencies] for global imports.
+
+    The [Origin] of an item is the union of these two cases.  *)
 module Origin : sig
 
   type t =
     | Dependency of Dependency.t
+    (** Item originates from a global dependency. *)
     | Dependencies of Dependency.t list
+    (** Item originates from more than one global dependency.  This is possible
+        with functor applications: items from [Map.Make(String)] will have
+        [Dependencies [Map; String]].
+        The list is sorted in increasing order.  *)
     | Environment of Age.t
+    (** Item originates from local environment, at a specific [Age]. *)
+
+  (* CR def for lpw25: performance consideration asides, it seems that
+     [Dependency] and [Dependencies] could be merged, as the former is a
+     special case of the later when there is only as single dependency.
+     Why not merge them to simplify the interface? *)
 
   val equal : t -> t -> bool
 
@@ -208,7 +236,41 @@ module Origin : sig
 
 end
 
+module Component : sig
+
+  type source =
+    | Global
+    (** Component comes from a global import. Only applicable to modules. *)
+    | Local
+    (** Component comes from a local definition. *)
+    | Open
+    (** Component comes from an open item. *)
+
+  (** A [Component.t] augments a [Desc.t] with an origin and a source. *)
+  type t =
+    | Type of Origin.t * Ident.t * Desc.Type.t * source
+    | Class_type of Origin.t * Ident.t * Desc.Class_type.t * source
+    | Module_type of Origin.t * Ident.t * Desc.Module_type.t * source
+    | Module of Origin.t * Ident.t * Desc.Module.t * source
+    | Declare_module of Origin.t * Ident.t
+
+end
+
+(** The [graph] is the short-path specific representation of an environment.
+    It aggregates components and do name resolution.
+
+    Resolution turns syntactic descriptions into abstract values:
+    - Desc.Type.t        -> Type.t
+    - Desc.Class_type.t  -> Class_type.t
+    - Desc.Module.t      -> Module.t
+    - Desc.Module_type.t -> Module_type.t
+*)
+
 type graph
+
+(* Abstract definitions for each item.
+   [origin], [path] and [sort] are available for all kinds of item.
+*)
 
 module Type : sig
 
@@ -220,9 +282,16 @@ module Type : sig
 
   val sort : graph -> t -> Sort.t
 
+  (** Reminiscent of [Desc.Type.t] *)
   type resolved =
     | Nth of int
+    (** type is projection of n'th parameter *)
     | Path of int list option * t
+    (** [Path (None, t)] =>
+          type is an alias to (or is) [t].
+        [Path (Subst params, t)] =>
+          type is an alias to [t] with substituted parameters.
+    *)
 
   val resolve : graph -> t -> resolved
 
@@ -256,6 +325,8 @@ module Module_type : sig
 
 end
 
+(** For a module, entries of each kind can be additionnally queried. *)
+
 module Module : sig
 
   type t
@@ -265,6 +336,9 @@ module Module : sig
   val path : graph -> t -> Path.t
 
   val sort : graph -> t -> Sort.t
+
+  (** Entries are [None] when a module is not a structure (a functor...).
+      CR def for lpw25: or maybe an aliased module that is not available? *)
 
   val types : graph -> t -> Type.t String_map.t option
 
@@ -295,22 +369,6 @@ module Diff : sig
   end
 
   type t = Item.t list
-
-end
-
-module Component : sig
-
-  type source =
-    | Global
-    | Local
-    | Open
-
-  type t =
-    | Type of Origin.t * Ident.t * Desc.Type.t * source
-    | Class_type of Origin.t * Ident.t * Desc.Class_type.t * source
-    | Module_type of Origin.t * Ident.t * Desc.Module_type.t * source
-    | Module of Origin.t * Ident.t * Desc.Module.t * source
-    | Declare_module of Origin.t * Ident.t
 
 end
 
