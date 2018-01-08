@@ -1,33 +1,61 @@
-
 open Short_paths_graph
 
 module Desc = Desc
 
+(** [Rev_deps] keeps track of the reverse dependencies of each global module
+    (represented as a [Dependency.t]).  *)
 module Rev_deps : sig
 
   type t
 
   val create : unit -> t
 
+  (** Implementation detail:
+      [extend_up_to t dep] allocates space for storing dependencies
+      information up to [dep]. *)
   val extend_up_to : t -> Dependency.t -> unit
 
+  (** Get the transitive set of reverse dependencies of a module
+      (node: a module is part of its own reverse dependencies).  *)
   val get : t -> Dependency.t -> Dependency.Set.t
 
+  (* Register a concrete dependency *)
   val add : t -> source:Dependency.t -> target:Dependency.t -> unit
 
+  (* Register an alias dependency *)
   val add_alias : t -> source:Dependency.t -> target:Dependency.t -> unit
 
+  (* [before t o1 o2] is true if [o2] exists only in environments where [o1]
+     has already been defined.
+     This is the case if [o2] is a local definition made after [o1],
+     or if [o2] comes from a global module that depends on [o1].
+
+     Thus, [before] defines a total ordering on local definitions and
+     a partial ordering on global dependencies. *)
   val before : t -> Origin.t -> Origin.t -> bool
 
 end = struct
 
+  (* Stamps are used to update lazily: each modification increases the stamp.
+     Each dependency comes with the last stamp at which it has been updated.
+     At query-time, the dependency set is refreshed if the stamp is out of
+     date.
+  *)
   module Stamp = Natural.Make()
 
-  type item =
-    { mutable set : Dependency.Set.t;
-      mutable edges : Dependency.t list;
-      mutable alias_edges : Dependency.t list;
-      mutable last : Stamp.t; }
+  type item = {
+    (** output: closure of reverse dependency relation *)
+    mutable set : Dependency.Set.t;
+    (** input: concrete dependencies *)
+    mutable edges : Dependency.t list;
+    (** input: alias dependencies *)
+    mutable alias_edges : Dependency.t list;
+    (** last update time *)
+    mutable last : Stamp.t;
+  }
+
+  (* CR def for lpw25: what is the point of distinguishing edges and alias
+     edges ? *)
 
   type t =
     { mutable stamp : Stamp.t;

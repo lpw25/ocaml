@@ -1,6 +1,26 @@
 
 module Desc = Short_paths_graph.Desc
 
+(** A basis is a mutable set of consistent global (persistent) modules.
+
+    In [Env], this list isn't represented explicitly.  Instead persistent
+    modules are loaded on demand (and a consistency table is maintained along
+    to ensure they are compatible with current environment).
+
+    In short path representation, a basis exists outside of a specific
+    environment.
+    The short path environment is built by adding local definitions from an
+    [Env.t] on top of a basis.
+    When new global modules are loaded, the basis is invalidated and rebuilt on
+    demand.
+
+    Note: adding a new global module can reduce the short-paths of a prefix of
+    an environment that was type checking without referencing this global
+    module.
+    It is somehow "non-monotonous" -- there is a subtle interaction between
+    what shortest paths are and the set of global modules.
+*)
+
 module Basis : sig
 
   type t
@@ -12,6 +32,7 @@ module Basis : sig
   val load : t -> string -> string list -> string list -> Desc.Module.t -> unit
 
 end
+
 
 type t
 

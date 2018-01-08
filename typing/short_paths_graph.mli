@@ -4,6 +4,18 @@
     The only structures shared with the typechecker are [Ident.t] and [Path.t].
     [Graph.t] is pure and doesn't hook into the [Env.t].
     Context has to be rebuilt by outside code using [Graph.add].
+
+    For each item (a type, a class type, a module or a module type) the graph can:
+    - lookup its definition from a path
+    - resolve it to its canonical definition (following all aliases)
+    - keep track of its origin (which modules were involved in its definition)
+    - tell whether it is shadowed or not in a given context
+
+    Furthermore, updates to the graph produce a diff that can be replayed later
+    for efficiency.
+
+    These functionalities alone do not give a short path, but they help
+    computing it efficiently.
 *)
 
 (* Generic definitions *)
@@ -194,24 +206,31 @@ end
 *)
 module Age : Natural.S
 
-(** Each global module used by the environment is given a [Dependency.t]
-    number.
-    The numbers are chosen such that their total ordering is compatible with
-    module dependency relation.  (If global modules A and B are loaded and B
-    depends on A, the dependency number of A will be inferior to the one of B).
+(** Each global module referenced by the environment is given a [Dependency.t]
+    number.  This also applies to modules that are aliased but not used (hence
+    not loaded).
 
-    Dependency numbers are computed during [Basis] update: each time a global
-    module is loaded, [Env] will append the module to the [Basis].
-    The updates are done lazily, next time the [Basis] is queried, dependency
-    numbers will be attributed.
+    The number itself has no semantic meaning ([Dependency] is an
+    instance of [Natural.S] just to have an infinite set of values to pick
+    from, it is used as a gensym).
+
+    Dependency numbers are attributed during [Basis] update.
+    Each time a global module is loaded, [Env] will append the module to the
+    [Basis].
+    The updates are done lazily: next time the [Basis] is queried, dependency
+    numbers will be chosen.
+
+    CR def for lpw25: why not just consider a global module to be identified by
+      its name? To benefit from more efficient representations?
 *)
 module Dependency : Natural.S
 
-(** Together, [Age] and [Dependencies] provide an approximation of the
-    dependency graph.
-    [Age] is for local definitions, [Dependencies] for global imports.
-
-    The [Origin] of an item is the union of these two cases.  *)
+(** The [Origin] of an item tells when it became well-defined.
+    If the item depends only on global modules, its origin will list these
+    modules.
+    If the item depends on some local definitions, then its origin will be the
+    smallest [Age] at which all these definitions are available.
+*)
 module Origin : sig
 
   type t =
@@ -221,7 +240,7 @@ module Origin : sig
     (** Item originates from more than one global dependency.  This is possible
         with functor applications: items from [Map.Make(String)] will have
         [Dependencies [Map; String]].
-        The list is sorted in increasing order.  *)
+        The list is sorted in increasing order (it is actually a set).  *)
     | Environment of Age.t
     (** Item originates from local environment, at a specific [Age]. *)
 
@@ -381,6 +400,18 @@ module Graph : sig
   val add : t -> Component.t list -> t * Diff.t
 
   val merge : t -> Diff.t -> t
+
+  (* CR def for lpw25:
+
+     It seems that in:
+
+       let graph2, diff = add graph1 components
+       let graph2' = merge graph1 diff
+
+       graph2' is not the same as graph2
+
+     Is there any algebraic properties when can expect out of add/merge?
+  *)
 
   val find_type : t -> Path.t -> Type.t
 
