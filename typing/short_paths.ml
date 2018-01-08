@@ -140,7 +140,14 @@ end = struct
 
 end
 
-module Origin_range_tbl = struct
+module Origin_range_tbl : sig
+  type 'a t
+  val create : unit -> 'a t
+  val add : Rev_deps.t -> Origin.t -> 'a -> 'a t -> unit
+  val pop : Rev_deps.t -> Origin.t -> 'a t -> 'a list
+  val is_origin_empty : Rev_deps.t -> Origin.t -> 'a t -> bool
+  val is_completely_empty : 'a t -> bool
+end = struct
 
   type 'a t =
     { mutable envs : 'a list Age.Map.t;
