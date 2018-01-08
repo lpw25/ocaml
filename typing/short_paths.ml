@@ -152,6 +152,16 @@ module Origin_range_tbl = struct
       dep_keys = Dependency.Set.empty;
       deps = Dependency.Tbl.create 0; }
 
+  let intersect_reverse_dependencies rev_deps = function
+    | [] -> failwith
+              "Origin_range_tbl.intersect_reverse_dependencies: invalid origin"
+    | dep :: deps ->
+        List.fold_left
+          (fun acc dep ->
+             let rev_dep = Rev_deps.get rev_deps dep in
+             Dependency.Set.inter acc rev_dep)
+          (Rev_deps.get rev_deps dep) deps
+
   let add_dependency dep data t =
     t.dep_keys <- Dependency.Set.add dep t.dep_keys;
     let prev =
@@ -173,32 +183,30 @@ module Origin_range_tbl = struct
     match origin with
     | Origin.Dependency dep -> add_dependency dep data t
     | Origin.Environment age -> add_age age data t
-    | Origin.Dependencies deps -> begin
-        let rev_dep_opt =
-          List.fold_left
-            (fun acc dep ->
-               let rev_dep = Rev_deps.get rev_deps dep in
-               match acc with
-               | None -> Some rev_dep
-               | Some acc -> Some (Dependency.Set.inter acc rev_dep))
-            None deps
-        in
-        let rev_dep =
-          match rev_dep_opt with
-          | None -> failwith "Origin_range_tbl.add: invalid origin"
-          | Some rev_dep -> rev_dep
-        in
-        match
-          List.find
-            (fun dep -> Dependency.Set.mem dep rev_dep)
-            deps
-        with
-        | dep -> add_dependency dep data t
-        | exception Not_found ->
-          match Dependency.Set.choose rev_dep with
+    | Origin.Dependencies deps ->
+        (* multiple dependencies: we can add the element to only one.
+           try to pick the oldest dependency. *)
+        begin
+          (* rev_dep is the intersection of the reverse dependencies of all
+             dependencies *)
+          let rev_dep = intersect_reverse_dependencies rev_deps deps in
+          match
+            (* if there is one dependency that all other dependencies depend on,
+               pick it *)
+            List.find
+              (fun dep -> Dependency.Set.mem dep rev_dep)
+              deps
+          with
           | dep -> add_dependency dep data t
-          | exception Not_found -> add_age Age.zero data t
-      end
+          | exception Not_found ->
+              (* otherwise pick a random dependency *)
+              match Dependency.Set.choose rev_dep with
+              | dep -> add_dependency dep data t
+              | exception Not_found ->
+                  (* the intersection of reverse dependencies is empty:
+                     add item to the initial environment *)
+                  add_age Age.zero data t
+        end
 
   let pop_dependency rev_dep t =
     let matching = Dependency.Set.inter rev_dep t.dep_keys in
@@ -241,20 +249,7 @@ module Origin_range_tbl = struct
         let rev_dep = Rev_deps.get rev_deps dep in
         pop_dependency rev_dep t
     | Origin.Dependencies deps ->
-        let rev_dep_opt =
-          List.fold_left
-            (fun acc dep ->
-               let rev_dep = Rev_deps.get rev_deps dep in
-               match acc with
-               | None -> Some rev_dep
-               | Some acc -> Some (Dependency.Set.inter acc rev_dep))
-            None deps
-        in
-        let rev_dep =
-          match rev_dep_opt with
-          | None -> failwith "Origin_range_tbl.pop: invalid origin"
-          | Some rev_dep -> rev_dep
-        in
+        let rev_dep = intersect_reverse_dependencies rev_deps deps in
         pop_dependency rev_dep t
     | Origin.Environment age ->
         pop_age age t
@@ -271,21 +266,7 @@ module Origin_range_tbl = struct
     | Origin.Dependencies deps ->
         if not (Age.Map.is_empty t.envs) then false
         else begin
-          let rev_dep_opt =
-            List.fold_left
-              (fun acc dep ->
-                 let rev_dep = Rev_deps.get rev_deps dep in
-                 match acc with
-                 | None -> Some rev_dep
-                 | Some acc -> Some (Dependency.Set.inter acc rev_dep))
-              None deps
-          in
-          let rev_dep =
-            match rev_dep_opt with
-            | None ->
-                failwith "Origin_range_tbl.is_origin_empty: invalid origin"
-            | Some rev_dep -> rev_dep
-          in
+          let rev_dep = intersect_reverse_dependencies rev_deps deps in
           let matching = Dependency.Set.inter rev_dep t.dep_keys in
           Dependency.Set.is_empty matching
         end
