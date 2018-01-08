@@ -19,10 +19,10 @@ module Rev_deps : sig
       (node: a module is part of its own reverse dependencies).  *)
   val get : t -> Dependency.t -> Dependency.Set.t
 
-  (* Register a concrete dependency *)
+  (* Register a concrete reverse dependency (target depends on source) *)
   val add : t -> source:Dependency.t -> target:Dependency.t -> unit
 
-  (* Register an alias dependency *)
+  (* Register an alias reverse dependency (target has an alias to source) *)
   val add_alias : t -> source:Dependency.t -> target:Dependency.t -> unit
 
   (* [before t o1 o2] is true if [o2] exists only in environments where [o1]
@@ -44,18 +44,17 @@ end = struct
   module Stamp = Natural.Make()
 
   type item = {
-    (** output: closure of reverse dependency relation *)
+    (** output: reflexive & transitive closure of reverse dependencies *)
     mutable set : Dependency.Set.t;
-    (** input: concrete dependencies *)
+    (** input: immediate concrete reverse dependencies *)
     mutable edges : Dependency.t list;
-    (** input: alias dependencies *)
+    (** input: immediate alias reverse dependencies *)
     mutable alias_edges : Dependency.t list;
     (** last update time *)
     mutable last : Stamp.t;
   }
 
-  (* CR def for lpw25: what is the point of distinguishing edges and alias
-     edges ? *)
+  (* CR def for lpw25: why distinguish edges and alias edges ? *)
 
   type t =
     { mutable stamp : Stamp.t;
@@ -92,6 +91,7 @@ end = struct
 
   let update t dep item =
     if Stamp.less_than item.last t.stamp then begin
+      (* Recompute closure *)
       let rec add_edges item acc =
         let rec loop acc added = function
           | [] ->
@@ -168,13 +168,28 @@ end = struct
 
 end
 
+(** A priority queue-like data structure where data is ordered by [Origin.t].
+    Popping retrieve everything that is as old or younger [Origin.t]
+    (that was added after).
+    Adding finds a point as young as possible to add the data.
+
+    WIP: Not sure about correction criteria, the meaning of Dependencies case
+         is not clear yet.
+*)
 module Origin_range_tbl : sig
+
   type 'a t
+
   val create : unit -> 'a t
+
   val add : Rev_deps.t -> Origin.t -> 'a -> 'a t -> unit
+
   val pop : Rev_deps.t -> Origin.t -> 'a t -> 'a list
+
   val is_origin_empty : Rev_deps.t -> Origin.t -> 'a t -> bool
+
   val is_completely_empty : 'a t -> bool
+
 end = struct
 
   type 'a t =
@@ -188,8 +203,9 @@ end = struct
       deps = Dependency.Tbl.create 0; }
 
   let intersect_reverse_dependencies rev_deps = function
-    | [] -> failwith
-              "Origin_range_tbl.intersect_reverse_dependencies: invalid origin"
+    | [] ->
+        failwith
+          "Origin_range_tbl.intersect_reverse_dependencies: invalid origin"
     | dep :: deps ->
         List.fold_left
           (fun acc dep ->
@@ -220,14 +236,13 @@ end = struct
     | Origin.Environment age -> add_age age data t
     | Origin.Dependencies deps ->
         (* multiple dependencies: we can add the element to only one.
-           try to pick the oldest dependency. *)
+           try to pick the youngest dependency. *)
         begin
           (* rev_dep is the intersection of the reverse dependencies of all
              dependencies *)
           let rev_dep = intersect_reverse_dependencies rev_deps deps in
           match
-            (* if there is one dependency that all other dependencies depend on,
-               pick it *)
+            (* if there is a top element (it depends on everything else), pick it *)
             List.find
               (fun dep -> Dependency.Set.mem dep rev_dep)
               deps
@@ -316,6 +331,10 @@ end = struct
 
 end
 
+(** The cost measure on [Path.t]:
+    the job of short-path is to pick a [Path.t] among all aliases of a given
+    item that is minimal for this measure.
+*)
 module Height = struct
 
   include Natural.Make_no_zero()
@@ -339,13 +358,10 @@ module Height = struct
     if hidden_name name then maximum
     else one
 
-  let measure_ident id =
-    if hidden_ident id then maximum
-    else one
-
   let rec measure_path = function
     | Path.Pident id ->
-        measure_ident id
+        if hidden_ident id then maximum
+        else one
     | Path.Pdot(p, name, _) ->
         if hidden_name name then maximum
         else succ (measure_path p)
