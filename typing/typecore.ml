@@ -836,7 +836,7 @@ module Label = NameChoice (struct
   let in_env lbl =
     match lbl.lbl_repres with
     | Record_regular | Record_float | Record_unboxed false -> true
-    | Record_unboxed true | Record_inlined _ | Record_extension -> false
+    | Record_unboxed true | Record_inlined _ | Record_extension _ -> false
 end)
 
 let disambiguate_label_by_ids keep closed ids labels =
@@ -1749,7 +1749,7 @@ let rec is_nonexpansive exp =
       Vars.fold (fun _ (mut,_,_) b -> decr count; b && mut = Immutable)
         vars true &&
       !count = 0
-  | Texp_letmodule (_, _, mexp, e) ->
+  | Texp_letmodule (_, _, _, mexp, e) ->
       is_nonexpansive_mod mexp && is_nonexpansive e
   | Texp_pack mexp ->
       is_nonexpansive_mod mexp
@@ -2218,7 +2218,8 @@ and type_expect_
     let ty_exp = expand_head env ty_expected in
     let fmt6_path =
       Path.(Pdot (Pident (Ident.create_persistent "CamlinternalFormatBasics"),
-                  "format6", 0)) in
+                  "format6"))
+    in
     let is_format = match ty_exp.desc with
       | Tconstr(path, _, _) when Path.same path fmt6_path ->
         if !Clflags.principal && ty_exp.level <> generic_level then
@@ -2815,30 +2816,34 @@ and type_expect_
                   let (obj_ty, res_ty) = filter_arrow env method_type Nolabel in
                   unify env obj_ty desc.val_type;
                   unify env res_ty (instance typ);
+                  let method_desc =
+                    {val_type = method_type;
+                     val_kind = Val_reg;
+                     val_attributes = [];
+                     Types.val_loc = Location.none}
+                  in
+                  let exp_env = Env.add_value method_id method_desc env in
                   let exp =
                     Texp_apply({exp_desc =
-                                Texp_ident(Path.Pident method_id, lid,
-                                           {val_type = method_type;
-                                            val_kind = Val_reg;
-                                            val_attributes = [];
-                                            Types.val_loc = Location.none});
+                                Texp_ident(Path.Pident method_id,
+                                           lid, method_desc);
                                 exp_loc = loc; exp_extra = [];
                                 exp_type = method_type;
                                 exp_attributes = []; (* check *)
-                                exp_env = env},
+                                exp_env = exp_env},
                           [ Nolabel,
                             Some {exp_desc = Texp_ident(path, lid, desc);
                                   exp_loc = obj.exp_loc; exp_extra = [];
                                   exp_type = desc.val_type;
                                   exp_attributes = []; (* check *)
-                                  exp_env = env}
+                                  exp_env = exp_env}
                           ])
                   in
                   (Tmeth_name met, Some (re {exp_desc = exp;
                                              exp_loc = loc; exp_extra = [];
                                              exp_type = typ;
                                              exp_attributes = []; (* check *)
-                                             exp_env = env}), typ)
+                                             exp_env = exp_env}), typ)
               |  _ ->
                   assert false
               end
@@ -2984,7 +2989,12 @@ and type_expect_
       let context = Typetexp.narrow () in
       let modl = !type_module env smodl in
       Mtype.lower_nongen ty.level modl.mod_type;
-      let (id, new_env) = Env.enter_module name.txt modl.mod_type env in
+      let pres =
+        match modl.mod_type with
+        | Mty_alias _ -> Mta_absent
+        | _ -> Mta_present
+      in
+      let (id, new_env) = Env.enter_module name.txt pres modl.mod_type env in
       Ctype.init_def(Ident.current_time());
       Typetexp.widen context;
       (* ideally, we should catch Expr_type_clash errors
@@ -2996,7 +3006,7 @@ and type_expect_
       end_def ();
       Ctype.unify_var new_env ty body.exp_type;
       re {
-        exp_desc = Texp_letmodule(id, name, modl, body);
+        exp_desc = Texp_letmodule(id, name, pres, modl, body);
         exp_loc = loc; exp_extra = [];
         exp_type = ty;
         exp_attributes = sexp.pexp_attributes;
@@ -3631,16 +3641,19 @@ and type_argument ?recarg env sarg ty_expected' ty_expected =
       (* eta-expand to avoid side effects *)
       let var_pair name ty =
         let id = Ident.create name in
+        let desc =
+          { val_type = ty; val_kind = Val_reg;
+            val_attributes = [];
+            Types.val_loc = Location.none}
+        in
+        let exp_env = Env.add_value id desc env in
         {pat_desc = Tpat_var (id, mknoloc name); pat_type = ty;pat_extra=[];
          pat_attributes = [];
          pat_loc = Location.none; pat_env = env},
-        {exp_type = ty; exp_loc = Location.none; exp_env = env;
+        {exp_type = ty; exp_loc = Location.none; exp_env = exp_env;
          exp_extra = []; exp_attributes = [];
          exp_desc =
-         Texp_ident(Path.Pident id, mknoloc (Longident.Lident name),
-                    {val_type = ty; val_kind = Val_reg;
-                     val_attributes = [];
-                     Types.val_loc = Location.none})}
+         Texp_ident(Path.Pident id, mknoloc (Longident.Lident name), desc)}
       in
       let eta_pat, eta_var = var_pair "eta" ty_arg in
       let func texp =

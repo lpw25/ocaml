@@ -47,8 +47,8 @@ let rec env_from_summary sum subst =
           Env.add_extension ~check:false id
             (Subst.extension_constructor subst desc)
             (env_from_summary s subst)
-      | Env_module(s, id, desc) ->
-          Env.add_module_declaration ~check:false id
+      | Env_module(s, id, pres, desc) ->
+          Env.add_module_declaration ~check:false id pres
             (Subst.module_declaration subst desc)
             (env_from_summary s subst)
       | Env_modtype(s, id, desc) ->
@@ -68,9 +68,10 @@ let rec env_from_summary sum subst =
           | Some env -> env
           | None -> assert false
           end
-      | Env_functor_arg(Env_module(s, id, desc), id') when Ident.same id id' ->
+      | Env_functor_arg(Env_module(s, id, pres, desc), id')
+            when Ident.same id id' ->
           Env.add_module_declaration ~check:false
-            id (Subst.module_declaration subst desc)
+            id pres (Subst.module_declaration subst desc)
             ~arg:true (env_from_summary s subst)
       | Env_functor_arg _ -> assert false
       | Env_constraints(s, map) ->

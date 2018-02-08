@@ -353,7 +353,7 @@ let dir_install_printer ppf lid =
   try
     let ((ty_arg, ty), path, is_old_style) =
       find_printer_type ppf lid in
-    let v = eval_path !toplevel_env path in
+    let v = eval_value_path !toplevel_env path in
     match ty with
     | None ->
        let print_function =
@@ -418,7 +418,7 @@ let dir_trace ppf lid =
         fprintf ppf "%a is an external function and cannot be traced.@."
         Printtyp.longident lid
     | _ ->
-        let clos = eval_path !toplevel_env path in
+        let clos = eval_value_path !toplevel_env path in
         (* Nothing to do if it's not a closure *)
         if Obj.is_block clos
         && (Obj.tag clos = Obj.closure_tag || Obj.tag clos = Obj.infix_tag)
@@ -483,8 +483,8 @@ let trim_signature = function
       Mty_signature
         (List.map
            (function
-               Sig_module (id, md, rs) ->
-                 Sig_module (id, {md with md_attributes =
+               Sig_module (id, pres, md, rs) ->
+                 Sig_module (id, pres, {md with md_attributes =
                                     (Location.mknoloc "...", Parsetree.PStr [])
                                     :: md.md_attributes},
                              rs)
@@ -572,10 +572,11 @@ let () =
        let rec accum_aliases path acc =
          let md = Env.find_module path env in
          let acc =
-           Sig_module (id, {md with md_type = trim_signature md.md_type},
+           Sig_module (id, Mta_present,
+                       {md with md_type = trim_signature md.md_type},
                        Trec_not) :: acc in
          match md.md_type with
-         | Mty_alias(_, path) -> accum_aliases path acc
+         | Mty_alias path -> accum_aliases path acc
          | Mty_ident _ | Mty_signature _ | Mty_functor _ ->
              List.rev acc
        in

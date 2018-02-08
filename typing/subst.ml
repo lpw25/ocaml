@@ -87,8 +87,8 @@ let rec module_path s path =
   with Not_found ->
     match path with
     | Pident _ -> path
-    | Pdot(p, n, pos) ->
-       Pdot(module_path s p, n, pos)
+    | Pdot(p, n) ->
+       Pdot(module_path s p, n)
     | Papply(p1, p2) ->
        Papply(module_path s p1, module_path s p2)
 
@@ -99,8 +99,8 @@ let modtype_path s = function
           | Mty_ident p -> p
           | _ -> fatal_error "Subst.modtype_path"
       with Not_found -> p end
-  | Pdot(p, n, pos) ->
-      Pdot(module_path s p, n, pos)
+  | Pdot(p, n) ->
+      Pdot(module_path s p, n)
   | Papply _ ->
       fatal_error "Subst.modtype_path"
 
@@ -111,17 +111,17 @@ let type_path s path =
   | exception Not_found ->
      match path with
      | Pident _ -> path
-     | Pdot(p, n, pos) ->
-        Pdot(module_path s p, n, pos)
+     | Pdot(p, n) ->
+        Pdot(module_path s p, n)
      | Papply _ ->
         fatal_error "Subst.type_path"
 
 let type_path s p =
   match Path.constructor_typath p with
   | Regular p -> type_path s p
-  | Cstr (ty_path, cstr) -> Pdot(type_path s ty_path, cstr, nopos)
+  | Cstr (ty_path, cstr) -> Pdot(type_path s ty_path, cstr)
   | LocalExt _ -> type_path s p
-  | Ext (p, cstr) -> Pdot(module_path s p, cstr, nopos)
+  | Ext (p, cstr) -> Pdot(module_path s p, cstr)
 
 let to_subst_by_type_function s p =
   match Path.Map.find p s.types with
@@ -182,9 +182,9 @@ let rec typexp s ty =
     ty'.desc <-
       begin if has_fixed_row then
         match tm.desc with (* PR#7348 *)
-          Tconstr (Pdot(m,i,pos), tl, _abbrev) ->
+          Tconstr (Pdot(m,i), tl, _abbrev) ->
             let i' = String.sub i 0 (String.length i - 4) in
-            Tconstr(type_path s (Pdot(m,i',pos)), tl, ref Mnil)
+            Tconstr(type_path s (Pdot(m,i')), tl, ref Mnil)
         | _ -> assert false
       else match desc with
       | Tconstr (p, args, _abbrev) ->
@@ -397,7 +397,7 @@ let rec rename_bound_idents s idents = function
   | Sig_type(id, _, _) :: sg ->
       let id' = Ident.rename id in
       rename_bound_idents (add_type id (Pident id') s) (id' :: idents) sg
-  | Sig_module(id, _, _) :: sg ->
+  | Sig_module(id, _, _, _) :: sg ->
       let id' = Ident.rename id in
       rename_bound_idents (add_module id (Pident id') s) (id' :: idents) sg
   | Sig_modtype(id, _) :: sg ->
@@ -417,8 +417,8 @@ let rec modtype s = function
       begin match p with
         Pident id ->
           begin try Ident.Map.find id s.modtypes with Not_found -> mty end
-      | Pdot(p, n, pos) ->
-          Mty_ident(Pdot(module_path s p, n, pos))
+      | Pdot(p, n) ->
+          Mty_ident(Pdot(module_path s p, n))
       | Papply _ ->
           fatal_error "Subst.modtype"
       end
@@ -428,8 +428,8 @@ let rec modtype s = function
       let id' = Ident.rename id in
       Mty_functor(id', may_map (modtype s) arg,
                        modtype (add_module id (Pident id') s) res)
-  | Mty_alias(pres, p) ->
-      Mty_alias(pres, module_path s p)
+  | Mty_alias p ->
+      Mty_alias (module_path s p)
 
 and signature s sg =
   (* Components of signature may be mutually recursive (e.g. type declarations
@@ -447,8 +447,8 @@ and signature_component s comp newid =
       Sig_type(newid, type_declaration s d, rs)
   | Sig_typext(_id, ext, es) ->
       Sig_typext(newid, extension_constructor s ext, es)
-  | Sig_module(_id, d, rs) ->
-      Sig_module(newid, module_declaration s d, rs)
+  | Sig_module(_id, p, d, rs) ->
+      Sig_module(newid, p, module_declaration s d, rs)
   | Sig_modtype(_id, d) ->
       Sig_modtype(newid, modtype_declaration s d)
   | Sig_class(_id, d, rs) ->

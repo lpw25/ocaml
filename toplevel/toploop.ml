@@ -15,7 +15,6 @@
 
 (* The interactive toplevel loop *)
 
-open Path
 open Format
 open Config
 open Misc
@@ -51,10 +50,8 @@ let getvalue name =
 let setvalue name v =
   toplevel_value_bindings := String.Map.add name v !toplevel_value_bindings
 
-(* Return the value referred to by a path *)
-
-let rec eval_path = function
-  | Pident id ->
+let rec eval_address = function
+  | Env.Aident id ->
       if Ident.persistent id || Ident.global id then
         Symtable.get_global_value id
       else begin
@@ -64,20 +61,43 @@ let rec eval_path = function
         with Not_found ->
           raise (Symtable.Error(Symtable.Undefined_global name))
       end
-  | Pdot(p, _s, pos) ->
-      Obj.field (eval_path p) pos
-  | Papply _ ->
-      fatal_error "Toploop.eval_path"
+  | Env.Adot(p, pos) ->
+      Obj.field (eval_address p) pos
 
-let eval_path env path =
-  eval_path (Env.normalize_path (Some Location.none) env path)
+let eval_module_path env path =
+  match Env.find_module_address Location.none path env with
+  | addr -> eval_address addr
+  | exception Not_found ->
+      fatal_error ("Cannot find address for: " ^ (Path.name path))
+
+let eval_value_path env path =
+  match Env.find_value_address Location.none path env with
+  | addr -> eval_address addr
+  | exception Not_found ->
+      fatal_error ("Cannot find address for: " ^ (Path.name path))
+
+let eval_extension_path env path =
+  match Env.find_constructor_address Location.none path env with
+  | addr -> eval_address addr
+  | exception Not_found ->
+      fatal_error ("Cannot find address for: " ^ (Path.name path))
+
+let eval_class_path env path =
+  match Env.find_class_address Location.none path env with
+  | addr -> eval_address addr
+  | exception Not_found ->
+      fatal_error ("Cannot find address for: " ^ (Path.name path))
+
+
+(* Return the value referred to by a path *)
 
 (* To print values *)
 
 module EvalPath = struct
   type valu = Obj.t
   exception Error
-  let eval_path env p = try eval_path env p with Symtable.Error _ -> raise Error
+  let eval_address addr =
+    try eval_address addr with Symtable.Error _ -> raise Error
   let same_value v1 v2 = (v1 == v2)
 end
 

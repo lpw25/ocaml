@@ -256,7 +256,7 @@ let classify_expression : Typedtree.expression -> sd =
         classify_path env path
 
     (* non-binding cases *)
-    | Texp_letmodule (_, _, _, e)
+    | Texp_letmodule (_, _, _, _, e)
     | Texp_sequence (_, e)
     | Texp_letexception (_, e) ->
         classify_expression env e
@@ -369,7 +369,7 @@ let rec expression : Env.env -> Typedtree.expression -> Use.t =
           similar way to the way it's used in sequence: uses are
           propagated, but unguarded access are not. *)
       Use.join (Use.discard ty) (expression (Env.join env env') body)
-    | Texp_letmodule (x, _, m, e) ->
+    | Texp_letmodule (x, _, _, m, e) ->
       let ty = modexp env m in
       Use.join (Use.discard ty) (expression (Ident.add x ty env) e)
     | Texp_match (e, cases, _) ->
@@ -430,7 +430,7 @@ let rec expression : Env.env -> Typedtree.expression -> Use.t =
           | Record_float -> Use.inspect
           | Record_unboxed _ -> (fun x -> x)
           | Record_regular | Record_inlined _
-          | Record_extension -> Use.guard
+          | Record_extension _ -> Use.guard
         in
         let field env = function
             _, Kept _ -> Use.empty
@@ -543,7 +543,7 @@ and path : Env.env -> Path.t -> Use.t =
   fun env pth -> match pth with
     | Path.Pident x ->
         (try Ident.find_same x env with Not_found -> Use.empty)
-    | Path.Pdot (t, _, _) ->
+    | Path.Pdot (t, _) ->
         Use.inspect (path env t)
     | Path.Papply (f, p) ->
         Use.(inspect (join (path env f) (path env p)))
