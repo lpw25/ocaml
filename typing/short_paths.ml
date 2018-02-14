@@ -44,14 +44,14 @@ end = struct
   module Stamp = Natural.Make()
 
   type item = {
-    (** output: reflexive & transitive closure of reverse dependencies *)
     mutable set : Dependency.Set.t;
-    (** input: immediate concrete reverse dependencies *)
+    (** output: reflexive & transitive closure of reverse dependencies *)
     mutable edges : Dependency.t list;
-    (** input: immediate alias reverse dependencies *)
+    (** input: immediate concrete reverse dependencies *)
     mutable alias_edges : Dependency.t list;
-    (** last update time *)
+    (** input: immediate alias reverse dependencies *)
     mutable last : Stamp.t;
+    (** last update time *)
   }
 
   (* CR def for lpw25: why distinguish edges and alias edges ? *)
@@ -370,7 +370,23 @@ module Height = struct
 
 end
 
-module Todo = struct
+module Todo : sig
+  module Item : sig
+    type t =
+      | Base of Diff.Item.t
+      | Children of Module.t * Path.t
+      | Update of { id : Ident.t; origin : Origin.t; }
+      | Forward of { id : Ident.t; decl : Origin.t; origin : Origin.t; }
+  end
+  type t
+  val create : graph -> Rev_deps.t -> Diff.Item.t list -> t
+  val merge : graph -> Rev_deps.t -> t -> Diff.Item.t list -> unit
+  val mutate : graph -> Rev_deps.t -> t -> Diff.Item.t list -> unit
+  val add_children : graph -> Rev_deps.t -> t -> Height.t -> Module.t -> Path.t -> unit
+  val add_next_update : Rev_deps.t -> t -> Height.t -> Origin.t -> Ident.t -> unit
+  val add_next_forward : Rev_deps.t -> t -> Height.t -> Origin.t -> Ident.t -> Origin.t -> unit
+  val pop : Rev_deps.t -> t -> Height.Array.index -> Origin.t -> Item.t list option
+end = struct
 
   module Item = struct
 
