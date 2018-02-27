@@ -4569,42 +4569,51 @@ let rec close_effect_var env ty =
     | _ -> ()
   end
 
-let rec remove_local_effects env ty =
-  let ty = repr ty in
-  if ty.level <= !current_level then ty, false
-  else begin
-    set_level ty !current_level;
-    match ty.desc with
-    | Tvar _ -> ty, false
-    | Tenil -> ty, false
-    | Tconstr(p, _, _, _)
-          when generic_abbrev env p && safe_abbrev env ty ->
-        let t = expand_abbrev env ty in
-        let (t', changed) = remove_local_effects env t in
-        if changed then (t', true)
-        else (ty, false)
-    | Tconstr _ -> ty, false
-    | Teffect(ec, t) -> begin
-        let t', changed = remove_local_effects env t in
-        match ec with
-        | Eordinary _ ->
-            if changed then newty (Teffect(ec, t')), true
-            else ty, false
-        | Estate { ec_region } -> begin
-            let ec_region = repr ec_region in
-            match ec_region.desc with
-            | Tvar _ when ec_region.level > !current_level ->
-                t', true
-            | _ ->
-                if changed then newty (Teffect(ec, t')), true
-                else ty, false
-          end
-      end
-    | _ -> assert false
-  end
+let local_effect_scopes = ref []
 
-let remove_local_effects env ty =
-  fst (remove_local_effects env ty)
+let enter_local_effect_scope env expected_eff =
+  let ec_region = newvar ~name:"local" Sregion in
+  let level = ec_region.level in
+  local_effect_scopes := (level, ec_region) :: !local_effect_scopes;
+  let ec = Estate { ec_region } in
+  newty (Teffect(ec, expected_eff))
+
+let leave_local_effect_scope env expected_eff =
+  match !local_effect_scopes with
+  | [] -> assert false
+  | (level, ec_region) :: rest ->
+      local_effect_scopes := rest;
+      let ec_region = repr ec_region in
+      if not (is_Tvar ec_region) || ec_region.level < level then begin
+        let ec = Estate { ec_region } in
+        let eff = newty (Teffect(ec, newvar Seffect)) in
+        unify env eff expected_eff
+      end
+
+let rec effect_row_level env ty =
+  let ty = repr ty in
+  match ty.desc with
+  | Teffect (_, ty) -> effect_row_level env ty
+  | Tvar _ | Tunivar _ | Tenil -> ty.level
+  | Tconstr(p, _, _, _) -> get_level env p
+  | _ -> assert false
+
+let unify_lift_local_effect env eff expected_eff =
+  match !local_effect_scopes with
+  | [] ->
+      unify env eff expected_eff
+  | (level, _) :: _ ->
+      if not !Clflags.real_paths then
+        Format.eprintf "Lift Eff?: %a (%d)\n"
+                       !Btype.print_raw eff level;
+      let eff = repr eff in
+      if effect_row_level env eff < level then begin
+        let ec = Estate { ec_region = newvar Sregion } in
+        let eff = newty (Teffect(ec, eff)) in
+        unify env eff expected_eff
+      end else begin
+        unify env eff expected_eff
+      end
 
 let extract_effect_constructors env ty =
   let ecs, row = flatten_expanded_effects env ty in

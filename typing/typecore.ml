@@ -3125,7 +3125,7 @@ and type_function ?in_function loc attrs env ty_expected l caselist =
     generalize_structure ty_res
   end;
   begin_def ();
-  let ty_eff' = newvar Seffect in
+  let ty_eff' = enter_local_effect_scope env ty_eff in
   let cases, partial, _ =
     type_cases ~allow_exn:false ~in_function:(loc_fun,ty_fun) env
       ty_eff' (newvar Seffect) ty_arg ty_res loc caselist
@@ -3137,13 +3137,12 @@ and type_function ?in_function loc attrs env ty_expected l caselist =
   if is_optional l && not_function ty_res then
     Location.prerr_warning (List.hd cases).c_lhs.pat_loc
       Warnings.Unerasable_optional_argument;
-  end_def ();
-  let ty_eff'' = remove_local_effects env ty_eff' in
   begin try
-    unify env ty_eff'' ty_eff
+    leave_local_effect_scope env ty_eff
   with Unify trace ->
     raise(Error(loc, env, Function_effect_clash(trace)))
   end;
+  end_def ();
   re {
   exp_desc = Texp_function(l,cases, partial);
     exp_loc = loc; exp_extra = [];
@@ -3585,6 +3584,9 @@ and type_argument env expected_eff sarg ty_expected' ty_expected =
       texp
 
 and type_application env loc expected_eff funct sargs =
+  if not !Clflags.real_paths then
+    Format.eprintf "Start application Expected: %a\n"
+                   !Btype.print_raw expected_eff;
   (* funct.exp_type may be generic *)
   let result_type omitted ty_fun =
     List.fold_left
@@ -3600,7 +3602,7 @@ and type_application env loc expected_eff funct sargs =
       (args :
       (Asttypes.label * (unit -> Typedtree.expression) option *
          Typedtree.optional) list)
-    omitted eff ty_fun = function
+    omitted lift eff ty_fun = function
       [] ->
         (List.map
             (function l, None, x -> l, None, x
@@ -3649,8 +3651,16 @@ and type_application env loc expected_eff funct sargs =
           if optional = Optional then
             unify_exp env arg1 (type_option (newvar Stype));
           begin try
-            unify env ty_eff eff;
+            if not !Clflags.real_paths then
+              Format.eprintf "1 Lift: %b Eff: %a Expected: %a\n"
+                             lift !Btype.print_raw ty_eff !Btype.print_raw eff;
+            if lift then
+              unify_lift_local_effect env ty_eff eff
+            else
+              unify env ty_eff eff
           with Unify trace ->
+            if not !Clflags.real_paths then
+              Format.eprintf "Failed\n";
             if omitted = [] then
               raise(Error(loc, env, Expr_effect_clash(trace)))
             else
@@ -3659,7 +3669,7 @@ and type_application env loc expected_eff funct sargs =
           arg1
         in
         type_unknown_args ((l1, Some arg1, optional) :: args)
-          omitted eff ty_res sargl
+          omitted lift eff ty_res sargl
   in
   let ignore_labels =
     !Clflags.classic ||
@@ -3675,7 +3685,7 @@ and type_application env loc expected_eff funct sargs =
     end
   in
   let warned = ref false in
-  let rec type_args args omitted eff ty_fun ty_fun0 ty_old sargs more_sargs =
+  let rec type_args args omitted lift eff ty_fun ty_fun0 ty_old sargs more_sargs =
     match expand_head env ty_fun, expand_head env ty_fun0 with
       {desc=Tarrow (l, ty, eff_fun, ty_fun, com); level=lv} as ty_fun',
       {desc=Tarrow (_, ty0, _, ty_fun0, _)}
@@ -3689,8 +3699,16 @@ and type_application env loc expected_eff funct sargs =
         in
         let unify_effect sarg0 =
           try
-            unify env eff_fun eff;
+            if not !Clflags.real_paths then
+              Format.eprintf "2 Lift: %b Eff: %a Expected: %a\n"
+                             lift !Btype.print_raw eff_fun !Btype.print_raw eff;
+            if lift then
+              unify_lift_local_effect env eff_fun eff
+            else
+              unify env eff_fun eff
           with Unify trace ->
+            if not !Clflags.real_paths then
+              Format.eprintf "Failed\n";
             if omitted = [] then
               raise(Error(loc, env, Expr_effect_clash(trace)))
             else
@@ -3767,9 +3785,9 @@ and type_application env loc expected_eff funct sargs =
         let omitted =
           if arg = None then (l,ty,eff_fun,lv) :: omitted else omitted
         in
-        let eff = if arg = None then eff_fun else eff in
+        let lift, eff = if arg = None then false, eff_fun else lift, eff in
         let ty_old = if sargs = [] then ty_fun else ty_old in
-        type_args ((l,arg,optional)::args) omitted eff ty_fun ty_fun0
+        type_args ((l,arg,optional)::args) omitted lift eff ty_fun ty_fun0
           ty_old sargs more_sargs
     | _ ->
         match sargs with
@@ -3777,7 +3795,7 @@ and type_application env loc expected_eff funct sargs =
             raise(Error(sarg0.pexp_loc, env,
                         Apply_wrong_label(l, ty_old)))
         | _ ->
-            type_unknown_args args omitted eff ty_fun0
+            type_unknown_args args omitted lift eff ty_fun0
               (sargs @ more_sargs)
   in
   match funct.exp_desc, sargs with
@@ -3799,9 +3817,9 @@ and type_application env loc expected_eff funct sargs =
   | _ ->
       let ty = funct.exp_type in
       if ignore_labels then
-        type_args [] [] expected_eff ty (instance env ty) ty [] sargs
+        type_args [] [] true expected_eff ty (instance env ty) ty [] sargs
       else
-        type_args [] [] expected_eff ty (instance env ty) ty sargs []
+        type_args [] [] true expected_eff ty (instance env ty) ty sargs []
 
 and type_construct env loc lid sarg ty_expected expected_eff attrs =
   let opath =
