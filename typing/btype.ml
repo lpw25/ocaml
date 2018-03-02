@@ -668,6 +668,7 @@ type change =
   | Ccommu of commutable ref * commutable
   | Cuniv of type_expr option ref * type_expr option
   | Ctypeset of TypeSet.t ref * TypeSet.t
+  | Clifted of effect_lifted_var ref * effect_lifted_var
 
 let undo_change = function
     Ctype  (ty, desc) -> ty.desc <- desc
@@ -678,6 +679,7 @@ let undo_change = function
   | Ccommu (r, v) -> r := v
   | Cuniv  (r, v) -> r := v
   | Ctypeset (r, v) -> r := v
+  | Clifted (r, v) -> r := v
 
 type changes =
     Change of change * changes ref
@@ -734,6 +736,9 @@ let set_commu rc c =
   log_change (Ccommu (rc, !rc)); rc := c
 let set_typeset rs s =
   log_change (Ctypeset (rs, !rs)); rs := s
+let set_lifted rl l =
+  log_change (Clifted (rl, !rl)); rl := Llink l
+
 
 let snapshot () =
   let old = !last_snapshot in

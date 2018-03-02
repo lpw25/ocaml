@@ -226,6 +226,7 @@ val set_kind: field_kind option ref -> field_kind -> unit
 val set_commu: commutable ref -> commutable -> unit
 val set_typeset: TypeSet.t ref -> TypeSet.t -> unit
         (* Set references, logging the old value *)
+val set_lifted: effect_lifted_var ref -> effect_lifted -> unit
 val log_type: type_expr -> unit
         (* Log the old value of a type, before modifying it by hand *)
 

@@ -2981,7 +2981,9 @@ and unify_kind k1 k2 =
 
 and unify_effect_constructors env ec1 ec2 =
   match ec1, ec2 with
-  | Estate ec1, Estate ec2 -> unify env ec1.ec_region ec2.ec_region
+  | Estate ec1, Estate ec2 ->
+      unify env ec1.ec_region ec2.ec_region;
+      match ec1.ec_lifted, ec2.ec_lifted with
   | Eordinary ec1, Eordinary ec2 -> begin
      unify_list env ec1.ec_args ec2.ec_args;
      match ec1.ec_res, ec2.ec_res with
@@ -2993,6 +2995,19 @@ and unify_effect_constructors env ec1 ec2 =
         unify env res1 res2
     end
   | _, _ -> raise (Unify [])
+
+and unify_lifted l1 l2 =
+  let l1 = effect_lifted_repr l1 in
+  let l2 = effect_lifted_repr l2 in
+  if l1 == l2 then () else
+  match l1, l2 with
+  | Lvar {contents = Lscope i1} as r1, Lvar {contents = Lscope i2} as r2 ->
+      if i1 < i2 then
+        set_lifted r l2
+  | Lvar r, Lpresent -> set_lifted r Lpresent
+  | Lpresent, Lvar r -> set_lifted r Lpresent
+  | Lpresent, Lpresent -> ()
+  | _ -> assert false
 
 and unify_effects env ty1 ty2 =          (* Optimization *)
   let (effs1, rest1) = flatten_effects ty1 in
