@@ -105,8 +105,8 @@ let rec field_kind_repr =
   | kind                        -> kind
 
 let rec effect_lifted_repr = function
-  | Evar {contents = Some lifted} -> effect_lifted_repr lifted
-  | lifted                        -> lifted
+  | Lvar {contents = Llink lifted} -> effect_lifted_repr lifted
+  | lifted                         -> lifted
 
 let effect_contructor_lifted_repr = function
   | Eordinary _ -> Epresent

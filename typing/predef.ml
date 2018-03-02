@@ -135,6 +135,8 @@ let state ec_region =
   let ec = Estate { ec_region } in
   newgenty (Teffect(ec, ty))
 
+let state ec_region =
+
 let ident_false = ident_create "false"
 and ident_true = ident_create "true"
 and ident_void = ident_create "()"
@@ -199,11 +201,13 @@ let common_initial_env add_type add_extension empty_env =
      type_sort = Sregion}
   and decl_state =
     let tvar = newgenvar Sregion in
+    let ec = Estate { ec_region = tvar; ec_lifted = Lpresent } in
+    let ty = newgenty Teffect(ec, newgenty Tenil) in
     {decl_abstr with
      type_params = [tvar];
      type_arity = 1;
      type_sort = Seffect;
-     type_manifest = Some (state tvar);
+     type_manifest = Some ty;
      type_variance = [Variance.full (* strictly invariant *)]}
   in
   let add_extension id l =

@@ -57,9 +57,13 @@ and effect_constructor_ordinary =
     ec_res: type_expr option; }
 
 and effect_lifted =
-  | Evar of effect_lifted option ref
-  | Epresent
-  | Eabsent
+  | Lvar of effect_lifted_var ref
+  | Lpresent
+  | Labsent
+
+and effect_lifted_var =
+  | Llink of effect_lifted
+  | Lscope of int
 
 and row_desc =
     { row_fields: (label * row_field) list;

@@ -70,6 +70,11 @@ val field_kind_repr: field_kind -> field_kind
         (* Return the canonical representative of an object field
            kind. *)
 
+val effect_lifted_repr: effect_lifted -> effect_lifted
+        (* Return the canonical representative of an effect's lifting *)
+
+val effect_constructor_lifted_repr: effect_constructor -> effect_lifted
+
 val commu_repr: commutable -> commutable
         (* Return the canonical representative of a commutation lock *)
 

@@ -197,6 +197,8 @@ let rec typexp s ty =
           end
       | Tfield(label, kind, t1, t2) when field_kind_repr kind = Fabsent ->
           Tlink (typexp s t2)
+      | Teffect(ec, t2) when effect_constructor_lifted_repr ec = Labsent ->
+          Tlink (typexp s t2)
       | _ -> copy_type_desc (typexp s) desc
       end;
     ty'

@@ -120,12 +120,12 @@ let rec safe_kind_repr v = function
   | Fabsent -> "Fabsent"
 
 let rec safe_effect_lifted v = function
-    Evar {contents=Some l}  ->
-      if List.memq l v then "Evar loop" else
+    Lvar {contents=Llink l}  ->
+      if List.memq l v then "Lvar loop" else
       safe_kind_repr (l::v) l
-  | Evar {contents=None} -> "Evar None"
-  | Epresent -> "Epresent"
-  | Eabsent -> "Eabsent"
+  | Lvar {contents=Lscope i} -> "Lvar " ^ string_of_int i
+  | Lpresent -> "Lpresent"
+  | Labsent -> "Labsent"
 
 let rec safe_commu_repr v = function
     Cok -> "Cok"
@@ -632,8 +632,9 @@ let rec mark_loops_rec visited ty =
         count_effect_var ty
     | Teffect(ec, ty) ->
        begin match ec with
-       | Estate { ec_region } ->
-          mark_loops_rec visited ec_region
+       | Estate { ec_region; ec_lifted } ->
+          if effect_lifted_repr ec_lifted = Lpresent then
+            mark_loops_rec visited ec_region
        | Eordinary { ec_args; ec_res; _ } ->
           List.iter (mark_loops_rec visited) ec_args;
           Misc.may (mark_loops_rec visited) ec_res
@@ -674,8 +675,12 @@ let rec split_global_state ecs =
       | Some rest -> Some (ec :: rest)
     end
   | Estate { ec_region } :: rest ->
-      if is_global ec_region then Some rest
-      else None
+      if effect_lifted_repr ec_lifted = Lpresent then begin
+        if is_global ec_region then Some rest
+        else None
+      end else begin
+        split_global_state rest
+      end
 
 (* Disabled in classic mode when printing an unification error *)
 let print_labels = ref true
