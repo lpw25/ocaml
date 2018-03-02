@@ -48,12 +48,18 @@ and effect_constructor =
   | Eordinary of effect_constructor_ordinary
 
 and effect_constructor_state = (* inline once rebased to 4.03 *)
-  { ec_region: type_expr; }
+  { ec_region: type_expr;
+    ec_lifted: effect_lifted; }
 
 and effect_constructor_ordinary =
   { ec_label: label;
     ec_args: type_expr list;
     ec_res: type_expr option; }
+
+and effect_lifted =
+  | Evar of effect_lifted option ref
+  | Epresent
+  | Eabsent
 
 and row_desc =
     { row_fields: (label * row_field) list;

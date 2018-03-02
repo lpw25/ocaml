@@ -119,6 +119,14 @@ let rec safe_kind_repr v = function
   | Fpresent -> "Fpresent"
   | Fabsent -> "Fabsent"
 
+let rec safe_effect_lifted v = function
+    Evar {contents=Some l}  ->
+      if List.memq l v then "Evar loop" else
+      safe_kind_repr (l::v) l
+  | Evar {contents=None} -> "Evar None"
+  | Epresent -> "Epresent"
+  | Eabsent -> "Eabsent"
+
 let rec safe_commu_repr v = function
     Cok -> "Cok"
   | Cunknown -> "Cunknown"
@@ -219,9 +227,10 @@ and raw_type_desc ppf = function
   | Tenil -> fprintf ppf "Tenil"
 
 and raw_effect_constructor ppf = function
-  | Estate { ec_region } ->
+  | Estate { ec_lifted; ec_region } ->
      fprintf ppf
-       "Estate(@,%a)"
+       "Estate(@,%a,%a)"
+       safe_effect_lifted ec_lifted
        raw_type ec_region
   | Eordinary { ec_label; ec_args; ec_res } ->
      fprintf ppf

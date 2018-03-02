@@ -104,6 +104,14 @@ let rec field_kind_repr =
     Fvar {contents = Some kind} -> field_kind_repr kind
   | kind                        -> kind
 
+let rec effect_lifted_repr = function
+  | Evar {contents = Some lifted} -> effect_lifted_repr lifted
+  | lifted                        -> lifted
+
+let effect_contructor_lifted_repr = function
+  | Eordinary _ -> Epresent
+  | Estate { ec_lifted } -> effect_lifted_repr ec_lifted
+
 let rec repr =
   function
     {desc = Tlink t'} ->
@@ -115,6 +123,9 @@ let rec repr =
       *)
       repr t'
   | {desc = Tfield (_, k, _, t')} when field_kind_repr k = Fabsent ->
+      repr t'
+  | {desc = Teffect (ec, t')}
+        when effect_constructor_lifted_repr ec = Fabsent ->
       repr t'
   | t -> t
 
