@@ -107,7 +107,7 @@ and strengthen_decl ~aliasable env md p =
 
 let () = Env.strengthen := strengthen
 
-let scrape_only_alias env mty =
+let scrape_for_type_of env mty =
   let rec loop env path mty =
     match mty, path with
     | Mty_alias(_, path), _ -> begin
@@ -117,7 +117,7 @@ let scrape_only_alias env mty =
         with Not_found -> mty
       end
     | mty, Some path ->
-        strengthen ~aliasable:true env mty path
+        strengthen ~aliasable:false env mty path
     | _ -> mty
   in
   loop env None mty

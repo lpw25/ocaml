@@ -226,7 +226,7 @@ let merge_constraint initial_env remove_aliases loc sg constr =
           if remove_aliases then
             Mtype.remove_aliases env mty
           else
-            Mtype.scrape_only_alias env mty
+            Mtype.scrape_for_type_of env mty
         in
         let md'' = { md' with md_type = mty } in
         let newmd = Mtype.strengthen_decl ~aliasable:false env md'' path in
@@ -1551,7 +1551,7 @@ let type_module_type_of env smod =
       (* PR#6307: expand aliases at root and submodules *)
       Mtype.remove_aliases env mty
     else
-      Mtype.scrape_only_alias env mty
+      Mtype.scrape_for_type_of env mty
   in
   (* PR#5036: must not contain non-generalized type variables *)
   if not (closed_modtype env mty) then
