@@ -411,13 +411,7 @@ end = struct
     List.iter
       (fun item ->
          let origin = Diff.Item.origin graph item in
-         match Diff.Item.previous graph item with
-         | None ->
-             Origin_range_tbl.add rev_deps origin (Item.Base item) tbl;
-         | Some decl ->
-             let id = Diff.Item.id graph item in
-             let item = Item.Forward { id; decl; origin } in
-             Origin_range_tbl.add rev_deps origin item tbl)
+         Origin_range_tbl.add rev_deps origin (Item.Base item) tbl)
       diff;
     let table = Height.Array.singleton tbl in
     { table }
