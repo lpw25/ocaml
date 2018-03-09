@@ -649,9 +649,6 @@ end = struct
     | Unknown
 
   and t =
-    | Declaration of
-        { origin : Origin.t;
-          id : Ident.t; }
     | Definition of
         { origin : Origin.t;
           path : Path.t;
@@ -718,33 +715,33 @@ end = struct
     Definition { origin; path; sort; definition }
 
   let declare origin id =
-    Declaration { origin; id }
+    let path = Path.Pident id in
+    let sort = Sort.Declared (Ident_set.singleton id) in
+    let definition = Unknown in
+    Definition { origin; path; sort; definition }
 
   let declaration t =
     match t with
+    | Definition { origin; path = Path.Pident _; sort = Sort.Declared _; _ } ->
+        Some origin
     | Definition _ -> None
-    | Declaration { origin; _} -> Some origin
 
   let raw_origin t =
     match t with
-    | Declaration { origin; _ } | Definition { origin; _ } ->
-        origin
+    | Definition { origin; _ } -> origin
 
   let raw_path t =
     match t with
-    | Declaration { id; _ } -> Path.Pident id
     | Definition { path; _ } -> path
 
   let raw_sort t =
     match t with
-    | Declaration { id; _ } -> Sort.Declared (Ident_set.singleton id)
     | Definition { sort; _ } -> sort
 
   type normalized = t
 
   let rec normalize_loop root t =
     match t with
-    | Declaration _ -> t
     | Definition { definition = Signature _ | Functor _ | Unknown } -> t
     | Definition ({ definition = Indirection alias } as r) -> begin
         match Graph.find_module root alias with
@@ -755,7 +752,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } | Declaration _ ->
+    | Definition { sort = Sort.Declared _ } ->
         match Graph.find_module root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -773,7 +770,6 @@ end = struct
 
   let definition t =
     match Module.unnormalize t with
-    | Declaration _ -> Unknown
     | Definition { definition; _ } -> definition
 
   let force root t =
