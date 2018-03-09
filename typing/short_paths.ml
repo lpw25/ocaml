@@ -376,7 +376,6 @@ module Todo : sig
       | Base of Diff.Item.t
       | Children of Module.t * Path.t
       | Update of { id : Ident.t; origin : Origin.t; }
-      | Forward of { id : Ident.t; decl : Origin.t; origin : Origin.t; }
   end
   type t
   val create : graph -> Rev_deps.t -> Diff.Item.t list -> t
@@ -384,7 +383,6 @@ module Todo : sig
   val mutate : graph -> Rev_deps.t -> t -> Diff.Item.t list -> unit
   val add_children : graph -> Rev_deps.t -> t -> Height.t -> Module.t -> Path.t -> unit
   val add_next_update : Rev_deps.t -> t -> Height.t -> Origin.t -> Ident.t -> unit
-  val add_next_forward : Rev_deps.t -> t -> Height.t -> Origin.t -> Ident.t -> Origin.t -> unit
   val pop : Rev_deps.t -> t -> Height.Array.index -> Origin.t -> Item.t list option
 end = struct
 
@@ -395,10 +393,6 @@ end = struct
       | Children of Module.t * Path.t
       | Update of
           { id : Ident.t;
-            origin : Origin.t; }
-      | Forward of
-          { id : Ident.t;
-            decl : Origin.t;
             origin : Origin.t; }
 
   end
@@ -485,12 +479,6 @@ end = struct
     let item = Item.Update { id; origin } in
     Origin_range_tbl.add rev_deps origin item tbl
 
-  let add_next_forward rev_deps t height origin id decl =
-    let height = Height.succ height in
-    let tbl = get_table t height in
-    let item = Item.Forward { id; decl; origin } in
-    Origin_range_tbl.add rev_deps origin item tbl
-
   let rec is_empty_from rev_deps t height origin =
     match get_table_opt t height with
     | None -> true
@@ -530,8 +518,6 @@ module Forward_path_map : sig
 
   val rebase : t -> t -> t
 
-  val iter_forwards : (Path.t -> Path.t -> unit) -> t -> Ident.t -> unit
-
   val iter_updates : (Path.t -> Path.t -> unit) -> t -> Ident.t -> unit
 
 end = struct
@@ -539,13 +525,11 @@ end = struct
   type t =
     { new_paths : Path.t list Path_map.t;
       old_paths : Path.t list Path_map.t;
-      updates : Path_set.t Ident_map.t;
-      forwards : Path_set.t Ident_map.t; }
+      updates : Path_set.t Ident_map.t; }
 
   let empty =
     { new_paths = Path_map.empty;
       old_paths = Path_map.empty;
-      forwards = Ident_map.empty;
       updates = Ident_map.empty; }
 
   let add t sort path data =
@@ -587,12 +571,7 @@ end = struct
         (fun _ paths1 paths2 -> Some (paths1 @ paths2))
         base.new_paths base.old_paths
     in
-    let forwards =
-      Ident_map.union
-        (fun _ pset1 pset2 -> Some (Path_set.union pset1 pset2))
-        base.updates base.forwards
-    in
-    { t with old_paths; forwards }
+    { t with old_paths }
 
   let iter_updates f t id =
     match Ident_map.find id t.updates with
@@ -601,17 +580,6 @@ end = struct
         Path_set.iter
           (fun path ->
              match Path_map.find path t.new_paths with
-             | exception Not_found -> ()
-             | paths -> List.iter (f path) paths)
-          pset
-
-  let iter_forwards f t id =
-    match Ident_map.find id t.forwards with
-    | exception Not_found -> ()
-    | pset ->
-        Path_set.iter
-          (fun path ->
-             match Path_map.find path t.old_paths with
              | exception Not_found -> ()
              | paths -> List.iter (f path) paths)
           pset
@@ -748,12 +716,6 @@ module Shortest = struct
       Forward_path_map.iter_updates class_type t.class_types id;
       Forward_path_map.iter_updates module_type t.module_types id;
       Forward_path_map.iter_updates module_ t.modules id
-
-    let iter_forwards ~type_ ~class_type ~module_type ~module_ t id =
-      Forward_path_map.iter_forwards type_ t.types id;
-      Forward_path_map.iter_forwards class_type t.class_types id;
-      Forward_path_map.iter_forwards module_type t.module_types id;
-      Forward_path_map.iter_forwards module_ t.modules id
 
     let find_type graph t typ =
       let canonical = Type.path graph typ in
@@ -975,23 +937,6 @@ module Shortest = struct
             ~module_type ~module_ section id;
           true
       | None -> false
-
-    (* returns [true] if there might be forward paths at a greater height. *)
-    let iter_forwards ~type_ ~class_type ~module_type ~module_ t height id =
-      let all_initialised =
-        match t.initialised with
-        | All -> true
-        | Until until ->
-            if not (Height.less_than height until) then
-              failwith "Sections.iter_forwards: section not initialised";
-            false
-      in
-      match get t height with
-      | Some section ->
-          Section.iter_forwards ~type_ ~class_type
-            ~module_type ~module_ section id;
-          true
-      | None -> not all_initialised
 
     type result =
       | Not_found_here
@@ -1318,9 +1263,7 @@ module Shortest = struct
               | Todo.Item.Children(md, path) ->
                   process_children t height path md
               | Todo.Item.Update{ id; origin } ->
-                  process_update t origin height id
-              | Todo.Item.Forward{ id; decl; origin } ->
-                  process_forward t origin height id decl)
+                  process_update t origin height id)
             items;
             false
 
@@ -1344,29 +1287,6 @@ module Shortest = struct
       in
       if more then begin
         Todo.add_next_update (rev_deps t) t.todos height origin id
-      end
-
-
-  and process_forward : 'k . 'k t -> _ =
-    fun t origin height id decl ->
-      let sections = init t decl height in
-      let more =
-        Sections.iter_forwards sections height id
-          ~type_:(fun canon path ->
-            let typ = Graph.find_type t.graph canon in
-            process_type t height path typ)
-          ~class_type:(fun canon path ->
-            let mty = Graph.find_class_type t.graph canon in
-            process_class_type t height path mty)
-          ~module_type:(fun canon path ->
-            let mty = Graph.find_module_type t.graph canon in
-            process_module_type t height path mty)
-          ~module_:(fun canon path ->
-            let md = Graph.find_module t.graph canon in
-            process_module t height path md);
-      in
-      if more then begin
-        Todo.add_next_forward (rev_deps t) t.todos height origin id decl
       end
 
   and initialise : type k. k t -> _ =
