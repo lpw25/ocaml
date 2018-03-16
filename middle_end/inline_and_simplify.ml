@@ -647,6 +647,7 @@ and simplify_set_of_closures original_env r
       ~bound_vars:internal_value_set_of_closures.bound_vars
       ~invariant_params
       ~specialised_args:internal_value_set_of_closures.specialised_args
+      ~free_vars:internal_value_set_of_closures.free_vars
       ~freshening:internal_value_set_of_closures.freshening
       ~direct_call_surrogates:
         internal_value_set_of_closures.direct_call_surrogates
@@ -1420,10 +1421,8 @@ and duplicate_function ~env ~(set_of_closures : Flambda.set_of_closures)
         simplify body_env (R.create ()) function_decl.body)
   in
   let function_decl =
-    Flambda.create_function_declaration ~params:function_decl.params
-      ~body ~stub:function_decl.stub ~dbg:function_decl.dbg
-      ~inline:function_decl.inline ~specialise:function_decl.specialise
-      ~is_a_functor:function_decl.is_a_functor
+    Flambda.update_function_declaration function_decl
+      ~params:function_decl.params ~body
   in
   function_decl, specialised_args
 
@@ -1462,6 +1461,7 @@ let constant_defining_value_approx
         ~bound_vars:Var_within_closure.Map.empty
         ~invariant_params
         ~specialised_args:Variable.Map.empty
+        ~free_vars:Variable.Map.empty
         ~freshening:Freshening.Project_var.empty
         ~direct_call_surrogates:Closure_id.Map.empty
     in
