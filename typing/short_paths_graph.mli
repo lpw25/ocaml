@@ -181,8 +181,8 @@ module Sort : sig
   type t =
     | Defined
     (** Environment entries (a top-level [type t]) have sort [Defined]. *)
-    | Declared of Ident_set.t
-    (** Sub-entries of modules (such as [String.t]) have sort [Declared ids],
+    | Unloaded of Ident_set.t
+    (** Sub-entries of modules (such as [String.t]) have sort [Unloaded ids],
         where [ids] is the set of identifiers of modules that participate in
         the declaration of the entry.
         In [String.t] it is the singleton [String], but it can grow in entries

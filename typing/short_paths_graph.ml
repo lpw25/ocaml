@@ -142,16 +142,16 @@ module Sort = struct
 
   type t =
     | Defined
-    | Declared of Ident_set.t
+    | Unloaded of Ident_set.t
 
   (* Compute the sort of a functor application from the sort of the functor and
      the sort of the argument. *)
   let application t1 t2 =
     match t1, t2 with
     | Defined, Defined -> Defined
-    | Defined, Declared _ -> t2
-    | Declared _, Defined -> t1
-    | Declared ids1, Declared ids2 -> Declared (Ident_set.union ids1 ids2)
+    | Defined, Unloaded _ -> t2
+    | Unloaded _, Defined -> t1
+    | Unloaded ids1, Unloaded ids2 -> Unloaded (Ident_set.union ids1 ids2)
 
 end
 
@@ -326,7 +326,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } ->
+    | Definition { sort = Sort.Unloaded _ } ->
         match Graph.find_type root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -447,7 +447,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } ->
+    | Definition { sort = Sort.Unloaded _ } ->
         match Graph.find_class_type root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -561,7 +561,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } ->
+    | Definition { sort = Sort.Unloaded _ } ->
         match Graph.find_module_type root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
@@ -716,13 +716,13 @@ end = struct
 
   let declare origin id =
     let path = Path.Pident id in
-    let sort = Sort.Declared (Ident_set.singleton id) in
+    let sort = Sort.Unloaded (Ident_set.singleton id) in
     let definition = Unknown in
     Definition { origin; path; sort; definition }
 
   let declaration t =
     match t with
-    | Definition { origin; path = Path.Pident _; sort = Sort.Declared _; _ } ->
+    | Definition { origin; path = Path.Pident _; sort = Sort.Unloaded _; _ } ->
         Some origin
     | Definition _ -> None
 
@@ -752,7 +752,7 @@ end = struct
   let normalize root t =
     match t with
     | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Declared _ } ->
+    | Definition { sort = Sort.Unloaded _ } ->
         match Graph.find_module root (raw_path t) with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t

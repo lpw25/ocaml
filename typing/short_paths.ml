@@ -544,7 +544,7 @@ end = struct
     let updates =
       match sort with
       | Sort.Defined -> updates
-      | Sort.Declared ids ->
+      | Sort.Unloaded ids ->
           Ident_set.fold
             (fun id acc ->
                let prev =
@@ -1305,13 +1305,6 @@ module Shortest = struct
         in
         Sections.initialise sections height parent
       end
-
-  and init : 'k . 'k t -> _ =
-    fun t origin height ->
-      let sections = sections t origin in
-      Sections.update sections (stamp t);
-      initialise t sections origin height;
-      sections
 
   and complete : 'k. 'k t -> _ =
     fun t sections origin height ->
