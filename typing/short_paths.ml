@@ -1104,9 +1104,9 @@ module Shortest = struct
     let todos = Todo.create graph rev_deps diff in
     { kind; graph; sections; todos }
 
-  let local_or_open conc =
-    if conc then Component.Local
-    else Component.Open
+  let local_or_open = function
+    | Desc.Local -> Component.Local
+    | Desc.Open -> Component.Open
 
   let env parent desc =
     update parent;
@@ -1116,14 +1116,18 @@ module Shortest = struct
       List.map
         (fun desc ->
            match desc with
-           | Desc.Type(id, desc, conc) ->
-               Component.Type(origin, id, desc, local_or_open conc)
-           | Desc.Class_type(id, desc, conc) ->
-               Component.Class_type(origin, id, desc, local_or_open conc)
-           | Desc.Module_type(id, desc, conc) ->
-               Component.Module_type(origin, id, desc, local_or_open conc)
-           | Desc.Module(id, desc, conc) ->
-               Component.Module(origin, id, desc, local_or_open conc))
+           | Desc.Type t ->
+               Component.Type
+                 (origin, t.ident, t.desc, local_or_open t.source)
+           | Desc.Class_type t ->
+               Component.Class_type
+                 (origin, t.ident, t.desc, local_or_open t.source)
+           | Desc.Module_type t ->
+               Component.Module_type
+                 (origin, t.ident, t.desc, local_or_open t.source)
+           | Desc.Module t ->
+               Component.Module
+                 (origin, t.ident, t.desc, local_or_open t.source))
         desc
     in
     let graph, diff = Graph.add parent.graph components in

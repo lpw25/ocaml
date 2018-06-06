@@ -2381,53 +2381,60 @@ let short_paths_additions_desc env additions =
   List.fold_right
     (fun addition acc ->
        match addition with
-       | Type(id, decl) ->
+       | Type(ident, decl) ->
+           let source = Short_paths.Desc.Local in
            let desc = short_paths_type_desc decl in
-           Short_paths.Desc.Type(id, desc, true) :: acc
-       | Class_type(id, clty) ->
+           Short_paths.Desc.Type { ident; desc; source } :: acc
+       | Class_type(ident, clty) ->
+           let source = Short_paths.Desc.Local in
            let desc = short_paths_class_type_desc clty in
-           Short_paths.Desc.Class_type(id, desc, true) :: acc
-       | Module_type(id, mtd) ->
+           Short_paths.Desc.Class_type { ident; desc; source } :: acc
+       | Module_type(ident, mtd) ->
+           let source = Short_paths.Desc.Local in
            let desc = short_paths_module_type_desc mtd.mtd_type in
-           Short_paths.Desc.Module_type(id, desc, true) :: acc
-       | Module(id, md, comps) ->
-           let desc = short_paths_module_desc env (Pident id) md.md_type comps in
-           Short_paths.Desc.Module(id, desc, true) :: acc
+           Short_paths.Desc.Module_type { ident; desc; source } :: acc
+       | Module(ident, md, comps) ->
+           let source = Short_paths.Desc.Local in
+           let desc =
+             short_paths_module_desc env (Pident ident) md.md_type comps
+           in
+           Short_paths.Desc.Module { ident; desc; source } :: acc
        | Open{ path; types; class_types; module_types; modules } ->
+           let source = Short_paths.Desc.Open in
            let acc =
              Tbl.fold
                (fun name _ acc ->
-                  let id = Ident.create name in
+                  let ident = Ident.create name in
                   let path = Path.Pdot(path, name, 0) in
                   let desc = Short_paths.Desc.Type.Alias path in
-                  Short_paths.Desc.Type(id, desc, false) :: acc)
+                  Short_paths.Desc.Type { ident; desc; source } :: acc)
                types acc
            in
            let acc =
              Tbl.fold
                (fun name _ acc ->
-                  let id = Ident.create name in
+                  let ident = Ident.create name in
                   let path = Path.Pdot(path, name, 0) in
                   let desc = Short_paths.Desc.Class_type.Alias path in
-                  Short_paths.Desc.Class_type(id, desc, false) :: acc)
+                  Short_paths.Desc.Class_type { ident; desc; source } :: acc)
                class_types acc
            in
            let acc =
              Tbl.fold
                (fun name _ acc ->
-                  let id = Ident.create name in
+                  let ident = Ident.create name in
                   let path = Path.Pdot(path, name, 0) in
                   let desc = Short_paths.Desc.Module_type.Alias path in
-                  Short_paths.Desc.Module_type(id, desc, false) :: acc)
+                  Short_paths.Desc.Module_type { ident; desc; source } :: acc)
                module_types acc
            in
            let acc =
              Tbl.fold
                (fun name _ acc ->
-                  let id = Ident.create name in
+                  let ident = Ident.create name in
                   let path = Path.Pdot(path, name, 0) in
                   let desc = Short_paths.Desc.Module.Alias path in
-                  Short_paths.Desc.Module(id, desc, false) :: acc)
+                  Short_paths.Desc.Module { ident; desc; source } :: acc)
                modules acc
            in
            acc)

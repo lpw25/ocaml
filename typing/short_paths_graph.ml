@@ -130,11 +130,19 @@ module Desc = struct
 
   end
 
+  type source =
+    | Local
+    | Open
+
   type t =
-    | Type of Ident.t * Type.t * bool
-    | Class_type of Ident.t * Class_type.t * bool
-    | Module_type of Ident.t * Module_type.t * bool
-    | Module of Ident.t * Module.t * bool
+    | Type of
+        { ident: Ident.t; desc: Type.t; source: source }
+    | Class_type of
+        { ident: Ident.t; desc: Class_type.t; source: source }
+    | Module_type of
+        { ident: Ident.t; desc: Module_type.t; source: source }
+    | Module of
+        { ident: Ident.t; desc: Module.t; source: source }
 
 end
 

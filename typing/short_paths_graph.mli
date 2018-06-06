@@ -158,18 +158,21 @@ module Desc : sig
 
   end
 
-  (* CR def for lpw25: consider using inline records to make parameters more
-     intelligible. *)
+  (** Source of environment entries.  *)
+  type source =
+    | Local (** entry comes from a local definition *)
+    | Open (** entry comes from the contents of an [open Module] item *)
 
-  (** Description of environment entries.
-      The [bool] parameter of each constructor indicates whether
-      the entry comes from a local definition (when [true]) or an open item
-      (when [false]).  *)
+  (** Description of environment entries.  *)
   type t =
-    | Type of Ident.t * Type.t * bool
-    | Class_type of Ident.t * Class_type.t * bool
-    | Module_type of Ident.t * Module_type.t * bool
-    | Module of Ident.t * Module.t * bool
+    | Type of
+        { ident: Ident.t; desc: Type.t; source: source }
+    | Class_type of
+        { ident: Ident.t; desc: Class_type.t; source: source }
+    | Module_type of
+        { ident: Ident.t; desc: Module_type.t; source: source }
+    | Module of
+        { ident: Ident.t; desc: Module.t; source: source }
 
 end
 
