@@ -1087,7 +1087,7 @@ module Shortest = struct
           | None -> revision, graph
           | Some revision ->
               let diff = History.Revision.diff revision in
-              let graph = Graph.merge graph diff in
+              let graph = Graph.rebase graph diff in
               let rev_deps = History.Revision.rev_deps revision in
               Todo.merge graph rev_deps t.todos diff;
               loop graph revision

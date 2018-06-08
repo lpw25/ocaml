@@ -1,5 +1,5 @@
-(** [Short_paths_graph] is a representation of the environment (as a graph,
-    using [Graph.t]) that is more suitable to answer short path queries.
+(** [Short_paths_graph] is a representation of the environment (via the type
+    [Graph.t]) that is more suitable to answer short path queries.
 
     The only structures shared with the typechecker are [Ident.t] and [Path.t].
     [Graph.t] is pure and doesn't hook into the [Env.t].
@@ -10,9 +10,6 @@
     - resolve it to its canonical definition (following all aliases)
     - keep track of its origin (which modules were involved in its definition)
     - tell whether it is shadowed or not in a given context
-
-    Furthermore, updates to the graph produce a diff that can be replayed later
-    for efficiency.
 
     These functionalities alone do not give a short path, but they help
     computing it efficiently.
@@ -193,12 +190,11 @@ module Sort : sig
         identifiers are {[String], [Map]}. *)
 end
 
-(** CR def for lpw25: unsure about that.
-    [Age] defines when an entry became available.
+(** [Age] defines when an entry became available.
 
     Somewhat counter-intuitively [Age] actually represents a point in time:
     - global definitions have age [Age.zero]
-    - everytime an environment is extended, the age is incremented.
+    - each time an environment is extended, the age is incremented.
     So older entries have lower [Age], most recent entries have the highest
     [Age].
 
@@ -222,9 +218,6 @@ module Age : Natural.S
     [Basis].
     The updates are done lazily: next time the [Basis] is queried, dependency
     numbers will be chosen.
-
-    CR def for lpw25: why not just consider a global module to be identified by
-      its name? To benefit from more efficient representations?
 *)
 module Dependency : Natural.S
 
@@ -243,14 +236,13 @@ module Origin : sig
     (** Item originates from more than one global dependency.  This is possible
         with functor applications: items from [Map.Make(String)] will have
         [Dependencies [Map; String]].
-        The list is sorted in increasing order (it is actually a set).  *)
+        The list is sorted in increasing order (it is actually a set).
+
+        While [Dependency d] should behave exactly like [Dependencies [d]],
+        this case is distinguished for performance.
+    *)
     | Environment of Age.t
     (** Item originates from local environment, at a specific [Age]. *)
-
-  (* CR def for lpw25: performance consideration asides, it seems that
-     [Dependency] and [Dependencies] could be merged, as the former is a
-     special case of the later when there is only as single dependency.
-     Why not merge them to simplify the interface? *)
 
   val equal : t -> t -> bool
 
@@ -359,8 +351,7 @@ module Module : sig
 
   val sort : graph -> t -> Sort.t
 
-  (** Entries are [None] when a module is not a structure (a functor...).
-      CR def for lpw25: or maybe an aliased module that is not available? *)
+  (** Entries are [None] when a module is not a structure (a functor...). *)
 
   val types : graph -> t -> Type.t String_map.t option
 
@@ -371,6 +362,28 @@ module Module : sig
   val modules : graph -> t -> t String_map.t option
 
 end
+
+(** Diff and rebase.
+
+    Environments (Env.t) are made of two parts: basis (a set of global modules)
+    and local definitions.
+
+    Modules in the basis are loaded on demand. When a [Graph.t] is made from an
+    [Env.t], the current basis is used.
+
+    Since the graph is pure, the [Env.t] and the graph will get out of sync as
+    new modules are loaded. This is solved using [Diff.t] and [Graph.rebase]:
+    - the [Graph.t] made from the initial environment is remembered
+    - local definitions are made by extending the graph with [Graph.add]
+    - updates to the basis are introduced with [Graph.add] starting again from
+      the initial graph, which also produces a [Diff.t]
+    - these differences can be injected into the extended [Graph.t] by using
+      [Graph.rebase] to replay a set of [Diff.t]
+
+    The main difference between a [Graph.rebase]/[Diff.t] and just adding
+    everything on top with [Graph.add] is that shadowing is taken into account.
+    [Graph.rebase] will insert definitions at the right point in "time".
+*)
 
 module Diff : sig
 
@@ -402,19 +415,7 @@ module Graph : sig
 
   val add : t -> Component.t list -> t * Diff.t
 
-  val merge : t -> Diff.t -> t
-
-  (* CR def for lpw25:
-
-     It seems that in:
-
-       let graph2, diff = add graph1 components
-       let graph2' = merge graph1 diff
-
-       graph2' is not the same as graph2
-
-     Is there any algebraic properties when can expect out of add/merge?
-  *)
+  val rebase : t -> Diff.t -> t
 
   val find_type : t -> Path.t -> Type.t
 

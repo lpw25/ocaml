@@ -1003,7 +1003,7 @@ and Graph : sig
 
   val add : t -> Component.t list -> t * Diff.t
 
-  val merge : t -> Diff.t -> t
+  val rebase : t -> Diff.t -> t
 
   val find_type : t -> Path.t -> Type.t
 
@@ -1170,7 +1170,7 @@ end = struct
     in
     loop t [] [] descs
 
-  let merge t diff =
+  let rebase t diff =
     let rec loop acc = function
       | [] -> acc
       | Diff.Item.Type(id, typ, _) :: rest ->
