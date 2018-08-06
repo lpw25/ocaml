@@ -612,29 +612,23 @@ let rec transl_address loc = function
   | Env.Adot(addr, pos) ->
       Lprim(Pfield pos, [transl_address loc addr], loc)
 
-let transl_module_path loc env path =
-  match Env.find_module_address loc path env with
+let transl_path find loc env path =
+  match find loc path env with
   | exception Not_found ->
       fatal_error ("Cannot find address for: " ^ (Path.name path))
   | addr -> transl_address loc addr
+
+let transl_module_path loc env path =
+  transl_path Env.find_module_address loc env path
 
 let transl_value_path loc env path =
-  match Env.find_value_address loc path env with
-  | exception Not_found ->
-      fatal_error ("Cannot find address for: " ^ (Path.name path))
-  | addr -> transl_address loc addr
+  transl_path Env.find_value_address loc env path
 
 let transl_extension_path loc env path =
-  match Env.find_constructor_address loc path env with
-  | exception Not_found ->
-      fatal_error ("Cannot find address for: " ^ (Path.name path))
-  | addr -> transl_address loc addr
+  transl_path Env.find_constructor_address loc env path
 
 let transl_class_path loc env path =
-  match Env.find_class_address loc path env with
-  | exception Not_found ->
-      fatal_error ("Cannot find address for: " ^ (Path.name path))
-  | addr -> transl_address loc addr
+  transl_path Env.find_class_address loc env path
 
 (* Compile a sequence of expressions *)
 

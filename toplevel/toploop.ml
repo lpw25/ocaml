@@ -64,30 +64,23 @@ let rec eval_address = function
   | Env.Adot(p, pos) ->
       Obj.field (eval_address p) pos
 
-let eval_module_path env path =
-  match Env.find_module_address Location.none path env with
+let eval_path find env path =
+  match find Location.none path env with
   | addr -> eval_address addr
   | exception Not_found ->
       fatal_error ("Cannot find address for: " ^ (Path.name path))
+
+let eval_module_path env path =
+  eval_path Env.find_module_address env path
 
 let eval_value_path env path =
-  match Env.find_value_address Location.none path env with
-  | addr -> eval_address addr
-  | exception Not_found ->
-      fatal_error ("Cannot find address for: " ^ (Path.name path))
+  eval_path Env.find_value_address env path
 
 let eval_extension_path env path =
-  match Env.find_constructor_address Location.none path env with
-  | addr -> eval_address addr
-  | exception Not_found ->
-      fatal_error ("Cannot find address for: " ^ (Path.name path))
+  eval_path Env.find_constructor_address env path
 
 let eval_class_path env path =
-  match Env.find_class_address Location.none path env with
-  | addr -> eval_address addr
-  | exception Not_found ->
-      fatal_error ("Cannot find address for: " ^ (Path.name path))
-
+  eval_path Env.find_class_address env path
 
 (* Return the value referred to by a path *)
 

@@ -1054,6 +1054,15 @@ let rec normalize_path ~only_absent ~lax env path =
   || (match path with Pident id -> not (Ident.persistent id) | _ -> true) ->
       path
 
+let normalize_path_prefix ~only_absent ~lax env path =
+  match path with
+  | Pdot(p, s) ->
+      Pdot(normalize_path ~only_absent ~lax env p, s)
+  | Pident _ ->
+      path
+  | Papply _ ->
+      assert false
+
 let find_module path env =
   fst (find_module_with_addr ~alias:false path env)
 
@@ -1072,17 +1081,17 @@ let find_idtbl_address_opt proj1 proj2 path env =
   | Papply _ ->
       raise Not_found
 
-let rec find_idtbl_address proj1 proj2 loc path env =
+let rec find_idtbl_address normalize proj1 proj2 loc path env =
   match find_idtbl_address_opt proj1 proj2 path env with
   | Some addr -> addr
   | None -> begin
-      match normalize_path ~only_absent:true ~lax:true env path with
+      match normalize ~only_absent:true ~lax:true env path with
       | exception Not_found ->
-          let path' = normalize_path ~only_absent:true ~lax:true env path in
+          let path' = normalize ~only_absent:true ~lax:true env path in
           raise (Error(Missing_module(loc, path, path')))
       | alias ->
           if Path.same path alias then raise Not_found;
-          find_idtbl_address proj1 proj2 loc alias env
+          find_idtbl_address normalize proj1 proj2 loc alias env
     end
 
 let find_tycomptbl_address_opt proj1 proj2 path env =
@@ -1104,28 +1113,32 @@ let find_tycomptbl_address_opt proj1 proj2 path env =
   | Papply _ ->
       raise Not_found
 
-let rec find_tycomptbl_address proj1 proj2 loc path env =
+let rec find_tycomptbl_address normalize proj1 proj2 loc path env =
   match find_tycomptbl_address_opt proj1 proj2 path env with
   | Some addr -> addr
   | None -> begin
-      match normalize_path ~only_absent:true ~lax:true env path with
+      match normalize ~only_absent:true ~lax:true env path with
       | exception Not_found ->
-          let path' = normalize_path ~only_absent:true ~lax:true env path in
+          let path' = normalize ~only_absent:true ~lax:true env path in
           raise (Error(Missing_module(loc, path, path')))
       | alias ->
           if Path.same path alias then raise Not_found;
-          find_tycomptbl_address proj1 proj2 loc alias env
+          find_tycomptbl_address normalize proj1 proj2 loc alias env
     end
 
 let find_value_address =
-  find_idtbl_address (fun env -> env.values) (fun sc -> sc.comp_values)
+  find_idtbl_address normalize_path_prefix
+    (fun env -> env.values) (fun sc -> sc.comp_values)
 and find_class_address =
-  find_idtbl_address (fun env -> env.classes) (fun sc -> sc.comp_classes)
+  find_idtbl_address normalize_path_prefix
+    (fun env -> env.classes) (fun sc -> sc.comp_classes)
 and find_module_address =
-  find_idtbl_address (fun env -> env.modules) (fun sc -> sc.comp_modules)
+  find_idtbl_address normalize_path
+    (fun env -> env.modules) (fun sc -> sc.comp_modules)
 
 let find_constructor_address =
-  find_tycomptbl_address (fun env -> env.constrs) (fun sc -> sc.comp_constrs)
+  find_tycomptbl_address normalize_path_prefix
+    (fun env -> env.constrs) (fun sc -> sc.comp_constrs)
 
 let normalize_path oloc env path =
   try normalize_path ~only_absent:false ~lax:(oloc = None) env path
