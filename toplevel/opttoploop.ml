@@ -98,25 +98,39 @@ let toplevel_value id =
   in
   (Obj.magic (global_symbol glob)).(pos)
 
-let rec eval_path = function
-  | Pident id ->
+let rec eval_address = function
+  | Env.Aident id ->
       if Ident.persistent id || Ident.global id
       then global_symbol id
       else toplevel_value id
-  | Pdot(p, _s, pos) ->
-      Obj.field (eval_path p) pos
-  | Papply _ ->
-      fatal_error "Toploop.eval_path"
+  | Env.Adot(p, pos) ->
+      Obj.field (eval_address p) pos
 
-let eval_path env path =
-  eval_path (!Env.realize_value_path ~loc:Location.none ~env path)
+let eval_path find env path =
+  match find Location.none path env with
+  | addr -> eval_address addr
+  | exception Not_found ->
+      fatal_error ("Cannot find address for: " ^ (Path.name path))
+
+let eval_module_path env path =
+  eval_path Env.find_module_address env path
+
+let eval_value_path env path =
+  eval_path Env.find_value_address env path
+
+let eval_extension_path env path =
+  eval_path Env.find_constructor_address env path
+
+let eval_class_path env path =
+  eval_path Env.find_class_address env path
 
 (* To print values *)
 
 module EvalPath = struct
   type valu = Obj.t
   exception Error
-  let eval_path env p = try eval_path env p with _ -> raise Error
+  let eval_address addr =
+    try eval_address addr with _ -> raise Error
   let same_value v1 v2 = (v1 == v2)
 end
 
