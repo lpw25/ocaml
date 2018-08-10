@@ -38,6 +38,8 @@ type address =
   | Aident of Ident.t
   | Adot of address * int
 
+val address_head : address -> Ident.t
+
 type t
 
 val empty: t

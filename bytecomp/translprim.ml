@@ -90,15 +90,15 @@ let used_primitives = Hashtbl.create 7
 let add_used_primitive loc env path =
   match path with
   | Path.Pdot _ as path ->
-      let path = !Env.realize_value_path ~loc ~env path in
-      let unit = Path.head path in
-      if Ident.global unit && not (Hashtbl.mem used_primitives path)
-      then Hashtbl.add used_primitives path loc
+      let addr = Env.find_value_address loc path env in
+      let unit = Env.address_head addr in
+      if Ident.global unit && not (Hashtbl.mem used_primitives addr)
+      then Hashtbl.add used_primitives addr loc
   | _ -> ()
 
 let clear_used_primitives () = Hashtbl.clear used_primitives
 let get_used_primitives () =
-  Hashtbl.fold (fun path _ acc -> path :: acc) used_primitives []
+  Hashtbl.fold (fun addr _ acc -> addr :: acc) used_primitives []
 
 let gen_array_kind =
   if Config.flat_float_array then Pgenarray else Paddrarray

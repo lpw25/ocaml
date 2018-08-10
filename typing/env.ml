@@ -173,6 +173,10 @@ type address =
   | Aident of Ident.t
   | Adot of address * int
 
+let rec address_head = function
+  | Aident id -> id
+  | Adot(addr, _) -> address_head addr
+
 module TycompTbl =
   struct
     (** This module is used to store components of types (i.e. labels

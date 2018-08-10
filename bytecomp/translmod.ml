@@ -647,7 +647,7 @@ let required_globals ~flambda body =
   in
   let required =
     List.fold_left
-      (fun acc path -> add_global (Path.head path) acc)
+      (fun acc addr -> add_global (Env.address_head addr) acc)
       (if flambda then globals else Ident.Set.empty)
       (Translprim.get_used_primitives ())
   in
