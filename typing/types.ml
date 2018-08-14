@@ -257,11 +257,16 @@ type module_type =
     Mty_ident of Path.t
   | Mty_signature of signature
   | Mty_functor of Ident.t * module_type option * module_type
-  | Mty_alias of Path.t * (module_type * module_coercion) option
+  | Mty_alias of module_alias
 
 and module_presence =
   | Mta_present
   | Mta_absent
+
+and module_alias =
+  | Ma_ident of Ident.t
+  | Ma_dot of module_alias * string
+  | Ma_tconstraint of module_alias * module_type
 
 and signature = signature_item list
 

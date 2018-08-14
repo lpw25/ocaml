@@ -40,6 +40,13 @@ type address =
 
 val address_head : address -> Ident.t
 
+type module_coercion =
+    Tcoerce_none
+  | Tcoerce_structure of (int * module_coercion) list *
+                         (Ident.t * int * module_coercion) list
+  | Tcoerce_functor of module_coercion * module_coercion
+  | Tcoerce_alias of address * module_coercion
+
 type t
 
 val empty: t

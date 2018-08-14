@@ -26,7 +26,8 @@ type type_replacement =
 
 type t =
   { types: type_replacement Path.Map.t;
-    modules: Path.t Path.Map.t;
+    modules: Path.t Ident.Map.t;
+    module_paths: Path.t Path.Map.t;
     modtypes: module_type Ident.Map.t;
     for_saving: bool;
     loc: Location.t option;
@@ -34,7 +35,8 @@ type t =
 
 let identity =
   { types = Path.Map.empty;
-    modules = Path.Map.empty;
+    modules = Ident.Map.empty;
+    module_paths = Path.Map.empty;
     modtypes = Ident.Map.empty;
     for_saving = false;
     loc = None;
@@ -46,8 +48,11 @@ let add_type id p s = add_type_path (Pident id) p s
 let add_type_function id ~params ~body s =
   { s with types = Path.Map.add id (Type_function { params; body }) s.types }
 
-let add_module_path id p s = { s with modules = Path.Map.add id p s.modules }
-let add_module id p s = add_module_path (Pident id) p s
+let add_module id p s =
+  { s with modules = Ident.Map.add id p s.modules }
+
+let add_module_path p p' s =
+  { s with module_paths = Path.Map.add p p' s.module_paths }
 
 let add_modtype id ty s = { s with modtypes = Ident.Map.add id ty s.modtypes }
 
@@ -83,14 +88,19 @@ let attrs s x =
     else x
 
 let rec module_path s path =
-  try Path.Map.find path s.modules
-  with Not_found ->
-    match path with
-    | Pident _ -> path
-    | Pdot(p, n) ->
-       Pdot(module_path s p, n)
-    | Papply(p1, p2) ->
-       Papply(module_path s p1, module_path s p2)
+  match Path.Map.find path s.module_paths with
+  | p -> p
+  | exception Not_found ->
+      match path with
+      | Pident id -> begin
+          match Ident.Map.find id s.modules with
+          | p -> p
+          | exception Not_found -> path
+        end
+      | Pdot(p, n) ->
+          Pdot(module_path s p, n)
+      | Papply(p1, p2) ->
+          Papply(module_path s p1, module_path s p2)
 
 let modtype_path s = function
     Pident id as p ->
@@ -412,6 +422,11 @@ let rec rename_bound_idents s idents = function
       let id' = Ident.rename id in
       rename_bound_idents s (id' :: idents) sg
 
+let rec module_alias_of_path = function
+  | Pident id -> Ma_ident id
+  | Pdot(p, n) -> Ma_dot(module_alias_of_path p, n)
+  | Papply _ -> assert false
+
 let rec modtype s = function
     Mty_ident p as mty ->
       begin match p with
@@ -428,10 +443,8 @@ let rec modtype s = function
       let id' = Ident.rename id in
       Mty_functor(id', may_map (modtype s) arg,
                        modtype (add_module id (Pident id') s) res)
-  | Mty_alias(p, None) ->
-      Mty_alias(module_path s p, None)
-  | Mty_alias(p, Some mty) ->
-      Mty_alias(module_path s p, Some (modtype s mty))
+  | Mty_alias a ->
+      Mty_alias (module_alias s a)
 
 and signature s sg =
   (* Components of signature may be mutually recursive (e.g. type declarations
@@ -472,6 +485,16 @@ and modtype_declaration s decl  =
     mtd_loc = loc s decl.mtd_loc;
   }
 
+and module_alias s alias =
+  match alias with
+  | Ma_ident id -> begin
+      match Ident.Map.find id s.modules with
+      | path -> module_alias_of_path path
+      | exception Not_found -> alias
+    end
+  | Ma_dot(a, n) -> Ma_dot(module_alias s a, n)
+  | Ma_tconstraint(a, mty) -> Ma_tconstraint(module_alias s a, modtype s mty)
+
 (* For every binding k |-> d of m1, add k |-> f d to m2
    and return resulting merged map. *)
 
@@ -498,7 +521,9 @@ let type_replacement s = function
 
 let compose s1 s2 =
   { types = merge_path_maps (type_replacement s2) s1.types s2.types;
-    modules = merge_path_maps (module_path s2) s1.modules s2.modules;
+    modules = merge_tbls (module_path s2) s1.modules s2.modules;
+    module_paths =
+      merge_path_maps (module_path s2) s1.module_paths s2.module_paths;
     modtypes = merge_tbls (modtype s2) s1.modtypes s2.modtypes;
     for_saving = s1.for_saving || s2.for_saving;
     loc = keep_latest_loc s1.loc s2.loc;

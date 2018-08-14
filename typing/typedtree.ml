@@ -205,11 +205,11 @@ and module_expr_desc =
     Tmod_ident of Path.t * Longident.t loc
   | Tmod_structure of structure
   | Tmod_functor of Ident.t * string loc * module_type option * module_expr
-  | Tmod_apply of module_expr * module_expr * Path.module_coercion
+  | Tmod_apply of module_expr * module_expr * Env.module_coercion
   | Tmod_constraint of
       module_expr * Types.module_type
-      * module_type_constraint * Path.module_coercion
-  | Tmod_tconstraint of module_expr * module_type * Path.module_coercion
+      * module_type_constraint * Env.module_coercion
+  | Tmod_tconstraint of module_expr * module_type * Env.module_coercion
   | Tmod_unpack of expression * Types.module_type
 
 and structure = {

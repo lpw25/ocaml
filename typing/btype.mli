@@ -106,6 +106,7 @@ type type_iterators =
     it_class_declaration: type_iterators -> class_declaration -> unit;
     it_class_type_declaration: type_iterators -> class_type_declaration -> unit;
     it_module_type: type_iterators -> module_type -> unit;
+    it_module_alias: type_iterators -> module_alias -> unit;
     it_class_type: type_iterators -> class_type -> unit;
     it_type_kind: type_iterators -> type_kind -> unit;
     it_do_type_expr: type_iterators -> type_expr -> unit;

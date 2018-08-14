@@ -104,7 +104,7 @@ let empty = Empty
 
 let is_empty = function
   | Empty -> true
-  | None _ -> false
+  | Node _ -> false
 
 (* Inline expansion of height for better speed
  * let height = function

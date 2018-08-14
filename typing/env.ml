@@ -177,6 +177,13 @@ let rec address_head = function
   | Aident id -> id
   | Adot(addr, _) -> address_head addr
 
+type module_coercion =
+    Tcoerce_none
+  | Tcoerce_structure of (int * module_coercion) list *
+                         (Ident.t * int * module_coercion) list
+  | Tcoerce_functor of module_coercion * module_coercion
+  | Tcoerce_alias of address * module_coercion
+
 module TycompTbl =
   struct
     (** This module is used to store components of types (i.e. labels
@@ -1025,17 +1032,6 @@ let find_module_with_addr ~alias path env =
           raise Not_found
       end
 
-let find_module_alias = find_module ~alias:true
-let find_module = find_module ~alias:false
-
-let may_find_modtype path env = try
-    (find_modtype path env).mtd_type
-  with Not_found -> None
-
-let may_find_module path env = try
-    Some (find_module path env)
-  with Not_found -> None
-
 let required_globals = ref []
 let reset_required_globals () = required_globals := []
 let get_required_globals () = !required_globals
@@ -1056,7 +1052,7 @@ let rec normalize_path ~only_absent ~lax env path =
         Papply(p1, p2)
     | _ -> path
   in
-  try match find_module_with_addr ~alias:true path env with
+  match find_module_with_addr ~alias:true path env with
   | {md_type=Mty_alias(path1)}, addr -> begin
       match addr with
       | Some _ when only_absent -> path

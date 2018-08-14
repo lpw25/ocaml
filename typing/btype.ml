@@ -291,6 +291,7 @@ type type_iterators =
     it_class_declaration: type_iterators -> class_declaration -> unit;
     it_class_type_declaration: type_iterators -> class_type_declaration -> unit;
     it_module_type: type_iterators -> module_type -> unit;
+    it_module_alias: type_iterators -> module_alias -> unit;
     it_class_type: type_iterators -> class_type -> unit;
     it_type_kind: type_iterators -> type_kind -> unit;
     it_do_type_expr: type_iterators -> type_expr -> unit;
@@ -356,12 +357,16 @@ let type_iterators =
     List.iter (it.it_type_expr it) ctd.clty_params;
     it.it_class_type it ctd.clty_type;
     it.it_path ctd.clty_path
+  and it_module_alias it = function
+    | Ma_ident _ -> ()
+    | Ma_dot(a, _) ->
+        it.it_module_alias it a
+    | Ma_tconstraint(a, mty) ->
+        it.it_module_alias it a;
+        it.it_module_type it mty
   and it_module_type it = function
-      Mty_ident p
-    | Mty_alias(p, None) -> it.it_path p
-    | Mty_alias(p, Some (mty, _)) ->
-      it.it_path p;
-      it.it_module_type it mty
+      Mty_ident p -> it.it_path p
+    | Mty_alias a -> it.it_module_alias it a
     | Mty_signature sg -> it.it_signature it sg
     | Mty_functor (_, mto, mt) ->
         may (it.it_module_type it) mto;
@@ -395,7 +400,7 @@ let type_iterators =
   and it_path _p = ()
   in
   { it_path; it_type_expr = it_do_type_expr; it_do_type_expr;
-    it_type_kind; it_class_type; it_module_type;
+    it_type_kind; it_class_type; it_module_type; it_module_alias;
     it_signature; it_class_type_declaration; it_class_declaration;
     it_modtype_declaration; it_module_declaration; it_extension_constructor;
     it_type_declaration; it_value_description; it_signature_item; }
