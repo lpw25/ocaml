@@ -1032,49 +1032,61 @@ let find_module_with_addr ~alias path env =
           raise Not_found
       end
 
-let required_globals = ref []
-let reset_required_globals () = required_globals := []
-let get_required_globals () = !required_globals
-let add_required_global id =
-  if Ident.global id && not !Clflags.transparent_modules
-  && not (List.exists (Ident.same id) !required_globals)
-  then required_globals := id :: !required_globals
-
-let rec normalize_path ~only_absent ~lax env path =
+let rec realize_parent_path env path =
   let path =
     match path with
-      Pdot(p, s) ->
-        let p = normalize_path ~only_absent ~lax env p in
-        Pdot(p, s)
-    | Papply(p1, p2) ->
-        let p1 = normalize_path ~only_absent ~lax env p1 in
-        let p2 = normalize_path ~only_absent ~lax:true env p2 in
-        Papply(p1, p2)
-    | _ -> path
+      Pdot(p, s) -> Pdot(realize_parent_path env p, s)
+    | Pident _ -> path
+    | Papply _  -> assert false
   in
   match find_module_with_addr ~alias:true path env with
-  | {md_type=Mty_alias(path1)}, addr -> begin
-      match addr with
-      | Some _ when only_absent -> path
-      | _ ->
-          let path' = normalize_path ~only_absent ~lax env path1 in
-          if lax || !Clflags.transparent_modules then path' else
-          let id = Path.head path in
-          if Ident.global id && not (Ident.same id (Path.head path'))
-          then add_required_global id;
-          path'
-    end
+  | { md_type = Mty_alias path' }, None -> realize_parent_alias env path'
   | _ -> path
-  | exception Not_found -> path
+  | exception Not_found ->
+      raise (Error(Missing_module(loc, path, path')))
 
-let normalize_path_prefix ~only_absent ~lax env path =
+and realize_parent_alias env alias =
+  match alias with
+  | Ma_path p -> realize_parent_path env p
+  | Ma_tconstraint(a, _) -> realize_parent_alias env a
+  | Ma_dot(a, s) ->
+      let path = Pdot(realize_parent_alias env a, s) in
+      match find_module_with_addr ~alias:true path env with
+      | { md_type = Mty_alias path' }, None -> realize_parent_alias env path'
+      | _ -> path
+      | exception Not_found ->
+        raise (Error(Missing_module(loc, path, path')))
+
+let rec realize_module_path env path =
+  let path =
+    match path with
+      Pdot(p, s) -> Pdot(realize_module_path env p, s)
+    | Pident _ -> path
+    | Papply _  -> assert false
+  in
+  match find_module_with_addr ~alias:true path env with
+  | { md_type = Mty_alias path' }, None -> realize_module_alias env path'
+  | _ -> path
+  | exception Not_found ->
+      raise (Error(Missing_module(loc, path, path')))
+
+and realize_module_alias env alias =
+  match alias with
+  | Ma_path p -> realize_module_path env p
+  | Ma_tconstraint(a, _) -> realize_module_alias env a
+  | Ma_dot(a, s) ->
+      let path = Pdot(realize_parent_alias env a, s) in
+      match find_module_with_addr ~alias:true path env with
+      | { md_type = Mty_alias path' }, None -> realize_module_alias env path'
+      | _ -> path
+      | exception Not_found ->
+        raise (Error(Missing_module(loc, path, path')))
+
+let realize_nonmodule_path env path =
   match path with
-  | Pdot(p, s) ->
-      Pdot(normalize_path ~only_absent ~lax env p, s)
-  | Pident _ ->
-      path
-  | Papply _ ->
-      assert false
+  | Pdot(p, s) -> Pdot(realize_module_path env p, s)
+  | Pident _ -> path
+  | Papply _ -> assert false
 
 let find_module path env =
   fst (find_module_with_addr ~alias:false path env)
@@ -1094,17 +1106,13 @@ let find_idtbl_address_opt proj1 proj2 path env =
   | Papply _ ->
       raise Not_found
 
-let rec find_idtbl_address normalize proj1 proj2 loc path env =
+let rec find_idtbl_address realize proj1 proj2 loc path env =
   match find_idtbl_address_opt proj1 proj2 path env with
   | Some addr -> addr
   | None -> begin
-      match normalize ~only_absent:true ~lax:true env path with
-      | exception Not_found ->
-          let path' = normalize ~only_absent:true ~lax:true env path in
-          raise (Error(Missing_module(loc, path, path')))
-      | alias ->
-          if Path.same path alias then raise Not_found;
-          find_idtbl_address normalize proj1 proj2 loc alias env
+      let alias = realize env path in
+      if Path.same path alias then raise Not_found;
+      find_idtbl_address realize proj1 proj2 loc alias env
     end
 
 let find_tycomptbl_address_opt proj1 proj2 path env =
@@ -1126,49 +1134,73 @@ let find_tycomptbl_address_opt proj1 proj2 path env =
   | Papply _ ->
       raise Not_found
 
-let rec find_tycomptbl_address normalize proj1 proj2 loc path env =
+let rec find_tycomptbl_address realize proj1 proj2 loc path env =
   match find_tycomptbl_address_opt proj1 proj2 path env with
   | Some addr -> addr
   | None -> begin
-      match normalize ~only_absent:true ~lax:true env path with
-      | exception Not_found ->
-          let path' = normalize ~only_absent:true ~lax:true env path in
-          raise (Error(Missing_module(loc, path, path')))
-      | alias ->
-          if Path.same path alias then raise Not_found;
-          find_tycomptbl_address normalize proj1 proj2 loc alias env
+      let alias = realize env path in
+      if Path.same path alias then raise Not_found;
+      find_tycomptbl_address realize proj1 proj2 loc alias env
     end
 
 let find_value_address =
-  find_idtbl_address normalize_path_prefix
+  find_idtbl_address realize_nonmodule_path
     (fun env -> env.values) (fun sc -> sc.comp_values)
-and find_class_address =
-  find_idtbl_address normalize_path_prefix
+
+let find_class_address =
+  find_idtbl_address realize_nonmodule_path
     (fun env -> env.classes) (fun sc -> sc.comp_classes)
-and find_module_address =
-  find_idtbl_address normalize_path
+
+let find_module_address =
+  find_idtbl_address realize_module_path
     (fun env -> env.modules) (fun sc -> sc.comp_modules)
 
 let find_constructor_address =
-  find_tycomptbl_address normalize_path_prefix
+  find_tycomptbl_address realize_nonmodule_path
     (fun env -> env.constrs) (fun sc -> sc.comp_constrs)
 
-let normalize_path oloc env path =
-  try normalize_path ~only_absent:false ~lax:(oloc = None) env path
-  with Not_found ->
-    match oloc with None -> assert false
-    | Some loc ->
-        let path' = normalize_path ~only_absent:false ~lax:true env path in
-        raise (Error(Missing_module(loc, path, path')))
+let normalize_module_path oloc env path =
+  let original = path in
+  let rec loop_path path =
+    let path =
+      match path with
+      | Pdot(p, s) -> Pdot(loop_path p, s)
+      | Papply(p1, p2) -> Papply(loop_path p1, loop_path p2)
+      | Pident _ -> path
+    in
+    match find_module_with_addr ~alias:true oloc path env with
+    | { md_type = Mty_alias alias }, _ -> loop_alias alias
+    | _ -> path
+    | exception Not_found ->
+        match oloc with
+        | None -> path
+        | Some loc ->
+            raise (Error(Missing_module(loc, original, path)))
+  and loop_alias alias =
+    match alias with
+    | Ma_path p -> loop_path p
+    | Ma_tconstraint(a, _) -> loop_alias a
+    | Ma_dot(a, s) ->
+        let path = Pdot(loop_alias a, s) in
+        match find_module_with_addr ~alias:true path env with
+        | { md_type = Mty_alias alias' }, _ -> loop_alias alias'
+        | _ -> path
+        | exception Not_found ->
+            match oloc with
+            | None -> path
+            | Some loc ->
+                raise (Error(Missing_module(loc, original, path)))
+  in
+  loop_path path
 
-let normalize_path_prefix oloc env path =
+let normalize_nonmodule_path oloc env path =
   match path with
-    Pdot(p, s) ->
-      Pdot(normalize_path oloc env p, s)
-  | Pident _ ->
-      path
-  | Papply _ ->
-      assert false
+  | Pdot(p, s) -> Pdot(normalize_module_path oloc env p, s)
+  | Pident _ -> path
+  | Papply _ -> assert false
+
+let normalize_modtype_path = normalize_nonmodule_path
+let normalize_type_path = normalize_nonmodule_path
 
 (* Find the manifest type associated to a type when appropriate:
    - the type should be public or should have a private row,

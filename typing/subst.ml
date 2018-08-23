@@ -422,11 +422,6 @@ let rec rename_bound_idents s idents = function
       let id' = Ident.rename id in
       rename_bound_idents s (id' :: idents) sg
 
-let rec module_alias_of_path = function
-  | Pident id -> Ma_ident id
-  | Pdot(p, n) -> Ma_dot(module_alias_of_path p, n)
-  | Papply _ -> assert false
-
 let rec modtype s = function
     Mty_ident p as mty ->
       begin match p with
@@ -487,11 +482,7 @@ and modtype_declaration s decl  =
 
 and module_alias s alias =
   match alias with
-  | Ma_ident id -> begin
-      match Ident.Map.find id s.modules with
-      | path -> module_alias_of_path path
-      | exception Not_found -> alias
-    end
+  | Ma_path p -> Ma_path(module_path s p)
   | Ma_dot(a, n) -> Ma_dot(module_alias s a, n)
   | Ma_tconstraint(a, mty) -> Ma_tconstraint(module_alias s a, modtype s mty)
 

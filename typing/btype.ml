@@ -358,7 +358,7 @@ let type_iterators =
     it.it_class_type it ctd.clty_type;
     it.it_path ctd.clty_path
   and it_module_alias it = function
-    | Ma_ident _ -> ()
+    | Ma_path p -> it.it_path p
     | Ma_dot(a, _) ->
         it.it_module_alias it a
     | Ma_tconstraint(a, mty) ->

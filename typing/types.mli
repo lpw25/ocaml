@@ -416,7 +416,7 @@ and module_presence =
   | Mta_absent
 
 and module_alias =
-  | Ma_ident of Ident.t
+  | Ma_path of Path.t
   | Ma_dot of module_alias * string
   | Ma_tconstraint of module_alias * module_type
 

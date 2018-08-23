@@ -100,8 +100,6 @@ val is_functor_arg: Path.t -> t -> bool
 
 (* Normalize path - unroll all aliases on the path.
    Versions for modules, module types and types.
-   Warning: it breaks positions in Pdot, therefore should not be used on
-            anything with runtime representation.
 *)
 val normalize_module_path: env:t -> Path.t -> Path.t
 val normalize_modtype_path: env:t -> Path.t -> Path.t
