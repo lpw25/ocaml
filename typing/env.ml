@@ -172,17 +172,18 @@ type summary =
 type address =
   | Aident of Ident.t
   | Adot of address * int
+  | Acoerce of address * module_coercion
+
+and module_coercion =
+    Cnone
+  | Cstructure of (int * module_coercion) list *
+                         (Ident.t * int * module_coercion) list
+  | Cfunctor of module_coercion * module_coercion
+  | Calias of address * module_coercion
 
 let rec address_head = function
   | Aident id -> id
   | Adot(addr, _) -> address_head addr
-
-type module_coercion =
-    Tcoerce_none
-  | Tcoerce_structure of (int * module_coercion) list *
-                         (Ident.t * int * module_coercion) list
-  | Tcoerce_functor of module_coercion * module_coercion
-  | Tcoerce_alias of address * module_coercion
 
 module TycompTbl =
   struct
