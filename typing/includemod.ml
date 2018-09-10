@@ -184,71 +184,6 @@ let is_runtime_component = function
   | Sig_module(_,Mta_present,_,_)
   | Sig_class(_, _,_) -> true
 
-(* Compose two coercions
-   apply_coercion c1 (apply_coercion c2 e) behaves like
-   apply_coercion (compose_coercions c1 c2) e. *)
-
-let rec compose_coercions c1 c2 =
-  match (c1, c2) with
-    (Tcoerce_none, c2) -> c2
-  | (c1, Tcoerce_none) -> c1
-  | (Tcoerce_structure (pc1, ids1), Tcoerce_structure (pc2, ids2)) ->
-      let v2 = Array.of_list pc2 in
-      let ids1 =
-        List.map (fun (id,pos1,c1) ->
-          let (pos2,c2) = v2.(pos1) in (id, pos2, compose_coercions c1 c2))
-          ids1
-      in
-      Tcoerce_structure
-        (List.map (fun (p1, c1) ->
-           let (p2, c2) = v2.(p1) in (p2, compose_coercions c1 c2))
-           pc1,
-         ids1 @ ids2)
-  | (Tcoerce_functor(arg1, res1), Tcoerce_functor(arg2, res2)) ->
-      Tcoerce_functor(compose_coercions arg2 arg1,
-                      compose_coercions res1 res2)
-  | (c1, Tcoerce_alias (path, c2)) ->
-      Tcoerce_alias (path, compose_coercions c1 c2)
-  | (_, _) ->
-      fatal_error "Includemod.compose_coercions"
-(*
-let compose_coercions c1 c2 =
-  let c3 = compose_coercions c1 c2 in
-  Format.eprintf "@[<2>compose_coercions@ (%a)@ (%a) =@ %a@]@."
-    print_coercion c1 print_coercion c2 print_coercion c3;
-  c3
-*)
-(* Print a coercion *)
-
-let rec print_list pr ppf = function
-    [] -> ()
-  | [a] -> pr ppf a
-  | a :: l -> pr ppf a; Format.fprintf ppf ";@ "; print_list pr ppf l
-let print_list pr ppf l =
-  Format.fprintf ppf "[@[%a@]]" (print_list pr) l
-
-let rec print_coercion ppf c =
-  let pr fmt = Format.fprintf ppf fmt in
-  match c with
-    Tcoerce_none -> pr "id"
-  | Tcoerce_structure (fl, nl) ->
-      pr "@[<2>struct@ %a@ %a@]"
-        (print_list print_coercion2) fl
-        (print_list print_coercion3) nl
-  | Tcoerce_functor (inp, out) ->
-      pr "@[<2>functor@ (%a)@ (%a)@]"
-        print_coercion inp
-        print_coercion out
-  | Tcoerce_alias (_, p, c) ->
-      pr "@[<2>alias %a@ (%a)@]"
-        Printtyp.path p
-        print_coercion c
-and print_coercion2 ppf (n, c) =
-  Format.fprintf ppf "@[%d,@ %a@]" n print_coercion c
-and print_coercion3 ppf (i, n, c) =
-  Format.fprintf ppf "@[%s, %d,@ %a@]"
-    (Ident.unique_name i) n print_coercion c
-
 (* Simplify a structure coercion *)
 
 let simplify_structure_coercion cc id_pos_list =
@@ -574,14 +509,14 @@ let can_alias env path =
   in
   no_apply path && not (Env.is_functor_arg path env)
 
-let check_modtype_inclusion ~loc env mty1 path1 mty2 =
+let modtype_inclusion ~loc env mty1 path1 mty2 =
   let aliasable = can_alias env path1 in
-  ignore(modtypes ~loc env ~mark:Mark_both [] Subst.identity
-           (Mtype.strengthen ~aliasable env mty1 path1) mty2)
+  modtypes ~loc env ~mark:Mark_both [] Subst.identity
+    (Mtype.strengthen ~aliasable env mty1 path1) mty2
 
 let () =
-  Env.check_modtype_inclusion := (fun ~loc a b c d ->
-    try (check_modtype_inclusion ~loc a b c d : unit)
+  Env.modtype_inclusion := (fun ~loc a b c d ->
+    try (modtype_inclusion ~loc a b c d : Env.module_coercion)
     with Error _ -> raise Not_found)
 
 let () = Env.realize_value_path := fun ~loc ~env path ->
