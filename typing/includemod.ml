@@ -227,8 +227,8 @@ and try_modtypes ~loc env ~mark cxt subst mty1 mty2 =
       match omty1, omty2, pres2 with
         | None, None, Mta_absent -> Tcoerce_none
         | _ -> begin
-          let mty1 = Env.scrape_alias ~strengthened:false env mty1 in
-          let mty2 = Env.scrape_alias ~strengthened:false env
+          let mty1 = Env.scrape_alias_and_ident ~strengthened:false env mty1 in
+          let mty2 = Env.scrape_alias_and_ident ~strengthened:false env
                        (Subst.modtype subst mty2)
           in
           let cc = modtypes ~loc env cxt subst mty1 mty2 in
@@ -238,7 +238,7 @@ and try_modtypes ~loc env ~mark cxt subst mty1 mty2 =
       end
     end
   | (Mty_alias(pres1, p1, omty1, inner_cc), _) -> begin
-      let mty1 = Env.scrape_alias env mty1 in
+      let mty1 = Env.scrape_alias_and_ident env mty1 in
       let cc = modtypes ~loc env cxt subst mty1 mty2 in
       compose_coercions cc inner_cc
     end

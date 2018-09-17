@@ -94,7 +94,12 @@ type out_module_type =
   | Omty_functor of string * out_module_type option * out_module_type
   | Omty_ident of out_ident
   | Omty_signature of out_sig_item list
-  | Omty_alias of out_ident * out_module_type option
+  | Omty_alias of out_module_alias
+and out_module_alias =
+  | Oma_ident of out_ident
+  | Oma_dot of out_module_alias * string
+  | Oma_tconstraint of out_module_alias * out_module_type
+
 and out_sig_item =
   | Osig_class of
       bool * string * (string * (bool * bool)) list * out_class_type *

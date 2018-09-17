@@ -502,3 +502,5 @@ type label_description =
     lbl_loc: Location.t;
     lbl_attributes: Parsetree.attributes;
   }
+
+val path_of_module_alias : module_alias -> Path.t

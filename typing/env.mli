@@ -41,11 +41,17 @@ type address =
 val address_head : address -> Ident.t
 
 type module_coercion =
-    Tcoerce_none
-  | Tcoerce_structure of (int * module_coercion) list *
-                         (Ident.t * int * module_coercion) list
-  | Tcoerce_functor of module_coercion * module_coercion
-  | Tcoerce_alias of address * module_coercion
+    Cnone
+  | Cstructure of Ident.t * (int * module_coercion) list
+  | Cfunctor of module_coercion * module_coercion
+  | Calias of module_address
+  | Csubst of address_subst * module_coercion
+
+and address_subst = module_address Ident.Map.t
+
+and module_address =
+  { address : address;
+    coercion : module_coercion }
 
 type t
 
@@ -77,7 +83,7 @@ val find_value: Path.t -> t -> value_description
 val find_type: Path.t -> t -> type_declaration
 val find_type_descrs: Path.t -> t -> type_descriptions
 val find_module: Path.t -> t -> module_declaration
-val find_module_alias: Path.t -> t -> module_declaration
+val find_module_alias: module_alias -> t -> module_declaration
 val find_modtype: Path.t -> t -> modtype_declaration
 val find_class: Path.t -> t -> class_declaration
 val find_cltype: Path.t -> t -> class_type_declaration
@@ -90,10 +96,10 @@ val find_type_expansion_opt:
    of the compiler's type-based optimisations. *)
 val find_modtype_expansion: Path.t -> t -> module_type
 
-val find_value_address: Location.t -> Path.t -> t -> address
-val find_module_address: Location.t -> Path.t -> t -> address
-val find_class_address: Location.t -> Path.t -> t -> address
-val find_constructor_address: Location.t -> Path.t -> t -> address
+val find_value_address: Path.t -> t -> address
+val find_module_address: Path.t -> t -> module_address
+val find_class_address: Path.t -> t -> address
+val find_constructor_address: Path.t -> t -> address
 
 val add_functor_arg: Ident.t -> t -> t
 val is_functor_arg: Path.t -> t -> bool
@@ -101,11 +107,11 @@ val is_functor_arg: Path.t -> t -> bool
 (* Normalize path - unroll all aliases on the path.
    Versions for modules, module types and types.
 *)
-val normalize_module_path: env:t -> Path.t -> Path.t
-val normalize_modtype_path: env:t -> Path.t -> Path.t
-val normalize_type_path: env:t -> Path.t -> Path.t
+val normalize_module_path: Location.t option -> t -> Path.t -> Path.t
+val normalize_modtype_path: Location.t option -> t -> Path.t -> Path.t
+val normalize_type_path: Location.t option -> t -> Path.t -> Path.t
 
-val normalize_package_path: env:t -> Path.t -> Path.t
+val normalize_package_path: t -> Path.t -> Path.t
 
 (*
    Get a real path by which objects may be accessed.
@@ -118,10 +124,6 @@ val normalize_package_path: env:t -> Path.t -> Path.t
 *)
 
 val realize_value_path: (loc:Location.t -> env:t -> Path.t -> Path.t) ref
-
-val reset_required_globals: unit -> unit
-val get_required_globals: unit -> Ident.t list
-val add_required_global: Ident.t -> unit
 
 val has_local_constraints: t -> bool
 
@@ -326,8 +328,9 @@ val set_type_used_callback:
     string -> type_declaration -> ((unit -> unit) -> unit) -> unit
 
 (* Forward declaration to break mutual recursion with Includemod. *)
-val check_modtype_inclusion:
-      (loc:Location.t -> t -> module_type -> Path.t -> module_type -> unit) ref
+val modtype_inclusion:
+      (loc:Location.t -> t -> module_type ->
+       Path.t -> module_type -> module_coercion) ref
 (* Forward declaration to break mutual recursion with Typemod. *)
 val check_well_formed_module:
     (t -> Location.t -> string -> module_type -> unit) ref
@@ -372,9 +375,14 @@ val fold_cltypes:
   Longident.t option -> t -> 'a -> 'a
 
 (** Utilities *)
-val scrape_alias: ?strengthened:bool -> t -> module_type -> module_type
-val scrape_only_alias: ?strengthened:bool -> t -> module_type -> module_type
+val scrape_alias: t -> module_type -> module_type
+val scrape_ident: t -> module_type -> module_type
+val scrape_alias_and_ident: t -> module_type -> module_type
 val check_value_name: string -> Location.t -> unit
+
+val print_coercion : Format.formatter -> module_coercion -> unit
+val print_address : Format.formatter -> address -> unit
+val print_module_address : Format.formatter -> module_address -> unit
 
 module Persistent_signature : sig
   type t =

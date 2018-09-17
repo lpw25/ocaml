@@ -95,7 +95,7 @@ let rec narrow_unbound_lid_error : 'a. _ -> _ -> _ -> _ -> 'a =
   | Longident.Ldot (mlid, _) ->
       check_module mlid;
       let md = Env.find_module (Env.lookup_module ~load:true mlid env) env in
-      begin match Env.scrape_alias env md.md_type with
+      begin match Env.scrape_alias_and_ident env md.md_type with
       | Mty_functor _ ->
          error (Wrong_use_of_module (mlid, `Functor_used_as_structure))
       | Mty_ident _ ->
@@ -107,7 +107,7 @@ let rec narrow_unbound_lid_error : 'a. _ -> _ -> _ -> _ -> 'a =
       check_module flid;
       let fmd = Env.find_module (Env.lookup_module ~load:true flid env) env in
       let mty_param =
-        match Env.scrape_alias env fmd.md_type with
+        match Env.scrape_alias_and_ident env fmd.md_type with
         | Mty_signature _ ->
            error (Wrong_use_of_module (flid, `Structure_used_as_functor))
         | Mty_ident _ ->
@@ -120,7 +120,7 @@ let rec narrow_unbound_lid_error : 'a. _ -> _ -> _ -> _ -> 'a =
       check_module mlid;
       let mpath = Env.lookup_module ~load:true mlid env in
       let mmd = Env.find_module mpath env in
-      begin match Env.scrape_alias env mmd.md_type with
+      begin match Env.scrape_alias_and_ident env mmd.md_type with
       | Mty_alias(p, _) -> error (Cannot_scrape_alias(mlid, p))
       | mty_arg ->
          let details =

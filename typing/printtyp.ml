@@ -321,7 +321,8 @@ let find_double_underscore s =
 
 let rec module_path_is_an_alias_of env path ~alias_of =
   match Env.find_module path env with
-  | { md_type = Mty_alias path'; _ } ->
+  | { md_type = Mty_alias alias; _ } ->
+    let path' = path_of_module_alias alias in
     Path.same path' alias_of ||
     module_path_is_an_alias_of env path' ~alias_of
   | _ -> false
@@ -600,7 +601,7 @@ let rec normalize_type_path ?(cache=false) env p =
         (p, Nth (index params ty))
   with
     Not_found ->
-      (Env.normalize_type_path ~env p, Id)
+      (Env.normalize_type_path None env p, Id)
 
 let penalty s =
   if s <> "" && s.[0] = '_' then
@@ -1581,10 +1582,14 @@ let rec tree_of_modtype ?(ellipsis=false) = function
       in
       Omty_functor (Ident.name param,
                     may_map (tree_of_modtype ~ellipsis:false) ty_arg, res)
-  | Mty_alias(p, None) ->
-      Omty_alias (tree_of_path Module p, None)
-  | Mty_alias(p, Some mty) ->
-      Omty_alias (tree_of_path Module p, Some (tree_of_modtype mty))
+  | Mty_alias alias ->
+      Omty_alias (tree_of_module_alias alias)
+
+and tree_of_module_alias = function
+  | Ma_path p -> Oma_ident (tree_of_path Module p)
+  | Ma_dot(ma, s) -> Oma_dot (tree_of_module_alias ma, s)
+  | Ma_tconstraint(ma, mty) ->
+      Oma_tconstraint(tree_of_module_alias ma, tree_of_modtype mty)
 
 and tree_of_signature sg =
   wrap_env (fun env -> env) (tree_of_signature_rec !printing_env false) sg

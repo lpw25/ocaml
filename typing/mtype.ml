@@ -426,7 +426,7 @@ let rec remove_aliases_mty env excl pres mty =
     Mty_signature sg ->
       Mta_present, Mty_signature (remove_aliases_sig env excl sg)
   | Mty_alias _ ->
-      let mty' = Env.scrape_alias env mty in
+      let mty' = Env.scrape_alias_and_ident env mty in
       if mty' = mty then pres, mty else
       remove_aliases_mty env excl pres mty'
   | mty ->

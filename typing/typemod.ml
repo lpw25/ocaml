@@ -76,14 +76,14 @@ let rec path_concat head p =
 (* Extract a signature from a module type *)
 
 let extract_sig env loc mty =
-  match Env.scrape_alias env mty with
+  match Env.scrape_alias_and_ident env mty with
     Mty_signature sg -> sg
   | Mty_alias(path, _) ->
       raise(Error(loc, env, Cannot_scrape_alias path))
   | _ -> raise(Error(loc, env, Signature_expected))
 
 let extract_sig_open env loc mty =
-  match Env.scrape_alias env mty with
+  match Env.scrape_alias_and_ident env mty with
     Mty_signature sg -> sg
   | Mty_alias(path, _) ->
       raise(Error(loc, env, Cannot_scrape_alias path))
@@ -263,7 +263,7 @@ let retype_applicative_functor_type ~loc env funct arg =
   let mty_functor = (Env.find_module funct env).md_type in
   let mty_arg = (Env.find_module arg env).md_type in
   let mty_param =
-    match Env.scrape_alias env mty_functor with
+    match Env.scrape_alias_and_ident env mty_functor with
     | Mty_functor (_, Some mty_param, _) -> mty_param
     | _ -> assert false (* could trigger due to MPR#7611 *)
   in
@@ -1453,7 +1453,7 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
       let path = path_of_module arg in
       let funct =
         type_module (sttn && path <> None) funct_body None env sfunct in
-      begin match Env.scrape_alias env funct.mod_type with
+      begin match Env.scrape_alias_and_ident env funct.mod_type with
         Mty_functor(param, mty_param, mty_res) as mty_functor ->
           let generative, mty_param =
             (mty_param = None, Btype.default_mty mty_param) in

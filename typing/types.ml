@@ -356,3 +356,8 @@ type label_description =
     lbl_loc: Location.t;
     lbl_attributes: Parsetree.attributes;
    }
+
+let rec path_of_module_alias = function
+  | Ma_path p -> p
+  | Ma_dot(ma, s) -> Path.Pdot(path_of_module_alias ma, s)
+  | Ma_tconstraint(ma, _) -> path_of_module_alias ma

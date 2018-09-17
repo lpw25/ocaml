@@ -741,7 +741,7 @@ let rec update_level env level expand ty =
           iter_type_expr (update_level env level expand) ty
         end
     | Tpackage (p, nl, tl) when level < Path.binding_time p ->
-        let p' = Env.normalize_package_path ~env p in
+        let p' = Env.normalize_package_path env p in
         if Path.same p p' then raise (Unify [(ty, newvar2 level)]);
         log_type ty; ty.desc <- Tpackage (p', nl, tl);
         update_level env level expand ty
@@ -1412,7 +1412,7 @@ let expand_abbrev_gen kind find_type_expansion env ty =
           match find_type_expansion path env with
           | exception Not_found ->
             (* another way to expand is to normalize the path itself *)
-            let path' = Env.normalize_type_path ~env path in
+            let path' = Env.normalize_type_path None env path in
             if Path.same path path' then raise Cannot_expand
             else newty2 level (Tconstr (path', args, abbrev))
           | (params, body, lv) ->
@@ -2251,8 +2251,8 @@ let add_type_equality t1 t2 =
 
 let eq_package_path env p1 p2 =
   Path.same p1 p2 ||
-  Path.same (Env.normalize_package_path ~env p1)
-    (Env.normalize_package_path ~env p2)
+  Path.same (Env.normalize_package_path env p1)
+    (Env.normalize_package_path env p2)
 
 let nondep_type' = ref (fun _ _ _ -> assert false)
 let package_subtype = ref (fun _ _ _ _ _ _ _ -> assert false)
@@ -4373,7 +4373,7 @@ let rec nondep_type_rec ?(expand_private=false) env id ty =
           else
             Tconstr(p, List.map (nondep_type_rec env id) tl, ref Mnil)
       | Tpackage(p, nl, tl) when Path.isfree id p ->
-          let p' = Env.normalize_package_path ~env p in
+          let p' = Env.normalize_package_path env p in
           if Path.isfree id p' then raise Not_found;
           Tpackage (p', nl, List.map (nondep_type_rec env id) tl)
       | Tobject (t1, name) ->
