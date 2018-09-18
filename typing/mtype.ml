@@ -103,7 +103,8 @@ and strengthen_decl ~aliasable env md p =
   match md.md_type with
   | Mty_alias _ -> md
   | mty when aliasable = `Aliasable_with_constraints ->
-    {md with md_type = Mty_alias(p, Some mty)}
+    let alias = Ma_tconstraint(Ma_path p, mty) in
+    {md with md_type = Mty_alias alias}
   | _mty when aliasable = `Aliasable ->
     {md with md_type = Mty_alias(p, None)}
   | mty -> {md with md_type = strengthen ~aliasable env mty p}
