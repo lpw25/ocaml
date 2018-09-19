@@ -361,3 +361,8 @@ let rec path_of_module_alias = function
   | Ma_path p -> p
   | Ma_dot(ma, s) -> Path.Pdot(path_of_module_alias ma, s)
   | Ma_tconstraint(ma, _) -> path_of_module_alias ma
+
+let rec constrained_module_alias = function
+  | Ma_path _ -> false
+  | Ma_dot(ma, _) -> constrained_module_alias ma
+  | Ma_tconstraint _ -> true

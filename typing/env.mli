@@ -40,19 +40,6 @@ type address =
 
 val address_head : address -> Ident.t
 
-type module_coercion =
-    Cnone
-  | Cstructure of Ident.t * (int * module_coercion) list
-  | Cfunctor of module_coercion * module_coercion
-  | Calias of module_address
-  | Csubst of address_subst * module_coercion
-
-and address_subst = module_address Ident.Map.t
-
-and module_address =
-  { address : address;
-    coercion : module_coercion }
-
 type t
 
 val empty: t
@@ -83,7 +70,7 @@ val find_value: Path.t -> t -> value_description
 val find_type: Path.t -> t -> type_declaration
 val find_type_descrs: Path.t -> t -> type_descriptions
 val find_module: Path.t -> t -> module_declaration
-val find_module_alias: module_alias -> t -> module_declaration
+val find_module_alias: module_alias -> t -> module_type
 val find_modtype: Path.t -> t -> modtype_declaration
 val find_class: Path.t -> t -> class_declaration
 val find_cltype: Path.t -> t -> class_type_declaration
@@ -97,7 +84,7 @@ val find_type_expansion_opt:
 val find_modtype_expansion: Path.t -> t -> module_type
 
 val find_value_address: Path.t -> t -> address
-val find_module_address: Path.t -> t -> module_address
+val find_module_address: Path.t -> t -> address
 val find_class_address: Path.t -> t -> address
 val find_constructor_address: Path.t -> t -> address
 
@@ -328,19 +315,19 @@ val set_type_used_callback:
     string -> type_declaration -> ((unit -> unit) -> unit) -> unit
 
 (* Forward declaration to break mutual recursion with Includemod. *)
-val modtype_inclusion:
+val check_modtype_inclusion:
       (loc:Location.t -> t -> module_type ->
-       Path.t -> module_type -> module_coercion) ref
+       Path.t -> module_type -> unit) ref
 (* Forward declaration to break mutual recursion with Typemod. *)
 val check_well_formed_module:
     (t -> Location.t -> string -> module_type -> unit) ref
 (* Forward declaration to break mutual recursion with Typecore. *)
 val add_delayed_check_forward: ((unit -> unit) -> unit) ref
 (* Forward declaration to break mutual recursion with Mtype. *)
-val strengthen:
-   (aliasable:[`Aliasable | `Aliasable_with_constraints | `Not_aliasable]
-    -> t -> module_type -> Path.t
-    -> module_type) ref
+val strengthen_aliasable: (t -> module_type -> Path.t -> module_type) ref
+(* Forward declaration to break mutual recursion with Mtype. *)
+val strengthen_aliasable_with_constraints:
+  (t -> module_type -> Path.t -> module_type) ref
 (* Forward declaration to break mutual recursion with Ctype. *)
 val same_constr: (t -> type_expr -> type_expr -> bool) ref
 
@@ -380,9 +367,7 @@ val scrape_ident: t -> module_type -> module_type
 val scrape_alias_and_ident: t -> module_type -> module_type
 val check_value_name: string -> Location.t -> unit
 
-val print_coercion : Format.formatter -> module_coercion -> unit
 val print_address : Format.formatter -> address -> unit
-val print_module_address : Format.formatter -> module_address -> unit
 
 module Persistent_signature : sig
   type t =

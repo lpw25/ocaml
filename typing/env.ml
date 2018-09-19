@@ -79,6 +79,7 @@ module EnvLazy : sig
   val force : ('a -> 'b) -> ('a,'b) t -> 'b
   val create : 'a -> ('a,'b) t
   val create_forced : 'b -> ('a, 'b) t
+  val create_failed : exn -> ('a, 'b) t
 
   (* [force_logged log f t] is equivalent to [force f t] but if [f] returns
      [None] then [t] is recorded in [log]. [backtrack log] will then reset all
@@ -120,6 +121,9 @@ end  = struct
 
   let create_forced y =
     ref (Done y)
+
+  let create_failed e =
+    ref (Raise e)
 
   let log () =
     ref Nil
@@ -172,19 +176,6 @@ type summary =
 type address =
   | Aident of Ident.t
   | Adot of address * int
-
-type module_coercion =
-    Cnone
-  | Cstructure of Ident.t * (int * module_coercion) list
-  | Cfunctor of module_coercion * module_coercion
-  | Calias of module_address
-  | Csubst of address_subst * module_coercion
-
-and address_subst = module_address Ident.Map.t
-
-and module_address =
-  { address : address;
-    coercion : module_coercion }
 
 module TycompTbl =
   struct
@@ -472,9 +463,9 @@ type t = {
   constrs: (constructor_description * address_lazy option) TycompTbl.t;
   labels: label_description TycompTbl.t;
   types: (type_declaration * type_descriptions) IdTbl.t;
-  modules: (module_declaration_lazy * module_address_lazy) IdTbl.t;
+  modules: (module_declaration_lazy * address_lazy) IdTbl.t;
   modtypes: modtype_declaration IdTbl.t;
-  components: (module_components * module_address_lazy) IdTbl.t;
+  components: (module_components * address_lazy) IdTbl.t;
   classes: (class_declaration * address_lazy) IdTbl.t;
   cltypes: class_type_declaration IdTbl.t;
   functor_args: unit Ident.tbl;
@@ -491,7 +482,7 @@ and module_components =
     deprecated: string option;
     loc: Location.t;
     comps:
-      (t * Subst.t * Path.t * module_address_lazy * Types.module_type,
+      (t * Subst.t * Path.t * address_lazy * Types.module_type,
        module_components_repr option)
         EnvLazy.t;
   }
@@ -506,9 +497,9 @@ and structure_components = {
     ((constructor_description * address_lazy option) list) NameMap.t;
   mutable comp_labels: label_description list NameMap.t;
   mutable comp_types: (type_declaration * type_descriptions) NameMap.t;
-  mutable comp_modules: (module_declaration_lazy * module_address_lazy) NameMap.t;
+  mutable comp_modules: (module_declaration_lazy * address_lazy) NameMap.t;
   mutable comp_modtypes: modtype_declaration NameMap.t;
-  mutable comp_components: (module_components * module_address_lazy) NameMap.t;
+  mutable comp_components: (module_components * address_lazy) NameMap.t;
   mutable comp_classes: (class_declaration * address_lazy) NameMap.t;
   mutable comp_cltypes: class_type_declaration NameMap.t;
 }
@@ -521,21 +512,9 @@ and functor_components = {
   fcomp_subst_cache: (Path.t, module_type) Hashtbl.t
 }
 
-and module_address_unforced =
-  | ModProjection of
-      { parent : module_address_lazy;
-        pos : int; }
-  | ModAlias of
-      { env : t;
-        alias : module_alias; }
-  | ModNone
-
-and module_address_lazy = (module_address_unforced, module_address) EnvLazy.t
-
 and address_unforced =
-  | Projection of
-      { parent : module_address_lazy;
-        pos : int; }
+  | Projection of { parent : address_lazy; pos : int; }
+  | ModAlias of { env : t; path : Path.t; }
 
 and address_lazy = (address_unforced, address) EnvLazy.t
 
@@ -633,24 +612,28 @@ let without_cmis f x =
 let components_of_module' =
   ref ((fun ~deprecated:_ ~loc:_ _env _sub _path _addr _mty -> assert false) :
          deprecated:string option -> loc:Location.t -> t -> Subst.t ->
-       Path.t -> module_address_lazy -> module_type ->
+       Path.t -> address_lazy -> module_type ->
        module_components)
 let components_of_module_maker' =
   ref ((fun (_env, _sub, _path, _addr, _mty) -> assert false) :
-          t * Subst.t * Path.t * module_address_lazy * module_type ->
+          t * Subst.t * Path.t * address_lazy * module_type ->
           module_components_repr option)
 let components_of_functor_appl' =
   ref ((fun _f _env _p1 _p2 -> assert false) :
           functor_components -> t -> Path.t -> Path.t -> module_components)
-let modtype_inclusion =
+let check_modtype_inclusion =
   (* to be filled with Includemod.modtype_inclusion *)
   ref ((fun ~loc:_ _env _mty1 _path1 _mty2 -> assert false) :
-          loc:Location.t -> t -> module_type -> Path.t -> module_type -> module_coercion)
-let strengthen =
-  (* to be filled with Mtype.strengthen *)
-  ref ((fun ~aliasable:_ _env _mty _path -> assert false) :
-       aliasable:[`Aliasable | `Aliasable_with_constraints | `Not_aliasable] ->
-       t -> module_type -> Path.t -> module_type)
+          loc:Location.t -> t -> module_type -> Path.t -> module_type -> unit)
+let strengthen_aliasable =
+  (* to be filled with Mtype.strengthen ~aliasable:Aliasable *)
+  ref ((fun _env _mty _path -> assert false) :
+         t -> module_type -> Path.t -> module_type)
+
+let strengthen_aliasable_with_constraints =
+  (* to be filled with Mtype.strengthen ~aliasable:Aliasable_with_constraint *)
+  ref ((fun _env _mty _path -> assert false) :
+         t -> module_type -> Path.t -> module_type)
 
 let realize_value_path = ref ((fun ~loc:_ ~env:_ _ -> assert false) :
                                 (loc:Location.t -> env:t -> Path.t -> Path.t))
@@ -686,160 +669,11 @@ let rec address_head = function
   | Aident id -> id
   | Adot(addr, _) -> address_head addr
 
-(* Smart constructor for Csubst *)
-let csubst subst c =
-  match Ident.Map.is_empty subst, c with
-  | true, _ | _, Cnone -> c
-  | false, _ -> Csubst(subst, c)
-
-let rec apply_module_address_subst subst ma =
-  let rec loop s = function
-    | Aident id -> Ident.Map.find id s
-    | Adot(addr, pos) ->
-      project_module_from_module_address (loop s addr) pos
-  in
-  match loop subst ma.address with
-  | { address = address; coercion = coercion } ->
-      let coercion =
-        compose_coercions_with_substs
-          subst ma.coercion Ident.Map.empty coercion
-      in
-      { address; coercion }
-  | exception Not_found ->
-      let address = ma.address in
-      let coercion = csubst subst ma.coercion in
-      { address; coercion }
-
-(* Compose two module address substitutions.
-   [apply_module_address_subst (compose_module_address_substs s1 s2) a] behaves
-   as [apply_module_address_subst s1 (apply_module_address_subst s2 a)] *)
-and compose_module_address_substs s1 s2 =
-  if Ident.Map.is_empty s1 then s2
-  else if Ident.Map.is_empty s2 then s1
-  else begin
-    let s2' = Ident.Map.map (apply_module_address_subst s1) s2 in
-    Ident.Map.union (fun _ _ x2 -> Some x2) s1 s2'
-  end
-
-and compose_coercions_with_substs subst1 c1 subst2 c2 =
-  match c1, c2 with
-  | Cnone, Cnone -> Cnone
-  | Cnone, c2 -> csubst subst2 c2
-  | c1, Cnone -> csubst subst1 c1
-  | Cstructure (id1, pc1), Cstructure (id2, pc2) ->
-      let id = Ident.create "Self" in
-      let address = Aident id in
-      let subst2 = Ident.Map.add id2 { address; coercion = Cnone } subst2 in
-      let subst1 = Ident.Map.add id1 { address; coercion = c2 } subst1 in
-      let v2 = Array.of_list pc2 in
-      let pc =
-        List.map (fun (p1, c1) ->
-          let (p2, c2) = v2.(p1) in
-          (p2, compose_coercions_with_substs subst1 c1 subst2 c2))
-          pc1
-      in
-      Cstructure (id, pc)
-  | Cfunctor(arg1, res1), Cfunctor(arg2, res2) ->
-      Cfunctor(compose_coercions_with_substs subst2 arg2 subst1 arg1,
-               compose_coercions_with_substs subst1 res1 subst2 res2)
-  | Calias ma1, _ -> Calias (apply_module_address_subst subst1 ma1)
-  | c1, Calias ma2 ->
-      let ma2 = apply_module_address_subst subst2 ma2 in
-      let address = ma2.address in
-      let coercion =
-        compose_coercions_with_substs subst1 c1 Ident.Map.empty ma2.coercion
-      in
-      Calias { address; coercion }
-  | Csubst(subst1', c1), c2 ->
-      let subst1 = compose_module_address_substs subst1 subst1' in
-      compose_coercions_with_substs subst1 c1 subst2 c2
-  | c1, Csubst(subst2', c2) ->
-      let subst2 = compose_module_address_substs subst2 subst2' in
-      compose_coercions_with_substs subst1 c1 subst2 c2
- | (Cstructure _, Cfunctor _) | (Cfunctor _, Cstructure _) ->
-      fatal_error "Env.compose_coercions"
-
-and project_module_from_module_address ma pos =
-  let rec loop subst address coercion pos =
-    match coercion with
-    | Cnone ->
-        let address = Adot(address, pos) in
-        let coercion = Cnone in
-        { address; coercion }
-    | Cfunctor _ ->
-        fatal_error "Env.project_module_from_module_address"
-    | Cstructure(id, pc) ->
-        let subst = Ident.Map.add id { address; coercion } subst in
-        let (pos, coercion) = List.nth pc pos in
-        let address = Adot(address, pos) in
-        let coercion = csubst subst coercion in
-        { address; coercion }
-    | Calias ma  ->
-        let ma = apply_module_address_subst subst ma in
-        project_module_from_module_address ma pos
-    | Csubst(subst', c) ->
-        let subst = compose_module_address_substs subst subst' in
-        loop subst address c pos
-  in
-  loop Ident.Map.empty ma.address ma.coercion pos
-
-(* Compose two coercions
-   [apply_coercion (compose_coercions c1 c2) e] behaves as
-   [apply_coercion c1 (apply_coercion c2 e)]. *)
-let compose_coercions c1 c2 =
-  compose_coercions_with_substs Ident.Map.empty c1 Ident.Map.empty c2
-
-let rec project_from_module_address ma pos =
-  let rec loop subst address coercion pos =
-    match coercion with
-    | Cnone -> Adot(address, pos)
-    | Cfunctor _ ->
-        fatal_error "Env.project_from_module_address"
-    | Cstructure(_, pc) ->
-        let (pos, _) = List.nth pc pos in
-        Adot(address, pos)
-    | Calias ma  ->
-        let ma = apply_module_address_subst subst ma in
-        project_from_module_address ma pos
-    | Csubst(subst', c) ->
-        let subst = compose_module_address_substs subst subst' in
-        loop subst address c pos
-  in
-  loop Ident.Map.empty ma.address ma.coercion pos
-
 (* Print addresses and coercions *)
 
 let rec print_address ppf = function
   | Aident id -> Format.fprintf ppf "%s" (Ident.name id)
   | Adot(a, pos) -> Format.fprintf ppf "%a.[%i]" print_address a pos
-
-let rec print_coercion ppf c =
-  let pr fmt = Format.fprintf ppf fmt in
-  let pr_semi ppf () = Format.fprintf ppf ";@ " in
-  let pr_pos_coercion ppf (n, c) =
-    Format.fprintf ppf "@[%d,@ %a@]" n print_coercion c
-  in
-  match c with
-    Cnone -> pr "id"
-  | Cstructure (id, fl) ->
-      Format.fprintf ppf "@[<2>struct(%s)@ [@[%a@]]@]"
-        (Ident.unique_name id)
-        (Format.pp_print_list ~pp_sep:pr_semi pr_pos_coercion) fl
-  | Cfunctor (inp, out) ->
-      Format.fprintf ppf "@[<2>functor@ (%a)@ (%a)@]"
-        print_coercion inp
-        print_coercion out
-  | Calias ma ->
-      Format.fprintf ppf "@[<2>alias %a@]"
-        print_module_address ma
-  | Csubst (_, c) ->
-      Format.fprintf ppf "@[<2>subst (%a)@]"
-        print_coercion c
-
-and print_module_address ppf ma =
-  Format.fprintf ppf "@[<2>(%a@ : %a)@]"
-    print_address ma.address
-    print_coercion ma.coercion
 
 (* The name of the compilation unit currently compiled.
    "" if outside a compilation unit. *)
@@ -929,9 +763,7 @@ let acknowledge_pers_struct check modname
   in
   let id = Ident.create_persistent name in
   let path = Pident id in
-  let address = Aident id in
-  let coercion = Cnone in
-  let addr = EnvLazy.create_forced {address; coercion} in
+  let addr = EnvLazy.create_forced (Aident id) in
   let comps =
       !components_of_module' ~deprecated ~loc:Location.none
         empty Subst.identity path addr (Mty_signature sign)
@@ -1290,88 +1122,53 @@ let rec find_module_alias_descr alias env =
   | Ma_tconstraint(alias, mty) ->
       let path = path_of_module_alias alias in
       let loc = Location.none in
-      let md = find_module_alias alias env in
-      let { address; coercion } = find_module_alias_address alias env in
-      let coercion' = !modtype_inclusion ~loc env md.md_type path mty in
-      let coercion = compose_coercions coercion' coercion in
-      let addr = EnvLazy.create_forced {address; coercion} in
       let deprecated = None in
+      let addr = EnvLazy.create_failed Not_found in
       !components_of_module' ~deprecated ~loc
         env Subst.identity path addr mty
 
-and find_module_alias alias env =
+let find_module_alias alias env =
   match alias with
-  | Ma_path p -> find_module p env
+  | Ma_path p ->
+      let md = find_module p env in
+      md.md_type
   | Ma_dot(alias, s) -> begin
       match get_components (find_module_alias_descr alias env) with
       | Structure_comps c ->
           let data, _ = NameMap.find s c.comp_modules in
-          EnvLazy.force subst_modtype_maker data
+          let md = EnvLazy.force subst_modtype_maker data in
+          md.md_type
       | Functor_comps _ ->
           raise Not_found
     end
-  | Ma_tconstraint(_, mty) ->
-      { md_type = mty; md_attributes = []; md_loc = Location.none }
+  | Ma_tconstraint(_, mty) -> mty
 
-and find_module_alias_address alias env =
-  match alias with
-  | Ma_path path -> find_module_address path env
-  | Ma_dot(alias, s) -> begin
-      match get_components (find_module_alias_descr alias env) with
-      | Structure_comps c ->
-          let _, addr = NameMap.find s c.comp_modules in
-          get_module_address addr
-      | Functor_comps _ ->
-          raise Not_found
-    end
-  | Ma_tconstraint(alias, mty) ->
-      let path = path_of_module_alias alias in
-      let { address; coercion } = find_module_alias_address alias env in
-      let loc = Location.none in
-      let {md_type=mty2} = find_module_alias alias env in
-      let coercion' = !modtype_inclusion ~loc env mty2 path mty in
-      let coercion = compose_coercions coercion' coercion in
-      { address; coercion }
-
-and find_module_address path env =
+let rec find_module_address path env =
   match path with
   | Pident id ->
       begin try
         let _, addr = IdTbl.find_same id env.modules in
-        get_module_address addr
+        get_address addr
       with Not_found ->
         if Ident.persistent id && not (Ident.name id = !current_unit) then
-          let address = Aident id in
-          let coercion = Cnone in
-          { address; coercion }
+          Aident id
         else raise Not_found
       end
   | Pdot(p, s) -> begin
       match get_components (find_module_descr p env) with
       | Structure_comps c ->
           let _, addr = NameMap.find s c.comp_modules in
-          get_module_address addr
+          get_address addr
       | Functor_comps _ ->
           raise Not_found
       end
   | Papply _ -> raise Not_found
 
-and force_module_address = function
-  | ModProjection { parent; pos } ->
-      let ma = get_module_address parent in
-      project_module_from_module_address ma pos
-  | ModAlias { env; alias } -> find_module_alias_address alias env
-  | ModNone -> raise Not_found
+and force_address = function
+  | Projection { parent; pos } -> Adot(get_address parent, pos)
+  | ModAlias { env; path } -> find_module_address path env
 
-and get_module_address a =
-  EnvLazy.force force_module_address a
-
-let force_address = function
-  | Projection { parent; pos } ->
-      let ma = get_module_address parent in
-      project_from_module_address ma pos
-
-let get_address a =
+and get_address a =
   EnvLazy.force force_address a
 
 let find_value_address p env =
@@ -1489,7 +1286,7 @@ let rec lookup_module_descr_aux ?loc ~mark lid env =
           let loc = match loc with Some l -> l | None -> Location.none in
           (match f.fcomp_arg with
           | None ->  raise Not_found (* PR#7611 *)
-          | Some arg -> ignore (!modtype_inclusion ~loc env mty2 p2 arg));
+          | Some arg -> !check_modtype_inclusion ~loc env mty2 p2 arg);
           (Papply(p1, p2), !components_of_functor_appl' f env p1 p2)
       | Structure_comps _ ->
           raise Not_found
@@ -1558,7 +1355,7 @@ and lookup_module ~load ?loc ~mark lid env : Path.t =
           let loc = match loc with Some l -> l | None -> Location.none in
           (match f.fcomp_arg with
           | None -> raise Not_found (* PR#7611 *)
-          | Some arg -> ignore (!modtype_inclusion ~loc env mty2 p2 arg));
+          | Some arg -> !check_modtype_inclusion ~loc env mty2 p2 arg);
           p
       | Structure_comps _ ->
           raise Not_found
@@ -1906,12 +1703,16 @@ let scrape_alias env mty =
     match mty, alias with
     | Mty_alias alias, _ -> begin
         match find_module_alias alias env with
-        | { md_type } -> loop env (Some alias) md_type
+        | mty -> loop env (Some alias) mty
         | exception Not_found -> mty
       end
     | mty, Some alias ->
+      let constrained = constrained_module_alias alias in
       let path = path_of_module_alias alias in
-      !strengthen ~aliasable:`Aliasable env mty path
+      if constrained then
+        !strengthen_aliasable_with_constraints env mty path
+      else
+        !strengthen_aliasable env mty path
     | mty, None -> mty
   in
   loop env None mty
@@ -2020,13 +1821,6 @@ and components_of_module_maker (init_env, sub, path, addr, mty) =
         incr pos;
         EnvLazy.create addr
       in
-      let next_module_address () =
-        let addr : module_address_unforced =
-          ModProjection { parent = addr; pos = !pos }
-        in
-        incr pos;
-        EnvLazy.create addr
-      in
       List.iter2 (fun item path ->
         match item with
           Sig_value(id, decl) ->
@@ -2070,11 +1864,12 @@ and components_of_module_maker (init_env, sub, path, addr, mty) =
                   match md.md_type with
                   | Mty_alias alias ->
                     let env = init_env in
-                    let alias = Subst.module_alias sub alias in
-                    EnvLazy.create (ModAlias {env; alias})
+                    let path = path_of_module_alias alias in
+                    let path = Subst.module_path sub path in
+                    EnvLazy.create (ModAlias {env; path})
                   | _ -> assert false
                 end
-              | Mta_present -> next_module_address ()
+              | Mta_present -> next_address ()
             in
             c.comp_modules <-
               NameMap.add (Ident.name id) (md', addr) c.comp_modules;
@@ -2242,13 +2037,13 @@ and store_module ~check id presence md env =
     match presence with
     | Mta_absent -> begin
         match md.md_type with
-        | Mty_alias alias -> EnvLazy.create (ModAlias {env; alias})
+        | Mty_alias alias ->
+            let path = path_of_module_alias alias in
+            EnvLazy.create (ModAlias {env; path})
         | _ -> assert false
       end
     | Mta_present ->
-        let address = Aident id in
-        let coercion = Cnone in
-        EnvLazy.create_forced {address; coercion}
+        EnvLazy.create_forced (Aident id)
   in
   let deprecated = Builtin_attributes.deprecated_of_attrs md.md_attributes in
   { env with
@@ -2286,7 +2081,7 @@ let components_of_functor_appl f env p1 p2 =
     let p = Papply(p1, p2) in
     let sub = Subst.add_module f.fcomp_param p2 Subst.identity in
     let mty = Subst.modtype sub f.fcomp_res in
-    let addr = EnvLazy.create ModNone in
+    let addr = EnvLazy.create_failed Not_found in
     !check_well_formed_module env Location.(in_file !input_name)
       ("the signature of " ^ Path.name p) mty;
     let comps = components_of_module ~deprecated:None ~loc:Location.none
@@ -2582,9 +2377,7 @@ let save_signature_with_imports ~deprecated sg modname filename imports =
        will also return its crc *)
     let id = Ident.create_persistent modname in
     let path = Pident id in
-    let address = Aident id in
-    let coercion = Cnone in
-    let addr = EnvLazy.create_forced {address; coercion} in
+    let addr = EnvLazy.create_forced (Aident id) in
     let comps =
       components_of_module ~deprecated ~loc:Location.none
         empty Subst.identity path addr (Mty_signature sg)

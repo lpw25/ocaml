@@ -504,3 +504,5 @@ type label_description =
   }
 
 val path_of_module_alias : module_alias -> Path.t
+
+val constrained_module_alias : module_alias -> bool
