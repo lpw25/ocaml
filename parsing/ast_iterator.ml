@@ -46,6 +46,7 @@ type iterator = {
   include_description: iterator -> include_description -> unit;
   label_declaration: iterator -> label_declaration -> unit;
   location: iterator -> Location.t -> unit;
+  module_alias: iterator -> module_alias -> unit;
   module_binding: iterator -> module_binding -> unit;
   module_declaration: iterator -> module_declaration -> unit;
   module_expr: iterator -> module_expr -> unit;
@@ -220,7 +221,7 @@ module MT = struct
     sub.attributes sub attrs;
     match desc with
     | Pmty_ident s -> iter_loc sub s
-    | Pmty_alias s -> iter_loc sub s
+    | Pmty_alias ma -> sub.module_alias sub ma
     | Pmty_signature sg -> sub.signature sub sg
     | Pmty_functor (s, mt1, mt2) ->
         iter_loc sub s;
@@ -261,6 +262,15 @@ module MT = struct
     | Psig_extension (x, attrs) ->
         sub.extension sub x; sub.attributes sub attrs
     | Psig_attribute x -> sub.attribute sub x
+
+  let iter_module_alias sub x =
+    match x with
+    | Pma_ident s -> iter_loc sub s
+    | Pma_dot(ma, _) -> sub.module_alias sub ma
+    | Pma_tconstraint(ma, mty) ->
+        sub.module_alias sub ma;
+        sub.module_type sub mty
+
 end
 
 
@@ -487,6 +497,7 @@ let default_iterator =
     signature = (fun this l -> List.iter (this.signature_item this) l);
     signature_item = MT.iter_signature_item;
     module_type = MT.iter;
+    module_alias = MT.iter_module_alias;
     with_constraint = MT.iter_with_constraint;
     class_declaration =
       (fun this -> CE.class_infos this (this.class_expr this));

@@ -107,12 +107,6 @@ let iterator =
     | Pcl_constr (id, _) -> simple_longident id
     | _ -> ()
   in
-  let module_type self mty =
-    super.module_type self mty;
-    match mty.pmty_desc with
-    | Pmty_alias id -> simple_longident id
-    | _ -> ()
-  in
   let open_description self opn =
     super.open_description self opn;
     simple_longident opn.popen_lid
@@ -153,7 +147,6 @@ let iterator =
   ; extension_constructor
   ; class_expr
   ; module_expr
-  ; module_type
   ; open_description
   ; with_constraint
   ; structure_item

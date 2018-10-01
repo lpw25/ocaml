@@ -677,8 +677,13 @@ and module_type_desc =
         (* module type of ME *)
   | Pmty_extension of extension
         (* [%id] *)
-  | Pmty_alias of Longident.t loc
+  | Pmty_alias of module_alias
         (* (module M) *)
+
+and module_alias =
+  | Pma_ident of string loc
+  | Pma_dot of module_alias * string
+  | Pma_tconstraint of module_alias * module_type
 
 and signature = signature_item list
 

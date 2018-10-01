@@ -650,7 +650,9 @@ and module_type i ppf x =
   let i = i+1 in
   match x.pmty_desc with
   | Pmty_ident li -> line i ppf "Pmty_ident %a\n" fmt_longident_loc li;
-  | Pmty_alias li -> line i ppf "Pmty_alias %a\n" fmt_longident_loc li;
+  | Pmty_alias ma ->
+      line i ppf "Pmty_alias\n";
+      module_alias i ppf ma
   | Pmty_signature (s) ->
       line i ppf "Pmty_signature\n";
       signature i ppf s;
@@ -668,6 +670,20 @@ and module_type i ppf x =
   | Pmty_extension (s, arg) ->
       line i ppf "Pmod_extension \"%s\"\n" s.txt;
       payload i ppf arg
+
+and module_alias i ppf x =
+  line i ppf "module_alias\n";
+  let i = i+1 in
+  match x with
+  | Pma_ident s ->
+      line i ppf "Pma_ident %a\n" fmt_string_loc s
+  | Pma_dot(ma, s) ->
+      line i ppf "Pma_dot %s\n" s;
+      module_alias i ppf ma;
+  | Pma_tconstraint(ma, mty) ->
+      line i ppf "Pma_tconstraint\n";
+      module_alias i ppf ma;
+      module_type i ppf mty
 
 and signature i ppf x = list i signature_item ppf x
 

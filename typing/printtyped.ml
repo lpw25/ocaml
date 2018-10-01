@@ -667,7 +667,9 @@ and module_type i ppf x =
   let i = i+1 in
   match x.mty_desc with
   | Tmty_ident (li,_) -> line i ppf "Tmty_ident %a\n" fmt_path li;
-  | Tmty_alias (li,_) -> line i ppf "Tmty_alias %a\n" fmt_path li;
+  | Tmty_alias ma ->
+      line i ppf "Tmty_alias\n";
+      module_alias i ppf ma
   | Tmty_signature (s) ->
       line i ppf "Tmty_signature\n";
       signature i ppf s;
@@ -682,6 +684,20 @@ and module_type i ppf x =
   | Tmty_typeof m ->
       line i ppf "Tmty_typeof\n";
       module_expr i ppf m;
+
+and module_alias i ppf x =
+  line i ppf "module_alias\n";
+  let i = i+1 in
+  match x with
+  | Tma_ident(id, _) ->
+      line i ppf "Tma_ident %a\n" fmt_ident id
+  | Tma_dot(ma, s) ->
+      line i ppf "Tma_dot %s\n" s;
+      module_alias i ppf ma;
+  | Tma_tconstraint(ma, mty) ->
+      line i ppf "Tma_tconstraint\n";
+      module_alias i ppf ma;
+      module_type i ppf mty
 
 and signature i ppf x = list i signature_item ppf x.sig_items
 

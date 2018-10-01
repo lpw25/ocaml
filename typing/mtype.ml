@@ -172,20 +172,28 @@ let nondep_supertype env mid mty =
           nondep_mty env va (Env.find_modtype_expansion p env)
         else mty
     | Mty_alias alias -> begin
-        match nondep_module_alias env va alias with
-        | alias' -> Mty_alias alias'
+        match nondep_module_alias env alias with
+        | alias -> Mty_alias alias
         | exception Not_found ->
-            match va with
-            | Co ->
-                let path = path_of_module_alias alias in
-                let aliasable =
-                  if constrained_module_alias alias then
-                    Aliasable_with_constraints
-                  else Aliasable
-                in
-                let mty = Env.find_module_alias alias env in
-                nondep_mty env va (strengthen ~aliasable env mty path)
-            | _ -> raise Not_found
+            let path = path_of_module_alias alias in
+            let path =
+              if Path.isfree mid path then
+                Env.normalize_module_path None env path
+              else path
+            in
+            let mty = Env.find_module_alias alias env in
+            if Path.isfree mid path then begin
+              match va with
+              | Co ->
+                  let aliasable = Aliasable_with_constraints in
+                  let mty = strengthen ~aliasable env mty path in
+                  nondep_mty env va mty
+              | _ -> raise Not_found
+            end else begin
+              let mty = nondep_mty env va mty in
+              let alias = Ma_tconstraint(Ma_path path, mty) in
+              Mty_alias alias
+            end
       end
     | Mty_signature sg ->
         Mty_signature(nondep_sig env va sg)
@@ -234,32 +242,13 @@ let nondep_supertype env mid mty =
   and nondep_modtype_decl env mtd =
     {mtd with mtd_type = Misc.may_map (nondep_mty env Strict) mtd.mtd_type}
 
-  and nondep_module_alias env va ma =
-    let rec loop = function
-      | Ma_path p ->
-          if Path.isfree mid p then raise Not_found
-          else Ma_path p
-      | Ma_dot(ma, s) -> Ma_dot(loop ma, s)
-      | Ma_tconstraint(ma, mty) ->
-          Ma_tconstraint(loop ma, nondep_mty env Strict mty)
-    in
-    match loop ma with
-    | ma -> ma
-    | exception Not_found ->
-        let path = path_of_module_alias ma in
-        let constrained = constrained_module_alias ma in
-        let path' =
-          if Path.isfree mid path then
-            Env.normalize_module_path None env path
-          else path
-        in
-        if Path.isfree mid path' then raise Not_found
-        else if not constrained then Ma_path path'
-        else begin
-          let mty = Env.find_module_alias ma env in
-          let mty' = nondep_mty env va mty in
-          Ma_tconstraint(Ma_path path', mty')
-        end
+  and nondep_module_alias env = function
+    | Ma_path p ->
+        if Path.isfree mid p then raise Not_found
+        else Ma_path p
+    | Ma_dot(ma, s) -> Ma_dot(nondep_module_alias env ma, s)
+    | Ma_tconstraint(ma, mty) ->
+        Ma_tconstraint(nondep_module_alias env ma, nondep_mty env Strict mty)
 
   in
     nondep_mty env Co mty
@@ -450,8 +439,9 @@ let collect_arg_paths mty =
   and it_signature_item it si =
     type_iterators.it_signature_item it si;
     match si with
-    | Sig_module (id, _, {md_type=Mty_alias(p, _)}, _) ->
-        bindings := Ident.add id p !bindings
+    | Sig_module (id, _, {md_type=Mty_alias alias}, _) ->
+        let path = path_of_module_alias alias in
+        bindings := Ident.add id path !bindings
     | Sig_module (id, _, {md_type=Mty_signature sg}, _) ->
         List.iter
           (function Sig_module (id', _, _, _) ->

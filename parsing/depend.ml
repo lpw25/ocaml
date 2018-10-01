@@ -52,6 +52,12 @@ let rec lookup_map lid m =
   | Ldot (l, s) -> String.Map.find s (get_map (lookup_map l m))
   | Lapply _    -> raise Not_found
 
+let rec lookup_alias_map ma m =
+  match ma with
+  | Pma_ident s -> String.Map.find s.txt m
+  | Pma_dot(ma, s) -> String.Map.find s (get_map (lookup_alias_map ma m))
+  | Pma_tconstraint _ -> raise Not_found
+
 (* Collect free module identifiers in the a.s.t. *)
 
 let free_structure_names = ref String.Set.empty
@@ -85,7 +91,11 @@ let add_parent bv lid =
 
 let add = add_parent
 
-let add_module_path bv lid = add_path bv lid.txt
+let add_module_path ignore_id bv lid =
+  match ignore_id, lid.txt with
+  | true, Ldot(l, _) -> add_path bv l
+  | true, _ -> ()
+  | false, l -> add_path bv l
 
 let handle_extension ext =
   match (fst ext).txt with
@@ -297,7 +307,7 @@ and add_bindings recf bv pel =
 and add_modtype bv mty =
   match mty.pmty_desc with
     Pmty_ident l -> add bv l
-  | Pmty_alias l -> add_module_path bv l
+  | Pmty_alias ma -> add_module_alias false bv ma
   | Pmty_signature s -> add_signature bv s
   | Pmty_functor(id, mty1, mty2) ->
       Misc.may (add_modtype bv) mty1;
@@ -307,29 +317,59 @@ and add_modtype bv mty =
       List.iter
         (function
           | Pwith_type (_, td) -> add_type_declaration bv td
-          | Pwith_module (_, lid) -> add_module_path bv lid
+          | Pwith_module (_, lid) -> add_module_path false bv lid
           | Pwith_typesubst (_, td) -> add_type_declaration bv td
-          | Pwith_modsubst (_, lid) -> add_module_path bv lid
+          | Pwith_modsubst (_, lid) -> add_module_path false bv lid
         )
         cstrl
   | Pmty_typeof m -> add_module_expr bv m
   | Pmty_extension e -> handle_extension e
 
-and add_module_alias bv l =
+and add_module_alias ignore_id bv ma =
+  let rec loop ignore_id bv p = function
+    | Pma_ident s ->
+        if not ignore_id then begin
+          let free =
+            match lookup_free (s.txt::p) bv with
+            | st -> st
+            | exception Not_found -> String.Set.singleton s.txt
+          in
+          add_names free
+        end
+    | Pma_dot(ma, s) ->
+        loop false bv (s::p) ma
+    | Pma_tconstraint(ma, mty) ->
+        loop false bv p ma;
+        add_modtype bv mty
+  in
+  loop ignore_id bv [] ma
+
+and add_module_alias_binding bv ma =
   (* If we are in delayed dependencies mode, we delay the dependencies
        induced by "Lident s" *)
-  (if !Clflags.transparent_modules then add_parent else add_module_path) bv l;
+  add_module_alias !Clflags.transparent_modules bv ma;
   try
-    lookup_map l.txt bv
+    lookup_alias_map ma bv
   with Not_found ->
-    match l.txt with
-      Lident s -> make_leaf s
-    | _ -> add_module_path bv l; bound (* cannot delay *)
+    match ma with
+    | Pma_ident s -> make_leaf s.txt
+    | _ -> add_module_alias false bv ma; bound (* cannot delay *)
+
+and add_module_path_binding bv lid =
+  (* If we are in delayed dependencies mode, we delay the dependencies
+       induced by "Lident s" *)
+  add_module_path !Clflags.transparent_modules bv lid;
+  try
+    lookup_map lid.txt bv
+  with Not_found ->
+    match lid.txt with
+    | Lident s -> make_leaf s
+    | _ -> add_module_path false bv lid; bound (* cannot delay *)
 
 and add_modtype_binding bv mty =
   match mty.pmty_desc with
     Pmty_alias l ->
-      add_module_alias bv l
+      add_module_alias_binding bv l
   | Pmty_signature s ->
       make_node (add_signature_binding bv s)
   | Pmty_typeof modl ->
@@ -389,14 +429,14 @@ and add_sig_item (bv, m) item =
 
 and add_module_binding bv modl =
   match modl.pmod_desc with
-    Pmod_ident l -> add_module_alias bv l
+    Pmod_ident l -> add_module_path_binding bv l
   | Pmod_structure s ->
      make_node (snd @@ add_structure_binding bv s)
   | _ -> add_module_expr bv modl; bound
 
 and add_module_expr bv modl =
   match modl.pmod_desc with
-    Pmod_ident l -> add_module_path bv l
+    Pmod_ident l -> add_module_path false bv l
   | Pmod_structure s -> ignore (add_structure bv s)
   | Pmod_functor(id, mty, modl) ->
       Misc.may (add_modtype bv) mty;

@@ -51,6 +51,7 @@ type mapper = {
   include_description: mapper -> include_description -> include_description;
   label_declaration: mapper -> label_declaration -> label_declaration;
   location: mapper -> Location.t -> Location.t;
+  module_alias: mapper -> module_alias -> module_alias;
   module_binding: mapper -> module_binding -> module_binding;
   module_declaration: mapper -> module_declaration -> module_declaration;
   module_expr: mapper -> module_expr -> module_expr;
@@ -236,7 +237,7 @@ module MT = struct
     let attrs = sub.attributes sub attrs in
     match desc with
     | Pmty_ident s -> ident ~loc ~attrs (map_loc sub s)
-    | Pmty_alias s -> alias ~loc ~attrs (map_loc sub s)
+    | Pmty_alias ma -> alias ~loc ~attrs (sub.module_alias sub ma)
     | Pmty_signature sg -> signature ~loc ~attrs (sub.signature sub sg)
     | Pmty_functor (s, mt1, mt2) ->
         functor_ ~loc ~attrs (map_loc sub s)
@@ -278,6 +279,13 @@ module MT = struct
     | Psig_extension (x, attrs) ->
         extension ~loc (sub.extension sub x) ~attrs:(sub.attributes sub attrs)
     | Psig_attribute x -> attribute ~loc (sub.attribute sub x)
+
+  let map_module_alias sub x =
+    match x with
+    | Pma_ident s -> Pma_ident (map_loc sub s)
+    | Pma_dot(ma, s) -> Pma_dot(sub.module_alias sub ma, s)
+    | Pma_tconstraint(ma, mty) ->
+        Pma_tconstraint(sub.module_alias sub ma, sub.module_type sub mty)
 end
 
 
@@ -522,6 +530,7 @@ let default_mapper =
     signature_item = MT.map_signature_item;
     module_type = MT.map;
     with_constraint = MT.map_with_constraint;
+    module_alias = MT.map_module_alias;
     class_declaration =
       (fun this -> CE.class_infos this (this.class_expr this));
     class_expr = CE.map;

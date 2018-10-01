@@ -997,8 +997,9 @@ and module_type1 ctxt f x =
   else match x.pmty_desc with
     | Pmty_ident li ->
         pp f "%a" longident_loc li;
-    | Pmty_alias li ->
-        pp f "(module %a)" longident_loc li;
+    | Pmty_alias alias ->
+        (* Impossible but we print something anyway *)
+        pp f "@[<hov2>!module alias!@ %a@]" (module_alias ctxt) alias
     | Pmty_signature (s) ->
         pp f "@[<hv0>@[<hv2>sig@ %a@]@ end@]" (* "@[<hov>sig@ %a@ end@]" *)
           (list (signature_item ctxt)) s (* FIXME wrong indentation*)
@@ -1006,6 +1007,14 @@ and module_type1 ctxt f x =
         pp f "@[<hov2>module@ type@ of@ %a@]" (module_expr ctxt) me
     | Pmty_extension e -> extension ctxt f e
     | _ -> paren true (module_type ctxt) f x
+
+and module_alias ctxt f x =
+  match x with
+  | Pma_ident s -> pp f "%s" s.txt
+  | Pma_dot(ma, s) -> pp f "%a.%s" (module_alias ctxt) ma s
+  | Pma_tconstraint(ma, mty) ->
+      pp f "@[<hov2>(%a@ <:@ %a)@]"
+        (module_alias ctxt) ma (module_type ctxt) mty
 
 and signature ctxt f x =  list ~sep:"@\n" (signature_item ctxt) f x
 
@@ -1042,7 +1051,7 @@ and signature_item ctxt f x : unit =
   | Psig_module ({pmd_type={pmty_desc=Pmty_alias alias;
                             pmty_attributes=[]; _};_} as pmd) ->
       pp f "@[<hov>module@ %s@ =@ %a@]%a" pmd.pmd_name.txt
-        longident_loc alias
+        (module_alias ctxt) alias
         (item_attributes ctxt) pmd.pmd_attributes
   | Psig_module pmd ->
       pp f "@[<hov>module@ %s@ :@ %a@]%a"

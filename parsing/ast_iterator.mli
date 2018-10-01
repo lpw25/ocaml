@@ -43,6 +43,7 @@ type iterator = {
   include_description: iterator -> include_description -> unit;
   label_declaration: iterator -> label_declaration -> unit;
   location: iterator -> Location.t -> unit;
+  module_alias: iterator -> module_alias -> unit;
   module_binding: iterator -> module_binding -> unit;
   module_declaration: iterator -> module_declaration -> unit;
   module_expr: iterator -> module_expr -> unit;

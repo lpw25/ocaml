@@ -635,9 +635,6 @@ let strengthen_aliasable_with_constraints =
   ref ((fun _env _mty _path -> assert false) :
          t -> module_type -> Path.t -> module_type)
 
-let realize_value_path = ref ((fun ~loc:_ ~env:_ _ -> assert false) :
-                                (loc:Location.t -> env:t -> Path.t -> Path.t))
-
 let md md_type =
   {md_type; md_attributes=[]; md_loc=Location.none}
 
@@ -1052,7 +1049,7 @@ let find_module ~alias path env =
       end
 
 (* Normalize paths *)
-let normalize_module_path oloc env path =
+let normalize_module_path through_tconstraints oloc env path =
   let original = path in
   let rec loop_path path =
     let path =
@@ -1062,7 +1059,11 @@ let normalize_module_path oloc env path =
       | Pident _ -> path
     in
     match find_module ~alias:true path env with
-    | { md_type = Mty_alias alias } -> loop_alias alias
+    | { md_type = Mty_alias alias } -> begin
+        match loop_alias alias with
+        | path -> path
+        | exception Not_found -> path
+      end
     | _ -> path
     | exception Not_found ->
         match oloc with
@@ -1072,7 +1073,9 @@ let normalize_module_path oloc env path =
   and loop_alias alias =
     match alias with
     | Ma_path p -> loop_path p
-    | Ma_tconstraint(a, _) -> loop_alias a
+    | Ma_tconstraint(a, _) ->
+        if through_tconstraints then loop_alias a
+        else raise Not_found
     | Ma_dot(a, s) ->
         let path = Pdot(loop_alias a, s) in
         match find_module ~alias:true path env with
@@ -1088,10 +1091,14 @@ let normalize_module_path oloc env path =
 
 let normalize_nonmodule_path oloc env path =
   match path with
-  | Pdot(p, s) -> Pdot(normalize_module_path oloc env p, s)
+  | Pdot(p, s) -> Pdot(normalize_module_path true oloc env p, s)
   | Pident _ -> path
   | Papply _ -> assert false
 
+let normalize_module_path_without_changing_type oloc env path =
+  normalize_module_path false oloc env path
+let normalize_module_path oloc env path =
+  normalize_module_path true oloc env path
 let normalize_modtype_path = normalize_nonmodule_path
 let normalize_type_path = normalize_nonmodule_path
 

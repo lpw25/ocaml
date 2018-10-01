@@ -401,7 +401,12 @@ and module_type_desc =
   | Tmty_functor of Ident.t * string loc * module_type option * module_type
   | Tmty_with of module_type * (Path.t * Longident.t loc * with_constraint) list
   | Tmty_typeof of module_expr
-  | Tmty_alias of Path.t * Longident.t loc
+  | Tmty_alias of module_alias
+
+and module_alias =
+  | Tma_ident of Ident.t * string loc
+  | Tma_dot of module_alias * string
+  | Tma_tconstraint of module_alias * module_type
 
 and signature = {
   sig_items : signature_item list;

@@ -17,11 +17,10 @@
 
 open Types
 
-type aliasable = [
-  | `Aliasable
-  | `Aliasable_with_constraints
-  | `Not_aliasable
-]
+type aliasable =
+  | Aliasable
+  | Aliasable_with_constraints
+  | Not_aliasable
 
 val scrape: Env.t -> module_type -> module_type
         (* Expand toplevel module type abbreviations

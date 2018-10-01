@@ -95,22 +95,12 @@ val is_functor_arg: Path.t -> t -> bool
    Versions for modules, module types and types.
 *)
 val normalize_module_path: Location.t option -> t -> Path.t -> Path.t
+val normalize_module_path_without_changing_type :
+  Location.t option -> t -> Path.t -> Path.t
 val normalize_modtype_path: Location.t option -> t -> Path.t -> Path.t
 val normalize_type_path: Location.t option -> t -> Path.t -> Path.t
 
 val normalize_package_path: t -> Path.t -> Path.t
-
-(*
-   Get a real path by which objects may be accessed.
-   Treat last part as a value, do not modify it
-
-   Unrolls aliases until a present one is found. May raise if some module is
-   unavailable.
-
-   Forward declarations, defined in includemod
-*)
-
-val realize_value_path: (loc:Location.t -> env:t -> Path.t -> Path.t) ref
 
 val has_local_constraints: t -> bool
 

@@ -78,14 +78,16 @@ let rec path_concat head p =
 let extract_sig env loc mty =
   match Env.scrape_alias_and_ident env mty with
     Mty_signature sg -> sg
-  | Mty_alias(path, _) ->
+  | Mty_alias alias ->
+      let path = path_of_module_alias alias in
       raise(Error(loc, env, Cannot_scrape_alias path))
   | _ -> raise(Error(loc, env, Signature_expected))
 
 let extract_sig_open env loc mty =
   match Env.scrape_alias_and_ident env mty with
     Mty_signature sg -> sg
-  | Mty_alias(path, _) ->
+  | Mty_alias alias ->
+      let path = path_of_module_alias alias in
       raise(Error(loc, env, Cannot_scrape_alias path))
   | mty -> raise(Error(loc, env, Structure_expected mty))
 
@@ -282,13 +284,19 @@ let check_usage_of_path_of_substituted_item paths env signature ~loc ~lid =
     let env, super = iterator_with_env env in
     { super with
       Btype.it_signature_item = (fun self -> function
-      | Sig_module (id, _, { md_type = Mty_alias(aliased_path, _); _ }, _)
-        when List.exists
-               (fun path -> path_is_strict_prefix path ~prefix:aliased_path)
-               paths
-        ->
-         let e = With_changes_module_alias (lid.txt, id, aliased_path) in
-         raise(Error(loc, Lazy.force !env, e))
+      | Sig_module (id, _, { md_type = Mty_alias alias; _ }, _) as sig_item ->
+          let aliased_path = path_of_module_alias alias in
+          let changed =
+            List.exists
+              (fun path -> path_is_strict_prefix path ~prefix:aliased_path)
+              paths
+          in
+          if changed then begin
+            let e = With_changes_module_alias (lid.txt, id, aliased_path) in
+            raise(Error(loc, Lazy.force !env, e))
+          end else begin
+            super.Btype.it_signature_item self sig_item
+          end
       | sig_item ->
          super.Btype.it_signature_item self sig_item
       );
@@ -465,14 +473,18 @@ let merge_constraint initial_env remove_aliases loc sg constr =
         let mty = md'.md_type in
         let mty = Mtype.scrape_for_type_of ~remove_aliases env mty in
         let md'' = { md' with md_type = mty } in
-        let newmd = Mtype.strengthen_decl ~aliasable:false env md'' path in
+        let aliasable = Mtype.Not_aliasable in
+        let newmd = Mtype.strengthen_decl ~aliasable env md'' path in
         ignore(Includemod.modtypes ~loc env newmd.md_type md.md_type);
         (Pident id, lid, Twith_module (path, lid')),
         Sig_module(id, pres, newmd, rs) :: rem
     | (Sig_module(id, _, md, rs) :: rem, [s], Pwith_modsubst (_, lid'))
       when Ident.name id = s ->
         let path, md' = Typetexp.find_module initial_env loc lid'.txt in
-        let aliasable = not (Env.is_functor_arg path env) in
+        let aliasable =
+          if Env.is_functor_arg path env then Mtype.Aliasable
+          else Mtype.Not_aliasable
+        in
         let newmd = Mtype.strengthen_decl ~aliasable env md' path in
         ignore(Includemod.modtypes ~loc env newmd.md_type md.md_type);
         real_ids := [Pident id];
@@ -605,7 +617,7 @@ let rec approx_modtype env smty =
       Mty_ident path
   | Pmty_alias lid ->
       let path = Typetexp.lookup_module env smty.pmty_loc lid.txt in
-      Mty_alias(path, None)
+      Mty_alias(Ma_path path)
   | Pmty_signature ssg ->
       Mty_signature(approx_sig env ssg)
   | Pmty_functor(param, sarg, sres) ->

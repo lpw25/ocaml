@@ -53,7 +53,6 @@ val type_declarations:
   loc:Location.t -> Env.t -> ?mark:mark ->
   Ident.t -> type_declaration -> type_declaration -> unit
 
-val compose_coercions: module_coercion -> module_coercion -> module_coercion
 val print_coercion: formatter -> module_coercion -> unit
 
 type symptom =
@@ -85,14 +84,3 @@ exception Error of error list
 
 val report_error: formatter -> error list -> unit
 val expand_module_alias: Env.t -> pos list -> Path.t -> Types.module_type
-
-(*
-   Get a real path by which module may be accessed. Unrolls aliases until a
-   present one is found. May raise if some module is unavailable.
-
-   Returns path, but also coercion and substitution needed to transform returned
-   path into the required module.
-*)
-
-val realize_module_path_with_coercion : ?stop_on_present:bool ->
-  loc:Location.t -> env:Env.t -> Path.t -> Path.t * module_coercion

@@ -44,6 +44,7 @@ type mapper = {
   include_description: mapper -> T.include_description -> include_description;
   label_declaration: mapper -> T.label_declaration -> label_declaration;
   location: mapper -> Location.t -> Location.t;
+  module_alias: mapper -> T.module_alias -> module_alias;
   module_binding: mapper -> T.module_binding -> module_binding;
   module_declaration: mapper -> T.module_declaration -> module_declaration;
   module_expr: mapper -> T.module_expr -> module_expr;
@@ -553,7 +554,7 @@ let module_type sub mty =
   let attrs = sub.attributes sub mty.mty_attributes in
   let desc = match mty.mty_desc with
       Tmty_ident (_path, lid) -> Pmty_ident (map_loc sub lid)
-    | Tmty_alias (_path, lid) -> Pmty_alias (map_loc sub lid)
+    | Tmty_alias ma -> Pmty_alias (sub.module_alias sub ma)
     | Tmty_signature sg -> Pmty_signature (sub.signature sub sg)
     | Tmty_functor (_id, name, mtype1, mtype2) ->
         Pmty_functor (name, map_opt (sub.module_type sub) mtype1,
@@ -576,6 +577,12 @@ let with_constraint sub (_path, lid, cstr) =
      Pwith_typesubst (map_loc sub lid, sub.type_declaration sub decl)
   | Twith_modsubst (_path, lid2) ->
       Pwith_modsubst (map_loc sub lid, map_loc sub lid2)
+
+let module_alias sub = function
+  | Tma_ident(_, s) -> Pma_ident (map_loc sub s)
+  | Tma_dot(ma, s) -> Pma_dot(sub.module_alias sub ma, s)
+  | Tma_tconstraint(ma, mty) ->
+      Pma_tconstraint(sub.module_alias sub ma, sub.module_type sub mty)
 
 let module_expr sub mexpr =
   let loc = sub.location sub mexpr.mod_loc in
@@ -794,6 +801,7 @@ let default_mapper =
     signature_item = signature_item;
     module_type = module_type;
     with_constraint = with_constraint;
+    module_alias = module_alias;
     class_declaration = class_declaration;
     class_expr = class_expr;
     class_field = class_field;

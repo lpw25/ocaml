@@ -882,8 +882,6 @@ module_type:
       { mkmty(Pmty_with($1, List.rev $3)) }
   | MODULE TYPE OF attributes module_expr %prec below_LBRACKETAT
       { mkmty ~attrs:$4 (Pmty_typeof $5) }
-/*  | LPAREN MODULE mod_longident RPAREN
-      { mkmty (Pmty_alias (mkrhs $3 3)) } */
   | LPAREN module_type RPAREN
       { $2 }
   | LPAREN module_type error
@@ -959,11 +957,27 @@ module_declaration:
           ~loc:(symbol_rloc()) ~docs:(symbol_docs ())
       , ext }
 ;
+module_alias_body:
+    UIDENT
+      { Pma_ident (mkrhs $1 1) }
+  | module_alias_body DOT UIDENT
+      { Pma_dot($1, $3) }
+  | LPAREN module_alias_body LESSCOLON module_type RPAREN
+      { Pma_tconstraint($2, $4) }
+;
 module_alias:
-    MODULE ext_attributes UIDENT EQUAL mod_longident post_item_attributes
+    MODULE ext_attributes UIDENT EQUAL module_alias_body post_item_attributes
       { let (ext, attrs) = $2 in
         Md.mk (mkrhs $3 3)
-          (Mty.alias ~loc:(rhs_loc 5) (mkrhs $5 5)) ~attrs:(attrs@$6)
+          (Mty.alias ~loc:(rhs_loc 5) $5) ~attrs:(attrs@$6)
+             ~loc:(symbol_rloc()) ~docs:(symbol_docs ())
+      , ext }
+  | MODULE ext_attributes UIDENT LESSCOLON module_type EQUAL module_alias_body
+    post_item_attributes
+      { let (ext, attrs) = $2 in
+        let alias = Pma_tconstraint($7, $5) in
+        Md.mk (mkrhs $3 3)
+          (Mty.alias ~loc:(rhs_loc 5) alias) ~attrs:(attrs@$8)
              ~loc:(symbol_rloc()) ~docs:(symbol_docs ())
       , ext }
 ;

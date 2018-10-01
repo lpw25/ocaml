@@ -537,6 +537,10 @@ and modexp : Env.env -> Typedtree.module_expr -> Use.t =
       modexp env m
     | Tmod_constraint (m, _, _, _) ->
       Use.inspect (modexp env m)
+    | Tmod_tconstraint (m, _, Tcoerce_none) ->
+      modexp env m
+    | Tmod_tconstraint (m, _, _) ->
+      Use.inspect (modexp env m)
     | Tmod_unpack (e, _) ->
         expression env e
 and path : Env.env -> Path.t -> Use.t =
