@@ -37,14 +37,15 @@ let rec scrape env mty =
 let freshen mty =
   Subst.modtype Subst.identity mty
 
-let rec strengthen  ~aliasable env mty p =
+let rec strengthen_modtype  ~aliasable env mty p =
   match scrape env mty with
-    Mty_signature sg ->
+  | Mty_signature sg ->
       Mty_signature(strengthen_sig ~aliasable env sg p)
   | Mty_functor(param, arg, res)
     when !Clflags.applicative_functors && Ident.name param <> "*" ->
       Mty_functor(param, arg,
-        strengthen ~aliasable:Not_aliasable env res (Papply(p, Pident param)))
+        strengthen_modtype ~aliasable:Not_aliasable
+          env res (Papply(p, Pident param)))
   | mty ->
       mty
 
@@ -76,7 +77,8 @@ and strengthen_sig ~aliasable env sg p =
       sigelt :: strengthen_sig ~aliasable env rem p
   | Sig_module(id, pres, md, rs) :: rem ->
       let str =
-        strengthen_decl ~aliasable env md (Pdot(p, Ident.name id))
+        strengthen_module_declaration
+          ~aliasable env md (Pdot(p, Ident.name id))
       in
       Sig_module(id, pres, str, rs)
       :: strengthen_sig ~aliasable
@@ -98,7 +100,7 @@ and strengthen_sig ~aliasable env sg p =
   | (Sig_class_type _ as sigelt) :: rem ->
       sigelt :: strengthen_sig ~aliasable env rem p
 
-and strengthen_decl ~aliasable env md p =
+and strengthen_module_declaration ~aliasable env md p =
   match md.md_type, aliasable with
   | Mty_alias _, _ -> md
   | mty, Aliasable_with_constraints ->
@@ -106,19 +108,35 @@ and strengthen_decl ~aliasable env md p =
     {md with md_type = Mty_alias alias}
   | _, Aliasable ->
     {md with md_type = Mty_alias(Ma_path p)}
-  | mty, _ -> {md with md_type = strengthen ~aliasable env mty p}
+  | mty, _ -> {md with md_type = strengthen_modtype ~aliasable env mty p}
 
-let strengthen_aliasable env md p =
-  strengthen ~aliasable:Aliasable env md p
+let aliasable_of_module_alias env alias =
+  let rec loop env = function
+    | Ma_path path ->
+        if Env.is_aliasable path env then Aliasable
+        else Not_aliasable
+    | Ma_dot(ma, _) -> loop env ma
+    | Ma_tconstraint(ma, _) -> begin
+        match loop env ma with
+        | Aliasable | Aliasable_with_constraints ->
+            Aliasable_with_constraints
+        | Not_aliasable ->
+            Not_aliasable
+      end
+  in
+  loop env alias
 
-let () = Env.strengthen_aliasable := strengthen_aliasable
+let strengthen env md alias =
+  let aliasable = aliasable_of_module_alias env alias in
+  let path = path_of_module_alias alias in
+  strengthen_modtype ~aliasable env md path
 
-let strengthen_aliasable_with_constraints env md p =
-  strengthen ~aliasable:Aliasable_with_constraints env md p
+let strengthen_decl env md alias =
+  let aliasable = aliasable_of_module_alias env alias in
+  let path = path_of_module_alias alias in
+  strengthen_module_declaration ~aliasable env md path
 
-let () =
-  Env.strengthen_aliasable_with_constraints :=
-    strengthen_aliasable_with_constraints
+let () = Env.strengthen := strengthen
 
 let rec make_aliases_absent pres mty =
   match mty with
@@ -147,12 +165,11 @@ let scrape_for_type_of env pres mty =
     | Mty_alias alias, _ -> begin
         try
           let mty = Env.find_module_alias alias env in
-          let path = path_of_module_alias alias in
-          loop env (Some path) mty
+          loop env (Some alias) mty
         with Not_found -> mty
       end
-    | mty, Some path ->
-        strengthen ~aliasable:Aliasable env mty path
+    | mty, Some alias ->
+        strengthen env mty alias
     | _ -> mty
   in
   make_aliases_absent pres (loop env None mty)
@@ -175,24 +192,20 @@ let nondep_supertype env mid mty =
         match nondep_module_alias env alias with
         | alias -> Mty_alias alias
         | exception Not_found ->
+            let mty = Env.find_module_alias alias env in
+            let mty = nondep_mty env va (strengthen env mty alias) in
             let path = path_of_module_alias alias in
             let path =
               if Path.isfree mid path then
                 Env.normalize_module_path None env path
               else path
             in
-            let mty = Env.find_module_alias alias env in
             if Path.isfree mid path then begin
               match va with
-              | Co ->
-                  let aliasable = Aliasable_with_constraints in
-                  let mty = strengthen ~aliasable env mty path in
-                  nondep_mty env va mty
+              | Co -> mty
               | _ -> raise Not_found
             end else begin
-              let mty = nondep_mty env va mty in
-              let alias = Ma_tconstraint(Ma_path path, mty) in
-              Mty_alias alias
+              Mty_alias (Ma_tconstraint(Ma_path path, mty))
             end
       end
     | Mty_signature sg ->

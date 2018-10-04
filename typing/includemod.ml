@@ -250,7 +250,7 @@ and try_modtypes ~loc env ~mark cxt subst mty1 mty2 =
   | Mty_alias alias1, Mty_alias alias2 -> begin
       let p1 = path_of_module_alias alias1 in
       let p2 = path_of_module_alias alias2 in
-      if Env.is_functor_arg p2 env then
+      if not (Env.is_aliasable p2 env) then
         raise (Error[cxt, env, Invalid_module_alias p2]);
       let paths_have_same_type =
         if Path.same p1 p2 then true
@@ -477,11 +477,11 @@ and module_declarations ~loc env ~mark cxt subst id1 md1 md2 =
     loc
     md1.md_attributes md2.md_attributes
     (Ident.name id1);
-  let p1 = Path.Pident id1 in
+  let alias1 = Ma_path (Path.Pident id1) in
   if mark_positive mark then
     Env.mark_module_used (Ident.name id1) md1.md_loc;
   modtypes ~loc env ~mark (Module id1::cxt) subst
-    (Mtype.strengthen ~aliasable:Mtype.Aliasable env md1.md_type p1)
+    (Mtype.strengthen env md1.md_type alias1)
     md2.md_type
 
 (* Inclusion between module type specifications *)
@@ -519,21 +519,9 @@ and check_modtype_equiv ~loc env ~mark cxt mty1 mty2 =
 
 (* Simplified inclusion check between module types (for Env) *)
 
-let can_alias env path =
-  let rec no_apply = function
-    | Path.Pident _ -> true
-    | Path.Pdot(p, _) -> no_apply p
-    | Path.Papply _ -> false
-  in
-  if (no_apply path && not (Env.is_functor_arg path env)) then
-    Mtype.Aliasable
-  else
-    Mtype.Not_aliasable
-
-let check_modtype_inclusion ~loc env mty1 path1 mty2 =
-  let aliasable = can_alias env path1 in
+let check_modtype_inclusion ~loc env mty1 alias1 mty2 =
   ignore(modtypes ~loc env ~mark:Mark_both [] Subst.identity
-           (Mtype.strengthen ~aliasable env mty1 path1) mty2)
+           (Mtype.strengthen env mty1 alias1) mty2)
 
 let () =
   Env.check_modtype_inclusion := (fun ~loc a b c d ->

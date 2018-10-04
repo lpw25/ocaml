@@ -269,7 +269,7 @@ let retype_applicative_functor_type ~loc env funct arg =
     | Mty_functor (_, Some mty_param, _) -> mty_param
     | _ -> assert false (* could trigger due to MPR#7611 *)
   in
-  Includemod.check_modtype_inclusion ~loc env mty_arg arg mty_param
+  Includemod.check_modtype_inclusion ~loc env mty_arg (Ma_path arg) mty_param
 
 (* When doing a deep destructive substitution with type M.N.t := .., we change M
    and M.N and so we have to check that uses of the modules other than just
@@ -473,19 +473,14 @@ let merge_constraint initial_env remove_aliases loc sg constr =
         let mty = md'.md_type in
         let mty = Mtype.scrape_for_type_of ~remove_aliases env mty in
         let md'' = { md' with md_type = mty } in
-        let aliasable = Mtype.Not_aliasable in
-        let newmd = Mtype.strengthen_decl ~aliasable env md'' path in
+        let newmd = Mtype.strengthen_decl env md'' (Ma_path path) in
         ignore(Includemod.modtypes ~loc env newmd.md_type md.md_type);
         (Pident id, lid, Twith_module (path, lid')),
         Sig_module(id, pres, newmd, rs) :: rem
     | (Sig_module(id, _, md, rs) :: rem, [s], Pwith_modsubst (_, lid'))
       when Ident.name id = s ->
         let path, md' = Typetexp.find_module initial_env loc lid'.txt in
-        let aliasable =
-          if Env.is_functor_arg path env then Mtype.Aliasable
-          else Mtype.Not_aliasable
-        in
-        let newmd = Mtype.strengthen_decl ~aliasable env md' path in
+        let newmd = Mtype.strengthen_decl env md' (Ma_path path) in
         ignore(Includemod.modtypes ~loc env newmd.md_type md.md_type);
         real_ids := [Pident id];
         (Pident id, lid, Twith_modsubst (path, lid')),
@@ -615,9 +610,15 @@ let rec approx_modtype env smty =
     Pmty_ident lid ->
       let (path, _info) = Typetexp.find_modtype env smty.pmty_loc lid.txt in
       Mty_ident path
-  | Pmty_alias lid ->
-      let path = Typetexp.lookup_module env smty.pmty_loc lid.txt in
-      Mty_alias(Ma_path path)
+  | Pmty_alias sma ->
+      let rec loop = function
+        | Pma_ident s -> Env.Lma_ident s.txt
+        | Pma_dot(sma, s) -> Env.Lma_dot(loop sma, s)
+        | Pma_tconstraint(sma, smty) ->
+            Env.Lma_tconstraint(loop sma, approx_modtype env smty)
+      in
+      let alias = Typetexp.lookup_module_alias env smty.pmty_loc (loop sma) in
+      Mty_alias alias
   | Pmty_signature ssg ->
       Mty_signature(approx_sig env ssg)
   | Pmty_functor(param, sarg, sres) ->
@@ -1252,9 +1253,9 @@ let check_recmodule_inclusion env bindings =
      the number of mutually recursive declarations. *)
 
   let subst_and_strengthen env s id mty =
-    Mtype.strengthen ~aliasable:`Not_aliasable env (Subst.modtype s mty)
-      (Subst.module_path s (Pident id)) in
-
+    let alias = Subst.module_alias s (Ma_path (Pident id)) in
+    Mtype.strengthen env (Subst.modtype s mty) alias
+  in
   let rec check_incl first_time n env s =
     if n > 0 then begin
       (* Generate fresh names Y_i for the rec. bound module idents X_i *)
@@ -1399,7 +1400,7 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
       let base_desc = Tmod_ident (path, lid) in
       let base_type = Mty_alias(path, None) in
       let loc = smod.pmod_loc in
-      let aliasable = not (Env.is_functor_arg path env) in
+      let aliasable = Env.is_aliasable path env in
       if alias && aliasable then begin
         Env.add_required_global (Path.head path);
         rm {
@@ -1421,9 +1422,8 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
             mod_env = env; mod_attributes = smod.pmod_attributes; mod_loc = loc
           }
       | mty ->
-          let aliasable = if aliasable then `Aliasable else `Not_aliasable in
           let mty =
-            if sttn then Mtype.strengthen ~aliasable env mty path else mty
+            if sttn then Mtype.strengthen env mty (Ma_path path) else mty
           in
           rm {
             mod_desc = base_desc; mod_type = mty; mod_env = env;
@@ -1548,8 +1548,8 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
         | _ ->
           let tmp_name = Ident.create "#module#" in
           let tmp_env = Env.add_module tmp_name arg.mod_type env in
-          let cmty_st = !Env.strengthen ~aliasable:`Aliasable_with_constraints
-                                        tmp_env cmty (Pident tmp_name) in
+          let alias = Ma_tconstraint(Ma_path (Pident tmp_name), cmty) in
+          let cmty_st = strengthen tmp_env cmty alias in
           Mtype.nondep_supertype tmp_env tmp_name cmty_st
       end in
       { mod_desc = Tmod_tconstraint(arg, mty, coercion);

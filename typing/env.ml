@@ -623,17 +623,12 @@ let components_of_functor_appl' =
           functor_components -> t -> Path.t -> Path.t -> module_components)
 let check_modtype_inclusion =
   (* to be filled with Includemod.modtype_inclusion *)
-  ref ((fun ~loc:_ _env _mty1 _path1 _mty2 -> assert false) :
-          loc:Location.t -> t -> module_type -> Path.t -> module_type -> unit)
-let strengthen_aliasable =
-  (* to be filled with Mtype.strengthen ~aliasable:Aliasable *)
-  ref ((fun _env _mty _path -> assert false) :
-         t -> module_type -> Path.t -> module_type)
-
-let strengthen_aliasable_with_constraints =
-  (* to be filled with Mtype.strengthen ~aliasable:Aliasable_with_constraint *)
-  ref ((fun _env _mty _path -> assert false) :
-         t -> module_type -> Path.t -> module_type)
+  ref ((fun ~loc:_ _env _mty1 _alias1 _mty2 -> assert false) :
+          loc:Location.t -> t -> module_type -> module_alias -> module_type -> unit)
+let strengthen =
+  (* to be filled with Mtype.strengthen *)
+  ref ((fun _env _mty _alias -> assert false) :
+         t -> module_type -> module_alias -> module_type)
 
 let md md_type =
   {md_type; md_attributes=[]; md_loc=Location.none}
@@ -1240,14 +1235,14 @@ let find_modtype_expansion path env =
   | None -> raise Not_found
   | Some mty -> mty
 
-let rec is_functor_arg path env =
+let rec is_aliasable path env =
   match path with
     Pident id ->
-      begin try Ident.find_same id env.functor_args; true
-      with Not_found -> false
+      begin try Ident.find_same id env.functor_args; false
+      with Not_found -> true
       end
-  | Pdot (p, _s) -> is_functor_arg p env
-  | Papply _ -> true
+  | Pdot (p, _s) -> is_aliasable p env
+  | Papply _ -> false
 
 (* Lookup by name *)
 
@@ -1257,6 +1252,14 @@ let report_deprecated ?loc p deprecated =
   match loc, deprecated with
   | Some loc, Some txt ->
       let txt = if txt = "" then "" else "\n" ^ txt in
+      Location.deprecated loc (Printf.sprintf "module %s%s" (Path.name p) txt)
+  | _ -> ()
+
+let report_deprecated_alias ?loc ma deprecated =
+  match loc, deprecated with
+  | Some loc, Some txt ->
+      let txt = if txt = "" then "" else "\n" ^ txt in
+      let p = path_of_module_alias ma in
       Location.deprecated loc (Printf.sprintf "module %s%s" (Path.name p) txt)
   | _ -> ()
 
@@ -1287,13 +1290,14 @@ let rec lookup_module_descr_aux ?loc ~mark lid env =
   | Lapply(l1, l2) ->
       let (p1, desc1) = lookup_module_descr ?loc ~mark l1 env in
       let p2 = lookup_module ~load:true ~mark ?loc l2 env in
+      let alias2 = Ma_path p2 in
       let {md_type=mty2} = find_module p2 env in
       begin match get_components desc1 with
         Functor_comps f ->
           let loc = match loc with Some l -> l | None -> Location.none in
           (match f.fcomp_arg with
           | None ->  raise Not_found (* PR#7611 *)
-          | Some arg -> !check_modtype_inclusion ~loc env mty2 p2 arg);
+          | Some arg -> !check_modtype_inclusion ~loc env mty2 alias2 arg);
           (Papply(p1, p2), !components_of_functor_appl' f env p1 p2)
       | Structure_comps _ ->
           raise Not_found
@@ -1355,6 +1359,7 @@ and lookup_module ~load ?loc ~mark lid env : Path.t =
   | Lapply(l1, l2) ->
       let (p1, desc1) = lookup_module_descr ?loc ~mark l1 env in
       let p2 = lookup_module ~load:true ?loc ~mark l2 env in
+      let alias2 = Ma_path p2 in
       let {md_type=mty2} = find_module p2 env in
       let p = Papply(p1, p2) in
       begin match get_components desc1 with
@@ -1362,11 +1367,68 @@ and lookup_module ~load ?loc ~mark lid env : Path.t =
           let loc = match loc with Some l -> l | None -> Location.none in
           (match f.fcomp_arg with
           | None -> raise Not_found (* PR#7611 *)
-          | Some arg -> !check_modtype_inclusion ~loc env mty2 p2 arg);
+          | Some arg -> !check_modtype_inclusion ~loc env mty2 alias2 arg);
           p
       | Structure_comps _ ->
           raise Not_found
       end
+
+type lookup_alias =
+  | Lma_ident of string
+  | Lma_dot of lookup_alias * string
+  | Lma_tconstraint of lookup_alias * module_type
+
+let rec lookup_module_alias_descr ?loc ~mark lma env =
+  match lma with
+  | Lma_ident s ->
+      let path, descr = lookup_module_descr ?loc ~mark (Lident s) env in
+      Ma_path path, descr
+  | Lma_dot(lma, s) -> begin
+      let (ma, descr) = lookup_module_alias_descr ?loc ~mark lma env in
+      match get_components descr with
+      | Structure_comps c ->
+          let (descr, _addr) = NameMap.find s c.comp_components in
+          (Ma_dot(ma, s), descr)
+      | Functor_comps _ ->
+          raise Not_found
+      end
+  | Lma_tconstraint(lma, mty) ->
+      let ma = lookup_module_alias ~load:true ?loc ~mark lma env in
+      let mty' = find_module_alias ma env in
+      let loc = match loc with Some l -> l | None -> Location.none in
+      !check_modtype_inclusion ~loc env mty' ma mty;
+      let path = path_of_module_alias ma in
+      let deprecated = None in
+      let addr = EnvLazy.create_failed Not_found in
+      let descr =
+        !components_of_module' ~deprecated ~loc
+          env Subst.identity path addr mty
+      in
+      (Ma_tconstraint(ma, mty), descr)
+
+and lookup_module_alias ~load ?loc ~mark lma env =
+  match lma with
+  | Lma_ident s ->
+      let path = lookup_module ~load ?loc ~mark (Lident s) env in
+      Ma_path path
+  | Lma_dot(lma, s) -> begin
+      let (ma, descr) = lookup_module_alias_descr ?loc ~mark lma env in
+      match get_components descr with
+      | Structure_comps c ->
+          let (comps, _) = NameMap.find s c.comp_components in
+          if mark then mark_module_used s comps.loc;
+          let ma = Ma_dot(ma, s) in
+          report_deprecated_alias ?loc ma comps.deprecated;
+          ma
+      | Functor_comps _ ->
+          raise Not_found
+      end
+  | Lma_tconstraint(lma, mty) ->
+      let ma = lookup_module_alias ~load:true ?loc ~mark lma env in
+      let mty' = find_module_alias ma env in
+      let loc = match loc with Some l -> l | None -> Location.none in
+      !check_modtype_inclusion ~loc env mty' ma mty;
+      Ma_tconstraint(ma, mty)
 
 let lookup proj1 proj2 ?loc ~mark lid env =
   match lid with
@@ -1593,6 +1655,9 @@ let lookup_all_labels ?loc ?(mark = true) lid env =
 let lookup_module ~load ?loc ?(mark = true) lid env =
   lookup_module ~load ?loc ~mark lid env
 
+let lookup_module_alias ~load ?loc ?(mark = true) lid env =
+  lookup_module_alias ~load ?loc ~mark lid env
+
 let lookup_modtype ?loc ?(mark = true) lid env =
   lookup_modtype ?loc ~mark lid env
 
@@ -1714,12 +1779,7 @@ let scrape_alias env mty =
         | exception Not_found -> mty
       end
     | mty, Some alias ->
-      let constrained = constrained_module_alias alias in
-      let path = path_of_module_alias alias in
-      if constrained then
-        !strengthen_aliasable_with_constraints env mty path
-      else
-        !strengthen_aliasable env mty path
+        !strengthen env mty alias
     | mty, None -> mty
   in
   loop env None mty

@@ -128,7 +128,64 @@ let rec narrow_unbound_lid_error : 'a. _ -> _ -> _ -> _ -> 'a =
       | mty_arg ->
          let details =
            try Includemod.check_modtype_inclusion
-                 ~loc env mty_arg mpath mty_param;
+                 ~loc env mty_arg (Ma_path mpath) mty_param;
+               None (* should be impossible *)
+           with Includemod.Error e -> Some e
+         in
+         error (Ill_typed_functor_application (flid, mlid, details))
+      end
+  end;
+  error (make_error lid)
+
+let rec narrow_unbound_lookup_module_alias_error : 'a. _ -> _ -> _ -> _ -> 'a =
+  fun env loc lma make_error ->
+  let check_module mlid =
+    try ignore (Env.lookup_module ~load:true mlid env) with
+    | Not_found ->
+        narrow_unbound_lid_error env loc mlid (fun lid -> Unbound_module lid)
+    | Env.Recmodule ->
+        raise (Error (loc, env, Illegal_reference_to_recursive_module))
+  in
+  let error e = raise (Error (loc, env, e)) in
+  begin match lma with
+  | Longident.Lma_ident _ -> ()
+  | Longident.Lma_dot (lma, _) ->
+      check_module lma;
+      let ma = Env.find_module (Env.lookup_module ~load:true mlid env) env in
+      begin match Env.scrape_alias_and_ident env md.md_type with
+      | Mty_functor _ ->
+         error (Wrong_use_of_module (mlid, `Functor_used_as_structure))
+      | Mty_ident _ ->
+         error (Wrong_use_of_module (mlid, `Abstract_used_as_structure))
+      | Mty_alias alias ->
+         error (Cannot_scrape_alias(mlid, path_of_module_alias alias))
+      | Mty_signature _ -> ()
+      end
+  | Longident.Lapply (flid, mlid) ->
+      check_module flid;
+      let fmd = Env.find_module (Env.lookup_module ~load:true flid env) env in
+      let mty_param =
+        match Env.scrape_alias_and_ident env fmd.md_type with
+        | Mty_signature _ ->
+           error (Wrong_use_of_module (flid, `Structure_used_as_functor))
+        | Mty_ident _ ->
+           error (Wrong_use_of_module (flid, `Abstract_used_as_functor))
+        | Mty_alias alias ->
+           error (Cannot_scrape_alias(flid, path_of_module_alias alias))
+        | Mty_functor (_, None, _) ->
+           error (Wrong_use_of_module (flid, `Generative_used_as_applicative))
+        | Mty_functor (_, Some mty_param, _) -> mty_param
+      in
+      check_module mlid;
+      let mpath = Env.lookup_module ~load:true mlid env in
+      let mmd = Env.find_module mpath env in
+      begin match Env.scrape_alias_and_ident env mmd.md_type with
+      | Mty_alias alias ->
+         error (Cannot_scrape_alias(mlid, path_of_module_alias alias))
+      | mty_arg ->
+         let details =
+           try Includemod.check_modtype_inclusion
+                 ~loc env mty_arg (Ma_path mpath) mty_param;
                None (* should be impossible *)
            with Includemod.Error e -> Some e
          in

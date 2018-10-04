@@ -89,7 +89,7 @@ val find_class_address: Path.t -> t -> address
 val find_constructor_address: Path.t -> t -> address
 
 val add_functor_arg: Ident.t -> t -> t
-val is_functor_arg: Path.t -> t -> bool
+val is_aliasable: Path.t -> t -> bool
 
 (* Normalize path - unroll all aliases on the path.
    Versions for modules, module types and types.
@@ -138,6 +138,14 @@ val lookup_class:
 val lookup_cltype:
   ?loc:Location.t -> ?mark:bool ->
   Longident.t -> t -> Path.t * class_type_declaration
+
+type lookup_alias =
+  | Lma_ident of string
+  | Lma_dot of lookup_alias * string
+  | Lma_tconstraint of lookup_alias * module_type
+
+val lookup_module_alias:
+  load:bool -> ?loc:Location.t -> ?mark:bool -> lookup_alias -> t -> module_alias
 
 type copy_of_types
 val make_copy_of_types: string list -> t -> copy_of_types
@@ -307,17 +315,14 @@ val set_type_used_callback:
 (* Forward declaration to break mutual recursion with Includemod. *)
 val check_modtype_inclusion:
       (loc:Location.t -> t -> module_type ->
-       Path.t -> module_type -> unit) ref
+       module_alias -> module_type -> unit) ref
 (* Forward declaration to break mutual recursion with Typemod. *)
 val check_well_formed_module:
     (t -> Location.t -> string -> module_type -> unit) ref
 (* Forward declaration to break mutual recursion with Typecore. *)
 val add_delayed_check_forward: ((unit -> unit) -> unit) ref
 (* Forward declaration to break mutual recursion with Mtype. *)
-val strengthen_aliasable: (t -> module_type -> Path.t -> module_type) ref
-(* Forward declaration to break mutual recursion with Mtype. *)
-val strengthen_aliasable_with_constraints:
-  (t -> module_type -> Path.t -> module_type) ref
+val strengthen: (t -> module_type -> module_alias -> module_type) ref
 (* Forward declaration to break mutual recursion with Ctype. *)
 val same_constr: (t -> type_expr -> type_expr -> bool) ref
 
