@@ -8,7 +8,7 @@ end = struct
   type ('a, 'b) t = 'a * 'a
 end;;
 [%%expect{|
-Line 3, characters 6-44:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type ('a, 'b) t = 'a * 'a
 5 | end..
@@ -29,7 +29,7 @@ end = struct
   type ('a, 'b) t = 'a * 'b
 end;;
 [%%expect{|
-Line 3, characters 6-44:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type ('a, 'b) t = 'a * 'b
 5 | end..
@@ -50,7 +50,7 @@ end = struct
   type t = <m : 'a. 'a * ('a * 'foo)> as 'foo
 end;;
 [%%expect{|
-Line 3, characters 6-62:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <m : 'a. 'a * ('a * 'foo)> as 'foo
 5 | end..
@@ -76,7 +76,7 @@ end = struct
   type t = <m : int>
 end;;
 [%%expect{|
-Line 3, characters 6-37:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <m : int>
 5 | end..
@@ -97,7 +97,7 @@ end = struct
   type t = s
 end;;
 [%%expect{|
-Line 3, characters 6-29:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = s
 5 | end..
@@ -120,7 +120,7 @@ end = struct
     | Foo of (int*int)*float
 end;;
 [%%expect{|
-Line 4, characters 6-56:
+Lines 4-7, characters 6-3:
 4 | ......struct
 5 |   type t =
 6 |     | Foo of (int*int)*float
@@ -147,7 +147,7 @@ end = struct
   type t = (int * float * int)
 end;;
 [%%expect{|
-Line 3, characters 6-47:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = (int * float * int)
 5 | end..
@@ -168,7 +168,7 @@ end = struct
   type t = <n : int; f : float>
 end;;
 [%%expect{|
-Line 3, characters 6-48:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <n : int; f : float>
 5 | end..
@@ -189,7 +189,7 @@ end = struct
   type t = <n : int>
 end;;
 [%%expect{|
-Line 3, characters 6-37:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <n : int>
 5 | end..
@@ -210,7 +210,7 @@ end = struct
   type t = <n : int; m : int>
 end;;
 [%%expect{|
-Line 3, characters 6-46:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <n : int; m : int>
 5 | end..
@@ -233,7 +233,7 @@ end = struct
     | Foo of [`Bar of string]
 end;;
 [%%expect{|
-Line 4, characters 6-57:
+Lines 4-7, characters 6-3:
 4 | ......struct
 5 |   type t =
 6 |     | Foo of [`Bar of string]
@@ -260,7 +260,7 @@ end = struct
   type t = private [`C]
 end;;
 [%%expect{|
-Line 3, characters 6-40:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [`C]
 5 | end..
@@ -281,7 +281,7 @@ end = struct
   type t = private [`C of int]
 end;;
 [%%expect{|
-Line 3, characters 6-47:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [`C of int]
 5 | end..
@@ -311,7 +311,7 @@ end = struct
   type t = private [`A of int]
 end;;
 [%%expect{|
-Line 3, characters 6-47:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [`A of int]
 5 | end..
@@ -332,7 +332,7 @@ end = struct
   type t = private [> `A of int]
 end;;
 [%%expect{|
-Line 3, characters 6-49:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [> `A of int]
 5 | end..
@@ -353,7 +353,7 @@ end = struct
   type 'a t =  [> `A of int] as 'a
 end;;
 [%%expect{|
-Line 3, characters 6-51:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type 'a t =  [> `A of int] as 'a
 5 | end..
@@ -374,7 +374,7 @@ end = struct
   type 'a t =  [> `A of int | `C of float] as 'a
 end;;
 [%%expect{|
-Line 3, characters 6-65:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type 'a t =  [> `A of int | `C of float] as 'a
 5 | end..
@@ -404,7 +404,7 @@ end = struct
   type t = private [< `C of int&float]
 end;;
 [%%expect{|
-Line 3, characters 6-55:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [< `C of int&float]
 5 | end..

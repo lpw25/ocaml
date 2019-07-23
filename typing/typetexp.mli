@@ -47,8 +47,8 @@ type error =
   | Bound_type_variable of string
   | Recursive_type
   | Unbound_row_variable of Longident.t
-  | Type_mismatch of Ctype.Unification_trace.t
-  | Alias_type_mismatch of Ctype.Unification_trace.t
+  | Type_mismatch of Errortrace.Unification.t
+  | Alias_type_mismatch of Errortrace.Unification.t
   | Present_has_conjunction of string
   | Present_has_no_type of string
   | Constructor_mismatch of type_expr * type_expr

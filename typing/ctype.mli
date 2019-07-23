@@ -18,78 +18,14 @@
 open Asttypes
 open Types
 
-module Unification_trace: sig
-  (** Unification traces are used to explain unification errors
-      when printing error messages *)
+exception Unify of Errortrace.Unification.t
+exception Equality of Errortrace.Equality.t
+exception Moregen of Errortrace.Moregen.t
+exception Subtype of Errortrace.Subtype.t * Errortrace.Unification.t
 
-  type position = First | Second
-  type desc = { t: type_expr; expanded: type_expr option }
-  type 'a diff = { got: 'a; expected: 'a}
-
-   (** Scope escape related errors *)
-    type 'a escape =
-    | Constructor of Path.t
-    | Univ of type_expr
-    (** The type_expr argument of [Univ] is always a [Tunivar _],
-        we keep a [type_expr] to track renaming in {!Printtyp} *)
-    | Self
-    | Module_type of Path.t
-    | Equation of 'a
-
-   (** Errors for polymorphic variants *)
-
-  type fixed_row_case =
-    | Cannot_be_closed
-    | Cannot_add_tags of string list
-
-  type variant =
-    | No_intersection
-    | No_tags of position * (Asttypes.label * row_field) list
-    | Incompatible_types_for of string
-    | Fixed_row of position * fixed_row_case * fixed_explanation
-    (** Fixed row types,  e.g. ['a. [> `X] as 'a] *)
-
-  type obj =
-    | Missing_field of position * string
-    | Abstract_row of position
-    | Self_cannot_be_closed
-
-  type 'a elt =
-    | Diff of 'a diff
-    | Variant of variant
-    | Obj of obj
-    | Escape of {context: type_expr option; kind:'a escape}
-    | Incompatible_fields of {name:string; diff: type_expr diff }
-    | Rec_occur of type_expr * type_expr
-
-  type t = desc elt list
-
-  val diff: type_expr -> type_expr -> desc elt
-
-  (** [map_diff f {expected;got}] is [{expected=f expected; got=f got}] *)
-  val map_diff: ('a -> 'b) -> 'a diff -> 'b diff
-
-  (** [flatten f trace] flattens all elements of type {!desc} in
-      [trace] to either [f x.t expanded] if [x.expanded=Some expanded]
-      or [f x.t x.t] otherwise *)
-  val flatten: (type_expr -> type_expr -> 'a) -> t -> 'a elt list
-
-  (** Switch [expected] and [got] *)
-  val swap: t -> t
-
-  (** [explain trace f] calls [f] on trace elements starting from the end
-      until [f ~prev elt] is [Some _], returns that
-      or [None] if the end of the trace is reached. *)
-  val explain:
-          'a elt list ->
-          (prev:'a elt option -> 'a elt -> 'b option) ->
-          'b option
-
-end
-
-exception Unify of Unification_trace.t
+exception Escape of {kind : Errortrace.desc Errortrace.escape;
+                     context : type_expr option}
 exception Tags of label * label
-exception Subtype of Unification_trace.t * Unification_trace.t
 exception Cannot_expand
 exception Cannot_apply
 
@@ -254,9 +190,9 @@ val deep_occur: type_expr -> type_expr -> bool
 val filter_self_method:
         Env.t -> string -> private_flag -> (Ident.t * type_expr) Meths.t ref ->
         type_expr -> Ident.t * type_expr
-val moregeneral: Env.t -> bool -> type_expr -> type_expr -> bool
+val moregeneral: Env.t -> bool -> type_expr -> type_expr -> unit
         (* Check if the first type scheme is more general than the second. *)
-
+val is_moregeneral: Env.t -> bool -> type_expr -> type_expr -> bool
 val rigidify: type_expr -> type_expr list
         (* "Rigidify" a type and return its type variable *)
 val all_distinct_vars: Env.t -> type_expr list -> bool
@@ -271,11 +207,13 @@ val reify_univars : Types.type_expr -> Types.type_expr
 type class_match_failure =
     CM_Virtual_class
   | CM_Parameter_arity_mismatch of int * int
-  | CM_Type_parameter_mismatch of Env.t * Unification_trace.t
+  | CM_Type_parameter_mismatch of Env.t * Errortrace.Equality.t
   | CM_Class_type_mismatch of Env.t * class_type * class_type
-  | CM_Parameter_mismatch of Env.t * Unification_trace.t
-  | CM_Val_type_mismatch of string * Env.t * Unification_trace.t
-  | CM_Meth_type_mismatch of string * Env.t * Unification_trace.t
+  | CM_Parameter_mismatch of Env.t * Errortrace.Moregen.t
+  | CM_Val_type_mismatch of string * Env.t * Errortrace.Moregen.t
+  | CM_Val_type_mismatch_eq of string * Env.t * Errortrace.Equality.t
+  | CM_Meth_type_mismatch of string * Env.t * Errortrace.Moregen.t
+  | CM_Meth_type_mismatch_eq of string * Env.t * Errortrace.Equality.t
   | CM_Non_mutable_value of string
   | CM_Non_concrete_value of string
   | CM_Missing_value of string
@@ -288,10 +226,11 @@ type class_match_failure =
 val match_class_types:
     ?trace:bool -> Env.t -> class_type -> class_type -> class_match_failure list
         (* Check if the first class type is more general than the second. *)
-val equal: Env.t -> bool -> type_expr list -> type_expr list -> bool
+val equal: Env.t -> bool -> type_expr list -> type_expr list -> unit
         (* [equal env [x1...xn] tau [y1...yn] sigma]
            checks whether the parameterized types
            [/\x1.../\xn.tau] and [/\y1.../\yn.sigma] are equivalent. *)
+val is_equal : Env.t -> bool -> type_expr list -> type_expr list -> bool
 val match_class_declarations:
         Env.t -> type_expr list -> class_type -> type_expr list ->
         class_type -> class_match_failure list

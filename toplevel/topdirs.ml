@@ -553,7 +553,7 @@ let () =
   reg_show_prim "show_exception"
     (fun env loc id lid ->
        let desc = Env.lookup_constructor ~loc Env.Positive lid env in
-       if not (Ctype.equal env true [desc.cstr_res] [Predef.type_exn]) then
+       if not (Ctype.is_equal env true [desc.cstr_res] [Predef.type_exn]) then
          raise Not_found;
        let ret_type =
          if desc.cstr_generalized then Some Predef.type_exn

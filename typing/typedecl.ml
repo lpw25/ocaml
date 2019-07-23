@@ -35,8 +35,8 @@ type error =
   | Cycle_in_def of string * type_expr
   | Definition_mismatch of type_expr * Includecore.type_mismatch option
   | Constraint_failed of type_expr * type_expr
-  | Inconsistent_constraint of Env.t * Ctype.Unification_trace.t
-  | Type_clash of Env.t * Ctype.Unification_trace.t
+  | Inconsistent_constraint of Env.t * Errortrace.Unification.t
+  | Type_clash of Env.t * Errortrace.Unification.t
   | Parameters_differ of Path.t * type_expr * type_expr
   | Null_arity_external
   | Missing_native_external
@@ -44,7 +44,7 @@ type error =
   | Cannot_extend_private_type of Path.t
   | Not_extensible_type of Path.t
   | Extension_mismatch of Path.t * Includecore.type_mismatch
-  | Rebind_wrong_type of Longident.t * Env.t * Ctype.Unification_trace.t
+  | Rebind_wrong_type of Longident.t * Env.t * Errortrace.Unification.t
   | Rebind_mismatch of Longident.t * Path.t * Path.t
   | Rebind_private of Longident.t
   | Variance of Typedecl_variance.error
@@ -654,16 +654,18 @@ let check_coherence env loc dpath decl =
             let err =
               if List.length args <> List.length decl.type_params
               then Some Includecore.Arity
-              else if not (Ctype.equal env false args decl.type_params)
-              then Some Includecore.Constraint
               else
-                Includecore.type_declarations ~loc ~equality:true env
-                  ~mark:true
-                  (Path.last path)
-                  decl'
-                  dpath
-                  (Subst.type_declaration
-                     (Subst.add_type_path dpath path Subst.identity) decl)
+                try
+                  (Ctype.equal env false args decl.type_params);
+                  Includecore.type_declarations ~loc ~equality:true env
+                    ~mark:true
+                    (Path.last path)
+                    decl'
+                    dpath
+                    (Subst.type_declaration
+                       (Subst.add_type_path dpath path Subst.identity) decl)
+                with
+                | Ctype.Equality _ -> Some Includecore.Constraint
             in
             if err <> None then
               raise(Error(loc, Definition_mismatch (ty, err)))
@@ -727,7 +729,9 @@ let check_well_founded env loc path to_check ty =
           let ty0 = if TypeSet.is_empty parents then ty else ty0 in
           check ty0 (TypeSet.add ty parents) ty'
         with
-          Ctype.Cannot_expand -> Option.iter raise arg_exn
+        | Ctype.Cannot_expand -> Option.iter raise arg_exn
+        | Ctype.Escape {kind; context} ->
+            raise (Ctype.Unify [Escape {kind; context}])
         end
     | _ -> Option.iter raise arg_exn
   in
@@ -766,7 +770,7 @@ let check_recursion env loc path decl to_check =
       match ty.desc with
       | Tconstr(path', args', _) ->
           if Path.same path path' then begin
-            if not (Ctype.equal env false args args') then
+            if not (Ctype.is_equal env false args args') then
               raise (Error(loc,
                      Parameters_differ(cpath, ty, Ctype.newconstr path args)))
           end
@@ -1077,7 +1081,7 @@ let transl_extension_constructor env type_path type_params
              (Tconstr(type_path, type_params, ref Mnil)))
           :: type_params
         in
-        if not (Ctype.equal env true cstr_types ext_types) then
+        if not (Ctype.is_equal env true cstr_types ext_types) then
           raise (Error(lid.loc,
                        Rebind_mismatch(lid.txt, cstr_type_path, type_path)));
         (* Disallow rebinding private constructors to non-private *)

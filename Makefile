@@ -93,7 +93,7 @@ PARSING=parsing/location.cmo parsing/longident.cmo \
   parsing/ast_mapper.cmo parsing/ast_iterator.cmo parsing/attr_helper.cmo \
   parsing/builtin_attributes.cmo parsing/ast_invariants.cmo parsing/depend.cmo
 
-TYPING=typing/ident.cmo typing/path.cmo \
+TYPING=typing/ident.cmo typing/path.cmo typing/errortrace.cmo \
   typing/primitive.cmo typing/types.cmo \
   typing/btype.cmo typing/oprint.cmo \
   typing/subst.cmo typing/predef.cmo \

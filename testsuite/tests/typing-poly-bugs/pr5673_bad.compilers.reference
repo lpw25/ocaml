@@ -8,7 +8,4 @@ Error: This expression has type
        Type ('b, 'c, ('b, 'c) Classdef.cl1) Classdef.cl0 = <  >
        is not compatible with type
          ('b0, 'c0, ('b0, 'c0) Classdef.cl1) Classdef.cl0 
-       Type < m : 'b -> 'c -> int; .. > is not compatible with type
-         ('b, 'c) Classdef.cl1 =
-           < m : 'b -> 'c -> int; raise_trouble : int -> 'b > 
-       The universal variable 'b would escape its scope
+       Types for method as_cl0 are incompatible

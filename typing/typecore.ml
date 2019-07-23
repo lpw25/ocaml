@@ -22,6 +22,7 @@ open Types
 open Typedtree
 open Btype
 open Ctype
+open Errortrace
 
 type type_forcing_context =
   | If_conditional
@@ -52,13 +53,13 @@ type existential_restriction =
 
 type error =
   | Constructor_arity_mismatch of Longident.t * int * int
-  | Label_mismatch of Longident.t * Ctype.Unification_trace.t
-  | Pattern_type_clash of Ctype.Unification_trace.t * pattern_desc option
-  | Or_pattern_type_clash of Ident.t * Ctype.Unification_trace.t
+  | Label_mismatch of Longident.t * Errortrace.Unification.t
+  | Pattern_type_clash of Errortrace.Unification.t * pattern_desc option
+  | Or_pattern_type_clash of Ident.t * Errortrace.Unification.t
   | Multiply_bound_variable of string
   | Orpat_vars of Ident.t * Ident.t list
   | Expr_type_clash of
-      Ctype.Unification_trace.t * type_forcing_context option
+      Errortrace.Unification.t * type_forcing_context option
       * expression_desc option
   | Apply_non_function of type_expr
   | Apply_wrong_label of arg_label * type_expr
@@ -78,17 +79,17 @@ type error =
   | Private_constructor of constructor_description * type_expr
   | Unbound_instance_variable of string * string list
   | Instance_variable_not_mutable of string
-  | Not_subtype of Ctype.Unification_trace.t * Ctype.Unification_trace.t
+  | Not_subtype of Errortrace.Subtype.t * Errortrace.Unification.t
   | Outside_class
   | Value_multiply_overridden of string
   | Coercion_failure of
-      type_expr * type_expr * Ctype.Unification_trace.t * bool
+      type_expr * type_expr * Errortrace.Unification.t * bool
   | Too_many_arguments of bool * type_expr * type_forcing_context option
   | Abstract_wrong_label of arg_label * type_expr * type_forcing_context option
   | Scoping_let_module of string * type_expr
   | Not_a_variant_type of Longident.t
   | Incoherent_label_order
-  | Less_general of string * Ctype.Unification_trace.t
+  | Less_general of string * Errortrace.Unification.t
   | Modules_not_allowed
   | Cannot_infer_signature
   | Not_a_packed_module of type_expr
@@ -109,9 +110,9 @@ type error =
   | Illegal_letrec_expr
   | Illegal_class_expr
   | Empty_pattern
-  | Letop_type_clash of string * Ctype.Unification_trace.t
-  | Andop_type_clash of string * Ctype.Unification_trace.t
-  | Bindings_type_clash of Ctype.Unification_trace.t
+  | Letop_type_clash of string * Errortrace.Unification.t
+  | Andop_type_clash of string * Errortrace.Unification.t
+  | Bindings_type_clash of Errortrace.Unification.t
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -1902,7 +1903,7 @@ let check_univars env expans kind exp ty_expected vars =
   let ty = newgenty (Tpoly(repr exp.exp_type, vars'))
   and ty_expected = repr ty_expected in
   raise (Error (exp.exp_loc, env,
-                Less_general(kind, [Unification_trace.diff ty ty_expected])))
+                Less_general(kind, [Unification.diff ty ty_expected])))
 
 let check_partial_application statement exp =
   let rec f delay =
@@ -4648,7 +4649,7 @@ open Printtyp
 
 (* Returns the first diff of the trace *)
 let type_clash_of_trace trace =
-  Ctype.Unification_trace.(explain trace (fun ~prev:_ -> function
+  Unification.(explain trace (fun ~prev:_ -> function
     | Diff diff -> Some diff
     | _ -> None
   ))
@@ -4680,8 +4681,7 @@ let report_literal_type_constraint expected_type const =
   | _, _ -> []
 
 let report_literal_type_constraint const = function
-  | Some Unification_trace.
-    { expected = { t = { desc = Tconstr (typ, [], _) } } } ->
+  | Some { expected = { t = { desc = Tconstr (typ, [], _) } } } ->
       report_literal_type_constraint typ const
   | Some _ | None -> []
 
@@ -4740,7 +4740,7 @@ let report_numeric_operator_clash_hints ~loc actual_type operator =
 let report_application_clash_hints diff expl =
   match expl, diff with
   | Some (Application { exp_desc = Texp_ident (p, _, _); exp_loc = loc; _ }),
-    Some Unification_trace.{ got = { t = { desc = Tconstr (typ, [], _) } } } ->
+    Some { got = { t = { desc = Tconstr (typ, [], _) } } } ->
       report_numeric_operator_clash_hints ~loc typ p
   | _ -> []
 

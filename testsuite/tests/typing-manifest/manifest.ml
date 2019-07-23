@@ -8,7 +8,7 @@ end = struct
   type t = [`C]
 end;;
 [%%expect{|
-Line 3, characters 6-32:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = [`C]
 5 | end..
@@ -29,7 +29,7 @@ end = struct
   type t = private [> `A]
 end;;
 [%%expect{|
-Line 3, characters 6-42:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [> `A]
 5 | end..
@@ -50,7 +50,7 @@ end = struct
   type t = [`B]
 end;;
 [%%expect{|
-Line 3, characters 6-32:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = [`B]
 5 | end..
@@ -71,7 +71,7 @@ end = struct
   type t = [`A]
 end;;
 [%%expect{|
-Line 3, characters 6-32:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = [`A]
 5 | end..
@@ -92,7 +92,7 @@ end = struct
    type t = private [< `A of & int]
 end;;
 [%%expect{|
-Line 3, characters 6-52:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |    type t = private [< `A of & int]
 5 | end..
@@ -114,7 +114,7 @@ end = struct
   type t = private [< `A]
 end;;
 [%%expect{|
-Line 3, characters 6-42:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [< `A]
 5 | end..
@@ -136,7 +136,7 @@ end = struct
   type t = private [< `A]
 end;;
 [%%expect{|
-Line 3, characters 6-42:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = private [< `A]
 5 | end..
@@ -157,7 +157,7 @@ end = struct
   type t = [`A of float]
 end;;
 [%%expect{|
-Line 3, characters 6-41:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = [`A of float]
 5 | end..
@@ -178,7 +178,7 @@ end = struct
   type t = <b : int>
 end;;
 [%%expect{|
-Line 3, characters 6-37:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <b : int>
 5 | end..
@@ -199,7 +199,7 @@ end = struct
   type t = <a : int>
 end;;
 [%%expect{|
-Line 3, characters 6-37:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   type t = <a : int>
 5 | end..
@@ -226,7 +226,7 @@ end;;
 type w = private float
 type q = private int * w
 type u = private int * q
-Line 6, characters 6-37:
+Lines 6-8, characters 6-3:
 6 | ......struct
 7 |   type t = private u
 8 | end..
@@ -253,7 +253,7 @@ end;;
 type w = float
 type q = int * w
 type u = private int * q
-Line 6, characters 6-37:
+Lines 6-8, characters 6-3:
 6 | ......struct
 7 |   type t = private u
 8 | end..
@@ -277,7 +277,7 @@ end = struct
 end;;
 [%%expect{|
 type s = private int
-Line 5, characters 6-37:
+Lines 5-7, characters 6-3:
 5 | ......struct
 6 |   type t = private s
 7 | end..

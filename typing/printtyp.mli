@@ -143,18 +143,27 @@ val tree_of_cltype_declaration:
 val cltype_declaration: Ident.t -> formatter -> class_type_declaration -> unit
 val type_expansion: type_expr -> Format.formatter -> type_expr -> unit
 val prepare_expansion: type_expr * type_expr -> type_expr * type_expr
-val trace:
-  bool -> bool-> string -> formatter
-  -> (type_expr * type_expr) Ctype.Unification_trace.elt list -> unit
 val report_unification_error:
     formatter -> Env.t ->
-    Ctype.Unification_trace.t ->
+    Errortrace.Unification.t ->
+    ?type_expected_explanation:(formatter -> unit) ->
+    (formatter -> unit) -> (formatter -> unit) ->
+    unit
+val report_moregen_error:
+    formatter -> Env.t ->
+    Errortrace.Moregen.t ->
+    ?type_expected_explanation:(formatter -> unit) ->
+    (formatter -> unit) -> (formatter -> unit) ->
+    unit
+val report_equality_error:
+    formatter -> Env.t ->
+    Errortrace.Equality.t ->
     ?type_expected_explanation:(formatter -> unit) ->
     (formatter -> unit) -> (formatter -> unit) ->
     unit
 val report_subtyping_error:
-    formatter -> Env.t -> Ctype.Unification_trace.t -> string
-    -> Ctype.Unification_trace.t -> unit
+    formatter -> Env.t -> Errortrace.Subtype.t -> string
+    -> Errortrace.Unification.t -> unit
 val report_ambiguous_type_error:
     formatter -> Env.t -> (Path.t * Path.t) -> (Path.t * Path.t) list ->
     (formatter -> unit) -> (formatter -> unit) -> (formatter -> unit) -> unit

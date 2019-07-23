@@ -48,7 +48,7 @@ parsing_modules := $(addprefix parsing/,\
 
 typing_modules := $(addprefix typing/,\
   ident path types btype primitive typedtree subst predef datarepr \
-  persistent_env env oprint ctype printtyp mtype envaux)
+  persistent_env errortrace env oprint ctype printtyp mtype envaux)
 
 file_formats_modules := $(addprefix file_formats/,\
   cmi_format)

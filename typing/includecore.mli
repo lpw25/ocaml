@@ -20,7 +20,7 @@ open Types
 
 exception Dont_match
 
-type position = Ctype.Unification_trace.position = First | Second
+type position = Errortrace.position = First | Second
 
 type label_mismatch =
   | Type

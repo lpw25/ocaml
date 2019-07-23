@@ -446,6 +446,7 @@ typing/ctype.cmo : \
     parsing/longident.cmi \
     parsing/location.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     utils/clflags.cmi \
     typing/btype.cmi \
@@ -460,6 +461,7 @@ typing/ctype.cmx : \
     parsing/longident.cmx \
     parsing/location.cmx \
     typing/ident.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     utils/clflags.cmx \
     typing/btype.cmx \
@@ -470,6 +472,7 @@ typing/ctype.cmi : \
     typing/path.cmi \
     parsing/longident.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     parsing/asttypes.cmi
 typing/datarepr.cmo : \
@@ -562,6 +565,20 @@ typing/envaux.cmi : \
     typing/subst.cmi \
     typing/path.cmi \
     typing/env.cmi
+typing/errortrace.cmo : \
+    typing/types.cmi \
+    typing/path.cmi \
+    parsing/asttypes.cmi \
+    typing/errortrace.cmi
+typing/errortrace.cmx : \
+    typing/types.cmx \
+    typing/path.cmx \
+    parsing/asttypes.cmi \
+    typing/errortrace.cmi
+typing/errortrace.cmi : \
+    typing/types.cmi \
+    typing/path.cmi \
+    parsing/asttypes.cmi
 typing/ident.cmo : \
     utils/misc.cmi \
     utils/identifiable.cmi \
@@ -598,7 +615,9 @@ typing/includecore.cmo : \
     typing/typedtree.cmi \
     typing/printtyp.cmi \
     typing/path.cmi \
+    utils/misc.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/ctype.cmi \
     parsing/builtin_attributes.cmi \
@@ -610,7 +629,9 @@ typing/includecore.cmx : \
     typing/typedtree.cmx \
     typing/printtyp.cmx \
     typing/path.cmx \
+    utils/misc.cmx \
     typing/ident.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     typing/ctype.cmx \
     parsing/builtin_attributes.cmx \
@@ -874,6 +895,7 @@ typing/printtyp.cmo : \
     parsing/longident.cmi \
     parsing/location.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/ctype.cmi \
     utils/clflags.cmi \
@@ -894,6 +916,7 @@ typing/printtyp.cmx : \
     parsing/longident.cmx \
     parsing/location.cmx \
     typing/ident.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     typing/ctype.cmx \
     utils/clflags.cmx \
@@ -908,8 +931,8 @@ typing/printtyp.cmi : \
     parsing/longident.cmi \
     parsing/location.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
-    typing/ctype.cmi \
     parsing/asttypes.cmi
 typing/printtyped.cmo : \
     typing/types.cmi \
@@ -1052,6 +1075,7 @@ typing/typeclass.cmo : \
     parsing/location.cmi \
     typing/includeclass.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/ctype.cmi \
     file_formats/cmt_format.cmi \
@@ -1081,6 +1105,7 @@ typing/typeclass.cmx : \
     parsing/location.cmx \
     typing/includeclass.cmx \
     typing/ident.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     typing/ctype.cmx \
     file_formats/cmt_format.cmx \
@@ -1097,6 +1122,7 @@ typing/typeclass.cmi : \
     parsing/longident.cmi \
     parsing/location.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/ctype.cmi \
     parsing/asttypes.cmi
@@ -1123,6 +1149,7 @@ typing/typecore.cmo : \
     parsing/longident.cmi \
     parsing/location.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/ctype.cmi \
     file_formats/cmt_format.cmi \
@@ -1156,6 +1183,7 @@ typing/typecore.cmx : \
     parsing/longident.cmx \
     parsing/location.cmx \
     typing/ident.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     typing/ctype.cmx \
     file_formats/cmt_format.cmx \
@@ -1174,8 +1202,8 @@ typing/typecore.cmi : \
     parsing/longident.cmi \
     parsing/location.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
-    typing/ctype.cmi \
     parsing/asttypes.cmi \
     typing/annot.cmi
 typing/typedecl.cmo : \
@@ -1198,6 +1226,7 @@ typing/typedecl.cmo : \
     parsing/location.cmi \
     typing/includecore.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/datarepr.cmi \
     typing/ctype.cmi \
@@ -1230,6 +1259,7 @@ typing/typedecl.cmx : \
     parsing/location.cmx \
     typing/includecore.cmx \
     typing/ident.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     typing/datarepr.cmx \
     typing/ctype.cmx \
@@ -1246,6 +1276,7 @@ typing/typedecl.cmi : \
     typing/types.cmi \
     typing/typedtree.cmi \
     typing/typedecl_variance.cmi \
+    typing/typedecl_unboxed.cmi \
     typing/typedecl_immediacy.cmi \
     typing/path.cmi \
     parsing/parsetree.cmi \
@@ -1253,8 +1284,8 @@ typing/typedecl.cmi : \
     parsing/location.cmi \
     typing/includecore.cmi \
     typing/ident.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
-    typing/ctype.cmi \
     parsing/asttypes.cmi
 typing/typedecl_immediacy.cmo : \
     typing/types.cmi \
@@ -1453,6 +1484,7 @@ typing/typemod.cmi : \
 typing/typeopt.cmo : \
     typing/types.cmi \
     typing/typedtree.cmi \
+    typing/typedecl_unboxed.cmi \
     typing/typedecl.cmi \
     typing/predef.cmi \
     typing/path.cmi \
@@ -1466,6 +1498,7 @@ typing/typeopt.cmo : \
 typing/typeopt.cmx : \
     typing/types.cmx \
     typing/typedtree.cmx \
+    typing/typedecl_unboxed.cmx \
     typing/typedecl.cmx \
     typing/predef.cmx \
     typing/path.cmx \
@@ -1522,6 +1555,7 @@ typing/typetexp.cmo : \
     utils/misc.cmi \
     parsing/longident.cmi \
     parsing/location.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
     typing/ctype.cmi \
     utils/clflags.cmi \
@@ -1542,6 +1576,7 @@ typing/typetexp.cmx : \
     utils/misc.cmx \
     parsing/longident.cmx \
     parsing/location.cmx \
+    typing/errortrace.cmx \
     typing/env.cmx \
     typing/ctype.cmx \
     utils/clflags.cmx \
@@ -1557,8 +1592,8 @@ typing/typetexp.cmi : \
     parsing/parsetree.cmi \
     parsing/longident.cmi \
     parsing/location.cmi \
+    typing/errortrace.cmi \
     typing/env.cmi \
-    typing/ctype.cmi \
     parsing/asttypes.cmi
 typing/untypeast.cmo : \
     typing/typedtree.cmi \

@@ -56,7 +56,7 @@ module O = struct
   end
 end;;
 [%%expect{|
-Line 5, characters 8-66:
+Lines 5-8, characters 8-5:
 5 | ........struct
 6 |     module type s
 7 |     let f (module X:s) = ()
@@ -82,7 +82,7 @@ end = struct
   let f (x : <m : 'a. ('a * 'foo)> as 'foo) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-65:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : <m : 'a. ('a * 'foo)> as 'foo) = ()
 5 | end..
@@ -106,7 +106,7 @@ end = struct
 end;;
 [%%expect{|
 type s = private < m : int; .. >
-Line 5, characters 6-44:
+Lines 5-7, characters 6-3:
 5 | ......struct
 6 |   let f (x : <m : int>) = x
 7 | end..
@@ -127,7 +127,7 @@ end = struct
   let x = ref []
 end;;
 [%%expect{|
-Line 3, characters 6-33:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let x = ref []
 5 | end..
@@ -198,7 +198,7 @@ end = struct
   let f (x : 'a) = x
 end;;
 [%%expect{|
-Line 3, characters 6-37:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : 'a) = x
 5 | end..
@@ -219,7 +219,7 @@ end = struct
   let f (x : (int * int)) = x
 end;;
 [%%expect{|
-Line 3, characters 6-46:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : (int * int)) = x
 5 | end..
@@ -240,7 +240,7 @@ end = struct
   let f (x : <m : int; f : float>) = x
 end;;
 [%%expect{|
-Line 3, characters 6-55:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : <m : int; f : float>) = x
 5 | end..
@@ -261,7 +261,7 @@ end = struct
   let f (x : [ `Foo | `Bar]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-50:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [ `Foo | `Bar]) = ()
 5 | end..
@@ -282,7 +282,7 @@ end = struct
   let f (x : [< `Foo]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-44:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [< `Foo]) = ()
 5 | end..
@@ -303,7 +303,7 @@ end = struct
   let f (x : [< `Foo]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-44:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [< `Foo]) = ()
 5 | end..
@@ -324,7 +324,7 @@ end = struct
   let f (x : < m : 'a. [< `Foo] as 'a >) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-62:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : < m : 'a. [< `Foo] as 'a >) = ()
 5 | end..
@@ -345,7 +345,7 @@ end = struct
   let f (x : < m : [`Foo]>) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-49:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : < m : [`Foo]>) = ()
 5 | end..
@@ -366,7 +366,7 @@ end = struct
   let f (x : [< `C of int&float]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-55:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [< `C of int&float]) = ()
 5 | end..
@@ -387,7 +387,7 @@ end = struct
   let f (x : [`Foo of int]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-49:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [`Foo of int]) = ()
 5 | end..
@@ -408,7 +408,7 @@ end = struct
   let f (x : [`Foo]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-42:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [`Foo]) = ()
 5 | end..
@@ -438,7 +438,7 @@ end = struct
   let f (x : [> `Foo | `Bar]) = ()
 end;;
 [%%expect{|
-Line 3, characters 6-51:
+Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let f (x : [> `Foo | `Bar]) = ()
 5 | end..
