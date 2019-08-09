@@ -29,9 +29,9 @@ Line 1, characters 16-53:
 Error: This variant or record definition does not match that of type M1.t
        Constructors do not match:
          E of M1.x
-       is not compatible with:
+       is not equal to:
          E of M1.y
-       The types are not equal.
+       Type M1.x is not equal to type M1.y
 |}]
 
 let bool_of_int x =
@@ -81,7 +81,8 @@ Line 1, characters 16-53:
 Error: This variant or record definition does not match that of type M1.t
        Constructors do not match:
          E of (M1.x, M1.x) eq
-       is not compatible with:
+       is not equal to:
          E of (M1.x, M1.y) eq
-       The types are not equal.
+       Type (M1.x, M1.x) eq is not equal to type (M1.x, M1.y) eq
+       Type M1.x is not equal to type M1.y
 |}]

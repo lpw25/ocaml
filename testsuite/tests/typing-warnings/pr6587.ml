@@ -36,4 +36,6 @@ Error: Signature mismatch:
          val f : fpclass -> Stdlib.fpclass
        is not included in
          val f : fpclass -> fpclass
+       Type fpclass -> Stdlib.fpclass do not match with fpclass -> fpclass
+       Type Stdlib.fpclass is not compatible with type fpclass
 |}]

@@ -117,7 +117,7 @@ Line 1, characters 0-37:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This variant or record definition does not match that of type
          ('a, 'a) foo
-       Their constraints differ.
+       Constraints are different: 'a is different from 'b
 |}]
 
 (* Check that signatures can hide exstensibility *)

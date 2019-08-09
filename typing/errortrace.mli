@@ -97,7 +97,7 @@ module Equality: sig
       or [f x.t x.t] otherwise *)
   val flatten: (type_expr -> type_expr -> 'a) -> t -> 'a elt list
 
-  exception Equality of t
+  exception Equality of (type_expr * type_expr) list * t
 
   val map : (desc -> desc) -> desc elt list -> desc elt list
 

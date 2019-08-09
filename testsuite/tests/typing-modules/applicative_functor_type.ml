@@ -52,6 +52,7 @@ Error: The type of M does not match F's parameter
          val equal : 'a -> 'a -> bool
        is not included in
          val equal : unit
+       Type 'a -> 'a -> bool do not match with unit
 |} ]
 
 

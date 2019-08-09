@@ -18,12 +18,12 @@
 open Typedtree
 open Types
 
-exception Dont_match
+exception Dont_match of (Env.t * Errortrace.Moregen.t) option
 
 type position = Errortrace.position = First | Second
 
 type label_mismatch =
-  | Type
+  | Type of Env.t * (type_expr * type_expr) list * Errortrace.Equality.t
   | Mutability of position
 
 type record_mismatch =
@@ -33,7 +33,7 @@ type record_mismatch =
   | Unboxed_float_representation of position
 
 type constructor_mismatch =
-  | Type
+  | Type of Env.t * (type_expr * type_expr) list * Errortrace.Equality.t
   | Arity
   | Inline_record of record_mismatch
   | Kind of position
@@ -57,8 +57,9 @@ type type_mismatch =
   | Arity
   | Privacy
   | Kind
-  | Constraint
+  | Constraint of Env.t * (type_expr * type_expr) list * Errortrace.Equality.t
   | Manifest
+  | Manifest_type of Env.t * (type_expr * type_expr) list * Errortrace.Equality.t
   | Variance
   | Record_mismatch of record_mismatch
   | Variant_mismatch of variant_mismatch

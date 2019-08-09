@@ -9,14 +9,14 @@ Error: Type declarations do not match:
          type 'a x = private [> `x ] constraint 'a = 'a x
        is not included in
          type 'a x
-       Their constraints differ.
+       Constraints are different: 'b x as 'b is different from 'a
 |}, Principal{|
 Line 1:
 Error: Type declarations do not match:
          type 'a x = private 'a constraint 'a = [> `x ]
        is not included in
          type 'a x
-       Their constraints differ.
+       Constraints are different: [> `x ] is different from 'a
 |}];;
 
 

@@ -131,7 +131,7 @@ module Equality = struct
     (* Convert desc to type_expr * type_expr *)
     let flatten f = map (flatten_desc f)
 
-    exception Equality of t
+    exception Equality of (type_expr * type_expr) list * t
 
     let incompatible_fields name got expected =
       Incompatible_fields {name; diff={got; expected} }

@@ -24,4 +24,5 @@ Error: Signature mismatch:
          type t = X.t = A | B
        is not included in
          type t = int * bool
+       Type X.t is not equal to type int * bool
 |}];;

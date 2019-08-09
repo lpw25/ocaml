@@ -19,7 +19,7 @@ open Asttypes
 open Types
 
 exception Unify of Errortrace.Unification.t
-exception Equality of Errortrace.Equality.t
+exception Equality of (type_expr * type_expr) list * Errortrace.Equality.t
 exception Moregen of Errortrace.Moregen.t
 exception Subtype of Errortrace.Subtype.t * Errortrace.Unification.t
 
@@ -207,13 +207,16 @@ val reify_univars : Types.type_expr -> Types.type_expr
 type class_match_failure =
     CM_Virtual_class
   | CM_Parameter_arity_mismatch of int * int
-  | CM_Type_parameter_mismatch of Env.t * Errortrace.Equality.t
+  | CM_Type_parameter_mismatch of Env.t * (type_expr * type_expr) list
+                                  * Errortrace.Equality.t
   | CM_Class_type_mismatch of Env.t * class_type * class_type
   | CM_Parameter_mismatch of Env.t * Errortrace.Moregen.t
   | CM_Val_type_mismatch of string * Env.t * Errortrace.Moregen.t
-  | CM_Val_type_mismatch_eq of string * Env.t * Errortrace.Equality.t
+  | CM_Val_type_mismatch_eq of string * Env.t * (type_expr * type_expr) list
+                               * Errortrace.Equality.t
   | CM_Meth_type_mismatch of string * Env.t * Errortrace.Moregen.t
-  | CM_Meth_type_mismatch_eq of string * Env.t * Errortrace.Equality.t
+  | CM_Meth_type_mismatch_eq of string * Env.t * (type_expr * type_expr) list
+                                * Errortrace.Equality.t
   | CM_Non_mutable_value of string
   | CM_Non_concrete_value of string
   | CM_Missing_value of string

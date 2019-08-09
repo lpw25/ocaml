@@ -1155,6 +1155,9 @@ Error: Signature mismatch:
          val f : (< m : 'a. 'a * ('a * 'b) > as 'b) -> unit
        is not included in
          val f : < m : 'b. 'b * ('b * < m : 'c. 'c * 'a > as 'a) > -> unit
+       Type (< m : 'a. 'a * ('a * 'd) > as 'd) -> unit do not match with
+         < m : 'b. 'b * ('b * < m : 'c. 'c * 'e > as 'e) > -> unit
+       The universal variable 'b would escape its scope
 |}];;
 
 module M : sig type 'a t type u = <m: 'a. 'a t> end

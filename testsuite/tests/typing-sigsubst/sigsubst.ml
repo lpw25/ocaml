@@ -58,6 +58,8 @@ Error: In this `with' constraint, the new definition of M.t
          type t = int
        is not included in
          type t = M2.t
+       Type int is not equal to type M2.t
+       M2.t is abstract because no corresponding cmi file was found in path.
 |}]
 
 

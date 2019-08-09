@@ -89,4 +89,9 @@ Error: Signature mismatch:
            [> `B of [> `BA | `BB of int list ] | `C of unit ]
        is not included in
          val a : t -> t
+       Type
+         [ `A of int | `B of [ `BA | `BB of unit list ] | `C of unit ] ->
+         [ `A of int | `B of [ `BA | `BB of int list ] | `C of unit ]
+       do not match with t -> t
+       Types for tag `BB are incompatible
 |}]

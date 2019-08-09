@@ -157,6 +157,7 @@ val report_moregen_error:
     unit
 val report_equality_error:
     formatter -> Env.t ->
+    (type_expr * type_expr) list ->
     Errortrace.Equality.t ->
     ?type_expected_explanation:(formatter -> unit) ->
     (formatter -> unit) -> (formatter -> unit) ->

@@ -2238,7 +2238,7 @@ let report_unification_error ppf env tr
     ~error:true
 ;;
 
-let equality_error env tr txt1 ppf txt2 ty_expect_explanation =
+let equality_error env tr txt1 ppf txt2 subst ty_expect_explanation =
   let rec filter_trace keep_last = function
     | [] -> []
     | [Equality.Diff d as elt]
@@ -2252,16 +2252,25 @@ let equality_error env tr txt1 ppf txt2 ty_expect_explanation =
         Some(Errortrace.map_diff (may_prepare_expansion empty_tr) d)
     | _ -> None
   in
+  let rec match_names_for_substs = function
+    | [] -> ()
+    | ({desc = Tvar _} as l, ({desc = Tvar _} as r)) :: tl ->
+        match_names_for_substs tl;
+        let name = name_of_type new_name l in
+        names := (r, name) :: !names
+    | _ :: tl -> match_names_for_substs tl
+  in
   reset ();
+  match_names_for_substs subst;
   let tr = prepare_equality_trace (fun t t' -> t, hide_variant_name t') tr in
   let mis = equality_mismatch txt1 env tr in
   handle_trace filter_trace prepare_expansion_head
     env tr "is not equal to type" mis txt1 ppf txt2 ty_expect_explanation
 
-let report_equality_error ppf env tr
+let report_equality_error ppf env subst tr
       ?(type_expected_explanation = fun _ -> ())
       txt1 txt2 =
-  wrap_printing_env env (fun () -> equality_error env tr txt1 ppf txt2
+  wrap_printing_env env (fun () -> equality_error env tr txt1 ppf txt2 subst
                                      type_expected_explanation)
     ~error:true
 ;;

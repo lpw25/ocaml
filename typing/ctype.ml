@@ -3456,9 +3456,10 @@ let rec eqtype rename type_pairs subst env t1 t2 =
     | (Tvar _, Tvar _) when rename ->
         begin try
           normalize_subst subst;
-          if List.assq t1 !subst != t2 then raise (Equality [])
+          if List.assq t1 !subst != t2 then raise (Equality (!subst, []))
         with Not_found ->
-          if List.exists (fun (_, t) -> t == t2) !subst then raise (Equality []);
+          if List.exists (fun (_, t) -> t == t2) !subst
+          then raise (Equality (!subst, []));
           subst := (t1, t2) :: !subst
         end
     | (Tconstr (p1, [], _), Tconstr (p2, [], _)) when Path.same p1 p2 ->
@@ -3477,10 +3478,10 @@ let rec eqtype rename type_pairs subst env t1 t2 =
           | (Tvar _, Tvar _) when rename ->
               begin try
                 normalize_subst subst;
-                if List.assq t1' !subst != t2' then raise (Equality [])
+                if List.assq t1' !subst != t2' then raise (Equality (!subst, []))
               with Not_found ->
                 if List.exists (fun (_, t) -> t == t2') !subst
-                then raise (Equality []);
+                then raise (Equality (!subst, []));
                 subst := (t1', t2') :: !subst
               end
           | (Tarrow (l1, t1, u1, _), Tarrow (l2, t2, u2, _)) when l1 = l2
@@ -3496,10 +3497,12 @@ let rec eqtype rename type_pairs subst env t1 t2 =
               begin try
                 unify_package env (eqtype_list rename type_pairs subst env)
                   t1'.level p1 n1 tl1 t2'.level p2 n2 tl2
-              with Not_found -> raise (Equality [])
+              with Not_found -> raise (Equality (!subst, []))
               end
-          | (Tnil,  Tconstr _ ) -> raise (Equality [Obj(Abstract_row Second)])
-          | (Tconstr _,  Tnil ) -> raise (Equality [Obj(Abstract_row First)])
+          | (Tnil,  Tconstr _ ) ->
+              raise (Equality (!subst, [Obj(Abstract_row Second)]))
+          | (Tconstr _,  Tnil ) ->
+              raise (Equality (!subst, [Obj(Abstract_row First)]))
           | (Tvariant row1, Tvariant row2) ->
               eqtype_row rename type_pairs subst env row1 row2
           | (Tobject (fi1, _nm1), Tobject (fi2, _nm2)) ->
@@ -3516,21 +3519,22 @@ let rec eqtype rename type_pairs subst env t1 t2 =
                   enter_poly env univar_pairs t1 tl1 t2 tl2
                    (eqtype rename type_pairs subst env)
                 with Escape {kind; context} ->
-                  raise (Equality [Equality.Escape {kind; context}])
+                  raise (Equality (!subst, [Equality.Escape {kind; context}]))
               end
           | (Tunivar _, Tunivar _) ->
               begin try
                 unify_univar t1' t2' !univar_pairs
-                with Unify _ -> raise (Equality [])
+              with Unify _ -> raise (Equality (!subst, []))
               end
           | (_, _) ->
-              raise (Equality [])
+              raise (Equality (!subst, []))
         end
-  with Equality trace ->  raise ( Equality (Equality.diff t1 t2 :: trace) )
+  with Equality (subst, trace) ->
+    raise ( Equality (subst, Equality.diff t1 t2 :: trace) )
 
 and eqtype_list rename type_pairs subst env tl1 tl2 =
   if List.length tl1 <> List.length tl2 then
-    raise (Equality []);
+    raise (Equality (!subst, []));
   List.iter2 (eqtype rename type_pairs subst env) tl1 tl2
 
 and eqtype_fields rename type_pairs subst env ty1 ty2 =
@@ -3549,16 +3553,19 @@ and eqtype_fields rename type_pairs subst env ty1 ty2 =
   let (pairs, miss1, miss2) = associate_fields fields1 fields2 in
   eqtype rename type_pairs subst env rest1 rest2;
   match miss1, miss2 with
-  | ((n, _, _)::_, _) -> raise (Equality [Obj(Missing_field (Second, n))])
-  | (_, (n, _, _)::_) -> raise (Equality [Obj(Missing_field (First, n))])
+  | ((n, _, _)::_, _) ->
+      raise (Equality (!subst, [Obj(Missing_field (Second, n))]))
+  | (_, (n, _, _)::_) ->
+      raise (Equality (!subst, [Obj(Missing_field (First, n))]))
   | [], [] ->
       List.iter
         (function (n, k1, t1, k2, t2) ->
            eqtype_kind k1 k2;
            try
              eqtype rename type_pairs subst env t1 t2;
-           with Equality trace ->
-             raise ( Equality (Equality.incompatible_fields n t1 t2 :: trace )))
+           with Equality (subst, trace) ->
+             raise ( Equality
+                       (subst, Equality.incompatible_fields n t1 t2 :: trace)))
         pairs
 
 and eqtype_kind k1 k2 =
@@ -3567,7 +3574,7 @@ and eqtype_kind k1 k2 =
   match k1, k2 with
   | (Fvar _, Fvar _)
   | (Fpresent, Fpresent) -> ()
-  | _                    -> raise (Equality [])
+  | _                    -> assert false
 
 and eqtype_row rename type_pairs subst env row1 row2 =
   (* Try expansion, needed when called from Includecore.type_manifest *)
@@ -3577,23 +3584,25 @@ and eqtype_row rename type_pairs subst env row1 row2 =
   let row1 = row_repr row1 and row2 = row_repr row2 in
   let r1, r2, pairs = merge_row_fields row1.row_fields row2.row_fields in
   if row1.row_closed <> row2.row_closed
-  then raise (Equality [Variant (Openness (
-    if row2.row_closed then First else Second))]);
+  then raise (Equality (!subst, [Variant (Openness (
+    if row2.row_closed then First else Second))]));
   if not row1.row_closed then begin
     match r1, r2 with
-    | (lb1, _)::_, _ -> raise (Equality [Variant (Missing (Second, lb1))])
-    | _, (lb2, _)::_ -> raise (Equality [Variant (Missing (First, lb2))])
+    | (lb1, _)::_, _ ->
+        raise (Equality (!subst, [Variant (Missing (Second, lb1))]))
+    | _, (lb2, _)::_ ->
+        raise (Equality (!subst, [Variant (Missing (First, lb2))]))
     | _, _ -> ()
   end;
   begin
     match filter_row_fields false r1 with
     | [] -> ();
-    | (lb, _) :: _ -> raise (Equality [Variant (Missing (Second, lb))])
+    | (lb, _) :: _ -> raise (Equality (!subst, [Variant (Missing (Second, lb))]))
   end;
   begin
     match filter_row_fields false r2 with
     | [] -> ()
-    | (lb, _) :: _ -> raise (Equality [Variant (Missing (First, lb))])
+    | (lb, _) :: _ -> raise (Equality (!subst, [Variant (Missing (First, lb))]))
   end;
   if not (static_row row1) then
     eqtype rename type_pairs subst env row1.row_more row2.row_more;
@@ -3618,13 +3627,13 @@ and eqtype_row rename type_pairs subst env row1 row2 =
              end
          | Rpresent None, Rpresent None -> ()
          | Rabsent, Rabsent -> ()
-         | Rpresent (Some _), Rpresent None -> raise (Equality [])
-         | Rpresent None, Rpresent (Some _) -> raise (Equality [])
-         | Rpresent _, Reither _ -> raise (Equality [])
-         | Reither _, Rpresent _ -> raise (Equality [])
-         | _ -> raise (Equality [])
-       with Equality err ->
-         raise (Equality (Variant (Incompatible_types_for l):: err)))
+         | Rpresent (Some _), Rpresent None -> raise (Equality (!subst, []))
+         | Rpresent None, Rpresent (Some _) -> raise (Equality (!subst, []))
+         | Rpresent _, Reither _ -> raise (Equality (!subst, []))
+         | Reither _, Rpresent _ -> raise (Equality (!subst, []))
+         | _ -> raise (Equality (!subst, []))
+       with Equality (subst, trace) ->
+         raise (Equality (subst, Variant (Incompatible_types_for l):: trace)))
     pairs
 
 (* Must empty univar_pairs first *)
@@ -3654,13 +3663,16 @@ let is_equal env rename tyl1 tyl2 =
 type class_match_failure =
     CM_Virtual_class
   | CM_Parameter_arity_mismatch of int * int
-  | CM_Type_parameter_mismatch of Env.t * Equality.t
+  | CM_Type_parameter_mismatch of Env.t * (type_expr * type_expr) list
+                                  * Equality.t
   | CM_Class_type_mismatch of Env.t * class_type * class_type
   | CM_Parameter_mismatch of Env.t * Moregen.t
   | CM_Val_type_mismatch of string * Env.t * Moregen.t
-  | CM_Val_type_mismatch_eq of string * Env.t * Equality.t
+  | CM_Val_type_mismatch_eq of string * Env.t * (type_expr * type_expr) list
+                               * Equality.t
   | CM_Meth_type_mismatch of string * Env.t * Moregen.t
-  | CM_Meth_type_mismatch_eq of string * Env.t * Equality.t
+  | CM_Meth_type_mismatch_eq of string * Env.t * (type_expr * type_expr) list
+                                * Equality.t
   | CM_Non_mutable_value of string
   | CM_Non_concrete_value of string
   | CM_Missing_value of string
@@ -3817,17 +3829,18 @@ let equal_clsig trace type_pairs subst env sign1 sign2 =
     List.iter
       (fun (lab, _k1, t1, _k2, t2) ->
          begin try eqtype true type_pairs subst env t1 t2 with
-           Equality trace ->
-           raise (Failure [CM_Meth_type_mismatch_eq
-                             (lab, env, expand_equality_trace env trace)])
+           Equality (subst, trace) ->
+             raise (Failure [CM_Meth_type_mismatch_eq
+                             (lab, env, subst, expand_equality_trace env trace)])
          end)
       pairs;
     Vars.iter
       (fun lab (_, _, ty) ->
          let (_, _, ty') = Vars.find lab sign1.csig_vars in
-         try eqtype true type_pairs subst env ty' ty with Equality trace ->
+         try eqtype true type_pairs subst env ty' ty
+         with Equality (subst, trace) ->
            raise (Failure [CM_Val_type_mismatch_eq
-                             (lab, env, expand_equality_trace env trace)]))
+                           (lab, env, subst, expand_equality_trace env trace)]))
       sign2.csig_vars
   with
     Failure error when trace ->
@@ -3916,9 +3929,10 @@ let match_class_declarations env patt_params patt_type subj_params subj_type =
         if lp  <> ls then
           raise (Failure [CM_Parameter_arity_mismatch (lp, ls)]);
         List.iter2 (fun p s ->
-          try eqtype true type_pairs subst env p s with Equality trace ->
+          try eqtype true type_pairs subst env p s
+          with Equality (subst, trace) ->
             raise (Failure [CM_Type_parameter_mismatch
-                               (env, expand_equality_trace env trace)]))
+                               (env, subst, expand_equality_trace env trace)]))
           patt_params subj_params;
      (* old code: equal_clty false type_pairs subst env patt_type subj_type; *)
         equal_clsig false type_pairs subst env sign1 sign2;
