@@ -665,7 +665,8 @@ let check_coherence env loc dpath decl =
                     (Subst.type_declaration
                        (Subst.add_type_path dpath path Subst.identity) decl)
                 with
-                | Ctype.Equality _ -> Some Includecore.Constraint
+                | Ctype.Equality trace ->
+                    Some (Includecore.Constraint (env, trace))
             in
             if err <> None then
               raise(Error(loc, Definition_mismatch (ty, err)))

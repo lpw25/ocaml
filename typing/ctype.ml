@@ -55,16 +55,16 @@ open Errortrace
 (**** Errors ****)
 
 module Unification = Errortrace.Unification
-exception Unify = Unification.Unify
+exception Unify of Unification.t
 
 module Equality = Errortrace.Equality
-exception Equality = Equality.Equality
+exception Equality of Equality.t
 
 module Moregen = Errortrace.Moregen
-exception Moregen = Moregen.Moregen
+exception Moregen of Moregen.t
 
 module Subtype = Errortrace.Subtype
-exception Subtype = Subtype.Subtype
+exception Subtype of Subtype.t * Unification.t
 
 exception Escape of {kind : desc Errortrace.escape;
                         context : type_expr option}
@@ -1708,7 +1708,7 @@ let unify_occur env t1 t2 =
   try
     occur env t1 t2
   with
-  | Occur -> raise (Unification.rec_occur t1 t2)
+  | Occur -> raise (Unify[Unification.Rec_occur(t1, t2)])
 
 let occur_in env ty0 t =
   try occur env ty0 t; false with Occur | Escape _ -> true
@@ -3163,7 +3163,7 @@ let rec moregen inst_nongen type_pairs env t1 t2 =
         moregen_wrap_escape (fun () ->
           update_scope t1.scope t2;
           try occur env t1 t2
-          with Occur -> raise (Moregen.rec_occur t1 t2));
+          with Occur -> raise (Moregen [Moregen.Rec_occur(t1, t2)]));
         link_type t1 t2
     | (Tconstr (p1, [], _), Tconstr (p2, [], _)) when Path.same p1 p2 ->
         ()

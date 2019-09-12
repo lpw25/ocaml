@@ -61,10 +61,6 @@ module Unification: sig
   (** Switch [expected] and [got] *)
   val swap: t -> t
 
-  exception Unify of t
-
-  val rec_occur :  type_expr -> type_expr -> exn
-
   val map : (desc -> desc) -> desc elt list -> desc elt list
 
   val incompatible_fields : string -> type_expr -> type_expr -> desc elt
@@ -96,8 +92,6 @@ module Equality: sig
       [trace] to either [f x.t expanded] if [x.expanded=Some expanded]
       or [f x.t x.t] otherwise *)
   val flatten: (type_expr -> type_expr -> 'a) -> t -> 'a elt list
-
-  exception Equality of t
 
   val map : (desc -> desc) -> desc elt list -> desc elt list
 
@@ -134,9 +128,6 @@ module Moregen : sig
       or [f x.t x.t] otherwise *)
   val flatten: (type_expr -> type_expr -> 'a) -> t -> 'a elt list
 
-  exception Moregen of t
-
-  val rec_occur :  type_expr -> type_expr -> exn
   val incompatible_fields : string -> type_expr -> type_expr -> desc elt
 end
 
@@ -152,5 +143,4 @@ module Subtype : sig
 
   val flatten: (type_expr -> type_expr -> 'a) -> t -> 'a elt list
 
-  exception Subtype of t * Unification.t
 end

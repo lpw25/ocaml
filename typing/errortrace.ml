@@ -76,10 +76,11 @@ module Unification = struct
     | Escape {kind=(Univ _ | Self|Constructor _ | Module_type _ |Constraint); _}
     | Variant _ | Obj _
     | Incompatible_fields _ as x -> x
-  let map f = List.map (map_elt f)
+
+  let map f t = List.map (map_elt f) t
 
   (* Convert desc to type_expr * type_expr *)
-  let flatten f = map (flatten_desc f)
+  let flatten f t = map (flatten_desc f) t
 
   (* Permute the expected and actual values *)
   let swap_elt = function
@@ -93,9 +94,6 @@ module Unification = struct
     | x -> x
   let swap x = List.map swap_elt x
 
-  exception Unify of t
-
-  let rec_occur x y = Unify[Rec_occur(x, y)]
   let incompatible_fields name got expected =
     Incompatible_fields {name; diff={got; expected} }
 end
@@ -131,8 +129,6 @@ module Equality = struct
     (* Convert desc to type_expr * type_expr *)
     let flatten f = map (flatten_desc f)
 
-    exception Equality of t
-
     let incompatible_fields name got expected =
       Incompatible_fields {name; diff={got; expected} }
 end
@@ -166,13 +162,11 @@ module Moregen = struct
       | Obj _
       | Escape {kind=(Univ _ | Self|Constructor _ |Module_type _|Constraint); _}
       | Incompatible_fields _ as x -> x
-    let map f = List.map (map_elt f)
 
-    let flatten f = map (flatten_desc f)
+    let map f t = List.map (map_elt f) t
 
-    exception Moregen of t
+    let flatten f t = map (flatten_desc f) t
 
-    let rec_occur x y = Moregen [Rec_occur(x, y)]
     let incompatible_fields name got expected =
       Incompatible_fields {name; diff={got; expected} }
 end
@@ -187,9 +181,9 @@ module Subtype = struct
 
   let map_elt f = function
     | Diff x -> Diff (map_diff f x)
-  let map f = List.map (map_elt f)
 
-  let flatten f = map (flatten_desc f)
+  let map f t = List.map (map_elt f) t
 
-  exception Subtype of t * Unification.t
+  let flatten f t = map (flatten_desc f) t
+
 end
