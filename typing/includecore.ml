@@ -494,7 +494,7 @@ let type_manifest env ty1 params1 ty2 params2 priv2 =
     match
       match priv2 with
       | Private -> Ctype.equal_private env params1 ty1 params2 ty2
-      | Publice -> Ctype.equal env true (params1 @ [ty1]) (params2 @ [ty2])
+      | Public -> Ctype.equal env true (params1 @ [ty1]) (params2 @ [ty2])
     with
     | () -> None
     | exception Ctype.Equality trace -> Some (Manifest (env, trace))

@@ -66,11 +66,11 @@ exception Moregen of Moregen.t
 module Subtype = Errortrace.Subtype
 exception Subtype of Subtype.t * Unification.t
 
-exception Escape of {kind : desc Errortrace.escape;
-                        context : type_expr option}
+exception Escape of desc Errortrace.escape
 
-let escape kind = Escape {kind; context = None}
-let scope_escape kind = escape (Equation (short kind))
+let escape kind = {kind; context = None}
+let escape_exn kind = Escape (escape kind)
+let scope_escape_exn kind = escape_exn (Equation (short kind))
 
 exception Tags of label * label
 
@@ -698,17 +698,17 @@ let check_scope_escape env level ty =
     if ty.level >= lowest_level then begin
       ty.level <- pivot_level - ty.level;
       if level < ty.scope then
-        raise(scope_escape ty);
+        raise(scope_escape_exn ty);
       begin match ty.desc with
       | Tconstr (p, _, _) when level < Path.scope p ->
           begin match !forward_try_expand_safe env ty with
           | ty' -> aux ty'
           | exception Cannot_expand ->
-              raise (escape (Constructor p))
+              raise (escape_exn (Constructor p))
           end
       | Tpackage (p, nl, tl) when level < Path.scope p ->
           let p' = normalize_package_path env p in
-          if Path.same p p' then raise (escape (Module_type p));
+          if Path.same p p' then raise (escape_exn (Module_type p));
           aux { ty with desc = Tpackage (p', nl, tl) }
       | _ ->
         iter_type_expr loop ty
@@ -726,7 +726,7 @@ let check_scope_escape env level ty =
 let update_scope scope ty =
   let ty = repr ty in
   let scope = max scope ty.scope in
-  if ty.level < scope then raise (scope_escape ty);
+  if ty.level < scope then raise (scope_escape_exn ty);
   set_scope ty scope
 
 (* Note: the level of a type constructor must be greater than its binding
@@ -740,7 +740,7 @@ let update_scope scope ty =
 let rec update_level env level expand ty =
   let ty = repr ty in
   if ty.level > level then begin
-    if level < ty.scope then raise (scope_escape ty);
+    if level < ty.scope then raise (scope_escape_exn ty);
     match ty.desc with
       Tconstr(p, _tl, _abbrev) when level < Path.scope p ->
         (* Try first to replace an abbreviation by its expansion. *)
@@ -748,7 +748,7 @@ let rec update_level env level expand ty =
           link_type ty (!forward_try_expand_safe env ty);
           update_level env level expand ty
         with Cannot_expand ->
-          raise (escape(Constructor p))
+          raise (escape_exn(Constructor p))
         end
     | Tconstr(_, _ :: _, _) when expand ->
         begin try
@@ -760,7 +760,7 @@ let rec update_level env level expand ty =
         end
     | Tpackage (p, nl, tl) when level < Path.scope p ->
         let p' = normalize_package_path env p in
-        if Path.same p p' then raise (escape (Module_type p));
+        if Path.same p p' then raise (escape_exn (Module_type p));
         log_type ty; ty.desc <- Tpackage (p', nl, tl);
         update_level env level expand ty
     | Tobject(_, ({contents=Some(p, _tl)} as nm))
@@ -779,7 +779,7 @@ let rec update_level env level expand ty =
         iter_type_expr (update_level env level expand) ty
     | Tfield(lab, _, ty1, _)
       when lab = dummy_method && (repr ty1).level > level ->
-        raise (escape Self)
+        raise (escape_exn Self)
     | _ ->
         set_level ty level;
         (* XXX what about abbreviations in Tconstr ? *)
@@ -1472,13 +1472,13 @@ let expand_abbrev_gen kind find_type_expansion env ty =
             let ty' =
               try
                 subst env level kind abbrev (Some ty) params args body
-              with Unify _ -> raise (escape Constraint)
+              with Unify _ -> raise (escape_exn Constraint)
             in
             (* For gadts, remember type as non exportable *)
             (* The ambiguous level registered for ty' should be the highest *)
             if !trace_gadt_instances then begin
               let scope = max lv ty.scope in
-              if level < scope then raise (scope_escape ty);
+              if level < scope then raise (scope_escape_exn ty);
               set_scope ty scope;
               set_scope ty' scope
             end;
@@ -1794,7 +1794,7 @@ let occur_univar env ty =
       match ty.desc with
         Tunivar _ ->
           if not (TypeSet.mem ty bound) then
-            raise (escape (Univ ty))
+            raise (escape_exn (Univ ty))
       | Tpoly (ty, tyl) ->
           let bound = List.fold_right TypeSet.add (List.map repr tyl) bound in
           occur_rec bound  ty
@@ -1845,7 +1845,7 @@ let univars_escape env univar_pairs vl ty =
         Tpoly (t, tl) ->
           if List.exists (fun t -> TypeSet.mem (repr t) family) tl then ()
           else occur t
-      | Tunivar _ -> if TypeSet.mem t family then raise (escape (Univ t))
+      | Tunivar _ -> if TypeSet.mem t family then raise (escape_exn (Univ t))
       | Tconstr (_, [], _) -> ()
       | Tconstr (p, tl, _) ->
           begin try
@@ -3127,6 +3127,11 @@ let moregen_update_scope scope ty =
     update_scope scope ty
   with Escape e -> raise (Moregen [Escape e])
 
+let occur_for_moregen env t1 t2 =
+  try
+    occur env t1 t2
+  with Occur -> raise (Moregen [Moregen.Rec_occur(t1, t2)])
+
 (*
    Update the level of [ty]. First check that the levels of generic
    variables from the subject are not lowered.
@@ -3169,8 +3174,7 @@ let rec moregen inst_nongen type_pairs env t1 t2 =
     | (Tvar _, _) when may_instantiate inst_nongen t1 ->
         moregen_occur env t1.level t2;
         moregen_update_scope t1.scope t2;
-        try occur env t1 t2
-        with Occur -> raise (Moregen [Moregen.Rec_occur(t1, t2)]);
+        occur_for_moregen env t1 t2;
         link_type t1 t2
     | (Tconstr (p1, [], _), Tconstr (p2, [], _)) when Path.same p1 p2 ->
         ()
@@ -3648,7 +3652,7 @@ let is_equal env rename tyl1 tyl2 =
   | () -> true
   | exception Equality _ -> false
 
-let equal_private env params1 ty1 params2 ty2 =
+let rec equal_private env params1 ty1 params2 ty2 =
   match equal env true (params1 @ [ty1]) (params2 @ [ty2]) with
   | () -> ()
   | exception (Equality _ as err) ->
@@ -4174,10 +4178,6 @@ let subtypes = TypePairs.create 17
 
 let subtype_error env trace =
   raise (Subtype (expand_subtype_trace env (List.rev trace), []))
-
-let fail_if_escape f =
-  try f ()
-  with Escape _ -> assert false
 
 let rec subtype_rec env trace t1 t2 cstrs =
   let t1 = repr t1 in

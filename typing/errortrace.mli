@@ -9,7 +9,7 @@ type 'a diff = { got: 'a; expected: 'a}
 val map_diff: ('a -> 'b) -> 'a diff -> 'b diff
 
 (** Scope escape related errors *)
-type 'a escape =
+type 'a escape_kind =
   | Constructor of Path.t
   | Univ of type_expr
   (* The type_expr argument of [Univ] is always a [Tunivar _],
@@ -18,6 +18,10 @@ type 'a escape =
   | Module_type of Path.t
   | Equation of 'a
   | Constraint
+
+type 'a escape =
+  { kind : 'a escape_kind;
+    context : type_expr option }
 
 val short : type_expr -> desc
 
@@ -45,7 +49,7 @@ module Unification: sig
     | Diff of 'a diff
     | Variant of variant
     | Obj of obj
-    | Escape of {context: type_expr option; kind:'a escape}
+    | Escape of 'a escape
     | Incompatible_fields of {name:string; diff: type_expr diff }
     | Rec_occur of type_expr * type_expr
 
@@ -81,7 +85,7 @@ module Equality: sig
     | Diff of 'a diff
     | Variant of variant
     | Obj of obj
-    | Escape of {context: type_expr option; kind:'a escape}
+    | Escape of 'a escape
     | Incompatible_fields of {name:string; diff: type_expr diff }
 
   type t = desc elt list
@@ -113,7 +117,7 @@ module Moregen : sig
     | Diff of 'a diff
     | Variant of variant
     | Obj of obj
-    | Escape of {context:type_expr option; kind: 'a escape}
+    | Escape of 'a escape
     | Incompatible_fields of {name:string; diff: type_expr diff }
     | Rec_occur of type_expr * type_expr
 

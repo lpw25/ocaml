@@ -23,8 +23,6 @@ exception Equality of Errortrace.Equality.t
 exception Moregen of Errortrace.Moregen.t
 exception Subtype of Errortrace.Subtype.t * Errortrace.Unification.t
 
-exception Escape of {kind : Errortrace.desc Errortrace.escape;
-                     context : type_expr option}
 exception Tags of label * label
 exception Cannot_expand
 exception Cannot_apply
@@ -231,8 +229,8 @@ val equal: Env.t -> bool -> type_expr list -> type_expr list -> unit
            [/\x1.../\xn.tau] and [/\y1.../\yn.sigma] are equivalent. *)
 val is_equal : Env.t -> bool -> type_expr list -> type_expr list -> bool
 val equal_private :
-        Env.t -> type_expr -> type_expr list ->
-        type_expr -> type_expr list -> unit
+        Env.t -> type_expr list -> type_expr -> 
+        type_expr list -> type_expr -> unit
 (* [equal_private env t1 params1 t2 params2] checks that [t1::params1]
    equals [t2::params2] but it is allowed to expand [t1] if it is a
    private abbreviations. *)
