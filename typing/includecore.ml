@@ -490,23 +490,15 @@ let type_manifest env ty1 params1 ty2 params2 priv2 =
       | None -> None
       | Some err -> Some (Private_object(ty1, ty2, err))
     end
-  | _ ->
-    let rec check_super ty1 =
-      match Ctype.equal env true (params1 @ [ty1]) (params2 @ [ty2]) with
-      | () -> ()
-      | exception (Ctype.Equality _ as err) ->
-          if priv2 = Private
-          then
-            match check_super (Ctype.try_expand_once_opt env
-                                 (Ctype.expand_head env ty1)) with
-            | () -> ()
-            | exception Ctype.Cannot_expand -> raise err
-          else
-            raise err
-    in
-    match check_super ty1 with
+  | _ -> begin
+    match
+      match priv2 with
+      | Private -> Ctype.equal_private env params1 ty1 params2 ty2
+      | Publice -> Ctype.equal env true (params1 @ [ty1]) (params2 @ [ty2])
+    with
     | () -> None
     | exception Ctype.Equality trace -> Some (Manifest (env, trace))
+  end
 
 let type_declarations ?(equality = false) ~loc env ~mark name
       decl1 path decl2 =
