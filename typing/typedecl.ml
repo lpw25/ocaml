@@ -654,19 +654,18 @@ let check_coherence env loc dpath decl =
             let err =
               if List.length args <> List.length decl.type_params
               then Some Includecore.Arity
-              else
-                try
-                  (Ctype.equal env false args decl.type_params);
-                  Includecore.type_declarations ~loc ~equality:true env
-                    ~mark:true
-                    (Path.last path)
-                    decl'
-                    dpath
-                    (Subst.type_declaration
-                       (Subst.add_type_path dpath path Subst.identity) decl)
-                with
-                | Ctype.Equality trace ->
+              else begin
+                match Ctype.equal env false args decl.type_params with
+                | exception Ctype.Equality trace ->
                     Some (Includecore.Constraint (env, trace))
+                | () ->
+                    let subst =
+                      Subst.type_declaration
+                        (Subst.add_type_path dpath path Subst.identity) decl
+                    in
+                    Includecore.type_declarations ~loc ~equality:true env
+                      ~mark:true (Path.last path) decl' dpath subst
+              end
             in
             if err <> None then
               raise(Error(loc, Definition_mismatch (ty, err)))
@@ -726,13 +725,11 @@ let check_well_founded env loc path to_check ty =
         if to_check p then Option.iter raise arg_exn
         else Btype.iter_type_expr (check ty0 TypeSet.empty) ty;
         begin try
-          let ty' = Ctype.try_expand_once_opt env ty in
+          let ty' = Ctype.try_expand_safe_opt env ty in
           let ty0 = if TypeSet.is_empty parents then ty else ty0 in
           check ty0 (TypeSet.add ty parents) ty'
         with
-        | Ctype.Cannot_expand -> Option.iter raise arg_exn
-        | Ctype.Escape {kind; context} ->
-            raise (Ctype.Unify [Escape {kind; context}])
+          Ctype.Cannot_expand -> Option.iter raise arg_exn
         end
     | _ -> Option.iter raise arg_exn
   in

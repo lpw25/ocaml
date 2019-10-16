@@ -77,9 +77,8 @@ let value_descriptions ~loc env ~mark cxt subst id vd1 vd2 =
   let vd2 = Subst.value_description subst vd2 in
   try
     Includecore.value_descriptions ~loc env (Ident.name id) vd1 vd2
-  with
-  | Includecore.Dont_match err ->
-      raise(Error[cxt, env, Value_descriptions(id, vd1, vd2, err)])
+  with Includecore.Dont_match err ->
+    raise(Error[cxt, env, Value_descriptions(id, vd1, vd2, err)])
 
 (* Inclusion between type declarations *)
 

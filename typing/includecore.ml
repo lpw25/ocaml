@@ -80,21 +80,23 @@ let value_descriptions ~loc env name
     vd1.val_attributes vd2.val_attributes
     name;
   match Ctype.moregeneral env true vd1.val_type vd2.val_type with
+  | exception Ctype.Moregen trace -> raise (Dont_match (Type (env, trace)))
   | () -> begin
       match (vd1.val_kind, vd2.val_kind) with
       | (Val_prim p1, Val_prim p2) -> begin
-        match primitive_descriptions p1 p2 with
-        | None -> Tcoerce_none
-        | Some err -> raise (Dont_match (Primitive_mismatch err))
-      end
+          match primitive_descriptions p1 p2 with
+          | None -> Tcoerce_none
+          | Some err -> raise (Dont_match (Primitive_mismatch err))
+        end
       | (Val_prim p, _) ->
-          let pc = {pc_desc = p; pc_type = vd2.Types.val_type;
-                  pc_env = env; pc_loc = vd1.Types.val_loc; } in
+          let pc =
+            { pc_desc = p; pc_type = vd2.Types.val_type;
+              pc_env = env; pc_loc = vd1.Types.val_loc; }
+          in
           Tcoerce_primitive pc
       | (_, Val_prim _) -> raise (Dont_match Not_a_primitive)
       | (_, _) -> Tcoerce_none
     end
-  | exception Ctype.Moregen trace -> raise (Dont_match (Type (env, trace)))
 
 (* Inclusion between "private" annotations *)
 
@@ -294,8 +296,8 @@ let rec compare_constructor_arguments ~loc env params1 params2 arg1 arg2 =
       else begin
         (* Ctype.equal must be called on all arguments at once, cf. PR#7378 *)
         match Ctype.equal env true (params1 @ arg1) (params2 @ arg2) with
-        | () -> None
         | exception Ctype.Equality trace -> Some (Type (env, trace))
+        | () -> None
       end
   | Types.Cstr_record l1, Types.Cstr_record l2 ->
       Option.map
@@ -308,8 +310,8 @@ and compare_constructors ~loc env params1 params2 res1 res2 args1 args2 =
   match res1, res2 with
   | Some r1, Some r2 -> begin
       match Ctype.equal env true [r1] [r2] with
-      | () -> compare_constructor_arguments ~loc env [r1] [r2] args1 args2
       | exception Ctype.Equality trace -> Some (Type (env, trace))
+      | () -> compare_constructor_arguments ~loc env [r1] [r2] args1 args2
     end
   | Some _, None -> Some (Explicit_return_type First)
   | None, Some _ -> Some (Explicit_return_type Second)
@@ -341,18 +343,18 @@ and compare_variants ~loc env params1 params2 n
       end
 
 and compare_labels env params1 params2
-      (ld1 : Types.label_declaration)
-      (ld2 : Types.label_declaration) =
-      if ld1.ld_mutable <> ld2.ld_mutable
-      then
-        let ord = if ld1.ld_mutable = Asttypes.Mutable then First else Second in
-        Some (Mutability  ord)
-      else
-        match Ctype.equal env true
-                   (params1 @ [ld1.ld_type]) (params2 @ [ld2.ld_type]) with
-        | () -> None
-        | exception Ctype.Equality trace ->
-            Some (Type (env, trace) : label_mismatch)
+      (ld1 : Types.label_declaration) (ld2 : Types.label_declaration) =
+  if ld1.ld_mutable <> ld2.ld_mutable then begin
+    let ord = if ld1.ld_mutable = Asttypes.Mutable then First else Second in
+    Some (Mutability  ord)
+  end else begin
+    let tl1 = params1 @ [ld1.ld_type] in
+    let tl2 = params2 @ [ld2.ld_type] in
+    match Ctype.equal env true tl1 tl2 with
+    | exception Ctype.Equality trace ->
+        Some (Type (env, trace) : label_mismatch)
+    | () -> None
+  end
 
 and compare_records ~loc env params1 params2 n
     (labels1 : Types.label_declaration list)
@@ -420,27 +422,35 @@ let private_variant env row1 params1 row2 params2 =
     let rec loop tl1 tl2 pairs =
       match pairs with
       | [] -> begin
-        match Ctype.equal env true tl1 tl2 with
-        | () -> None
-        | exception Ctype.Equality trace ->
-            Some (Types (env, trace) : private_variant_mismatch)
-      end
+          match Ctype.equal env true tl1 tl2 with
+          | exception Ctype.Equality trace ->
+              Some (Types (env, trace) : private_variant_mismatch)
+          | () -> None
+        end
       | (s, f1, f2) :: pairs -> begin
           match Btype.row_field_repr f1, Btype.row_field_repr f2 with
-          | Rpresent(Some t1),
-              (Rpresent(Some t2) | Reither(false, [t2], _, _)) ->
+          | Rpresent to1, Rpresent to2 -> begin
+              match to1, to2 with
+              | Some t1, Some t2 ->
                   loop (t1 :: tl1) (t2 :: tl2) pairs
-          | Rpresent None, (Rpresent None | Reither(true, [], _, _)) ->
-              loop tl1 tl2 pairs
-          | Rpresent _, (Rpresent _ | Reither _) ->
-              Some (Incompatible_types_for s)
+              | None, None ->
+                  loop tl1 tl2 pairs
+              | Some _, None | None, Some _ ->
+                  Some (Incompatible_types_for s)
+            end
+          | Rpresent to1, Reither(const2, tl2, _, _) -> begin
+              match to1, const2, tl2 with
+              | Some t1, false, [t2] -> loop (t1 :: tl1) (t2 :: tl2) pairs
+              | None, true, [] -> loop tl1 tl2 pairs
+              | _, _, _ -> Some (Incompatible_types_for s)
+            end
           | Rpresent _, Rabsent ->
               Some (Missing (Second, s) : private_variant_mismatch)
-          | Reither(c1,ts1,_,_), Reither(c2,ts2,_,_) ->
-              if List.length tl1 <> List.length tl2 || c1 <> c2 then
-                Some (Incompatible_types_for s)
-              else
+          | Reither(const1, ts1, _, _), Reither(const2, ts2, _, _) ->
+              if const1 = const2 && List.length ts1 = List.length ts2 then
                 loop (ts1 @ tl1) (ts2 @ tl2) pairs
+              else
+                Some (Incompatible_types_for s)
           | Reither _, Rpresent _ ->
               Some (Presence s)
           | Reither _, Rabsent ->
@@ -449,7 +459,7 @@ let private_variant env row1 params1 row2 params2 =
               loop tl1 tl2 pairs
           | Rabsent, Rpresent _ ->
               Some (Missing (First, s) : private_variant_mismatch)
-      end
+        end
     in
     loop params1 params2 pairs
 
@@ -466,8 +476,8 @@ let private_object env fields1 params1 fields2 params2 =
   in
   begin
     match Ctype.equal env true (params1 @ tl1) (params2 @ tl2) with
-    | () -> None
     | exception Ctype.Equality trace -> Some (Types (env, trace))
+    | () -> None
   end
 
 let type_manifest env ty1 params1 ty2 params2 priv2 =
@@ -496,8 +506,8 @@ let type_manifest env ty1 params1 ty2 params2 priv2 =
       | Private -> Ctype.equal_private env params1 ty1 params2 ty2
       | Public -> Ctype.equal env true (params1 @ [ty1]) (params2 @ [ty2])
     with
-    | () -> None
     | exception Ctype.Equality trace -> Some (Manifest (env, trace))
+    | () -> None
   end
 
 let type_declarations ?(equality = false) ~loc env ~mark name
@@ -514,8 +524,8 @@ let type_declarations ?(equality = false) ~loc env ~mark name
       (_, None) ->
         begin
           match Ctype.equal env true decl1.type_params decl2.type_params with
-          | () -> None
           | exception Ctype.Equality trace -> Some (Constraint(env, trace))
+          | () -> None
         end
     | (Some ty1, Some ty2) ->
          type_manifest env ty1 decl1.type_params ty2 decl2.type_params
@@ -618,13 +628,15 @@ let extension_constructors ~loc env ~mark id ext1 ext2 =
   let ty2 =
     Btype.newgenty (Tconstr(ext2.ext_type_path, ext2.ext_type_params, ref Mnil))
   in
-  match Ctype.equal env true (ty1 :: ext1.ext_type_params)
-          (ty2 :: ext2.ext_type_params) with
+  let tl1 = ty1 :: ext1.ext_type_params in
+  let tl2 = ty2 :: ext2.ext_type_params in
+  match Ctype.equal env true tl1 tl2 with
   | exception Ctype.Equality trace ->
       Some (Constructor_mismatch (id, ext1, ext2, Type(env, trace)))
   | () ->
     let r =
-      compare_constructors ~loc env ext1.ext_type_params ext2.ext_type_params
+      compare_constructors ~loc env
+        ext1.ext_type_params ext2.ext_type_params
         ext1.ext_ret_type ext2.ext_ret_type
         ext1.ext_args ext2.ext_args
     in
