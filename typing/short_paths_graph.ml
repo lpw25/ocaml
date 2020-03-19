@@ -146,23 +146,6 @@ module Desc = struct
 
 end
 
-module Sort = struct
-
-  type t =
-    | Defined
-    | Unloaded of Ident_set.t
-
-  (* Compute the sort of a functor application from the sort of the functor and
-     the sort of the argument. *)
-  let application t1 t2 =
-    match t1, t2 with
-    | Defined, Defined -> Defined
-    | Defined, Unloaded _ -> t2
-    | Unloaded _, Defined -> t1
-    | Unloaded ids1, Unloaded ids2 -> Unloaded (Ident_set.union ids1 ids2)
-
-end
-
 module Age = Natural.Make()
 
 module Dependency = Natural.Make()
@@ -243,17 +226,23 @@ module Origin = struct
 
 end
 
-(* CR lwhite: Should probably short-circuit indirections if they are to
-    canonical entries older than the indirection. *)
+module Sort = struct
+
+  type t =
+    | Defined
+    | Unloaded of Dependency.t
+
+end
+
 module rec Type : sig
 
   type t
 
-  val base : Origin.t -> Ident.t -> Desc.Type.t option -> t
+  val base : Origin.t -> Ident.t -> Desc.Type.t -> t
 
-  val child : Module.normalized -> string -> Desc.Type.t option -> t
+  val child : Module.Normalized.t -> string -> Desc.Type.t -> t
 
-  val declaration : t -> Origin.t option
+  val unloaded : Module.Normalized.t -> string -> t
 
   val origin : Graph.t -> t -> Origin.t
 
@@ -272,81 +261,74 @@ end = struct
   open Desc.Type
 
   type definition =
-    | Indirection of Path.t
-    | Defined
+    | Alias of Path.t
+    | Fresh
     | Nth of int
     | Subst of Path.t * int list
-    | Unknown
+    | Unloaded of Dependency.t
 
   type t =
-    | Definition of
-        { origin : Origin.t;
-          path : Path.t;
-          sort : Sort.t;
-          definition : definition; }
+    { origin : Origin.t;
+      path : Path.t;
+      definition : definition; }
 
-  let definition_of_desc (desc : Desc.Type.t option) =
+  let definition_of_desc (desc : Desc.Type.t) =
     match desc with
-    | None -> Unknown
-    | Some Fresh -> Defined
-    | Some (Nth n) -> Nth n
-    | Some (Subst(p, ns)) -> Subst(p, ns)
-    | Some (Alias alias) -> Indirection alias
+    | Fresh -> Fresh
+    | Nth n -> Nth n
+    | Subst(p, ns) -> Subst(p, ns)
+    | Alias alias -> Alias alias
 
   let base origin id desc =
     let path = Path.Pident id in
-    let sort = Sort.Defined in
     let definition = definition_of_desc desc in
-    Definition { origin; path; sort; definition }
+    { origin; path; definition }
 
   let child md name desc =
-    let origin = Module.raw_origin md in
-    let sort = Module.raw_sort md in
-    let path = Path.Pdot(Module.raw_path md, name, 0) in
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
     let definition = definition_of_desc desc in
-    Definition { origin; path; sort; definition }
+    { origin; path; definition }
 
-  let declaration t =
-    match t with
-    | Definition _ -> None
-
-  let raw_origin t =
-    match t with
-    | Definition { origin; _ } -> origin
-
-  let raw_path t =
-    match t with
-    | Definition { path; _ } -> path
-
-  let raw_sort t =
-    match t with
-    | Definition { sort; _ } -> sort
+  let unloaded md name =
+    match Module.Normalized.sort md with
+    | Sort.Defined -> assert false
+    | Sort.Unloaded dep ->
+        let origin = Module.Normalized.origin md in
+        let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+        let definition = Unloaded dep in
+        { origin; path; definition }
 
   let rec normalize_loop root t =
-    match t with
-    | Definition { definition = Defined | Unknown | Nth _ | Subst _ } -> t
-    | Definition ({ definition = Indirection alias } as r) -> begin
+    match t.definition with
+    | Fresh | Unloaded _ | Nth _ | Subst _ -> t
+    | Alias alias -> begin
         match Graph.find_type root alias with
-        | exception Not_found -> Definition { r with definition = Unknown }
+        | exception Not_found -> { t with definition = Unknown }
         | aliased -> normalize_loop root aliased
       end
 
   let normalize root t =
-    match t with
-    | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Unloaded _ } ->
-        match Graph.find_type root (raw_path t) with
-        | exception Not_found -> normalize_loop root t
-        | t -> normalize_loop root t
+    let t =
+      match t.definition with
+      | Fresh | Nth _ | Subst _ | Alias _ -> t
+      | Unloaded _ ->
+          match Graph.find_type root t.path with
+          | exception Not_found -> t
+          | t -> t
+    in
+    normalize_loop root t
 
   let origin root t =
-    raw_origin (normalize root t)
+    (normalize root t).origin
 
   let path root t =
-    raw_path (normalize root t)
+    (normalize root t).path
 
   let sort root t =
-    raw_sort (normalize root t)
+    match (normalize root t).definition with
+    | Fresh | Nth _ | Subst _ | Alias _ -> Sort.Defined
+    | Unloaded dep -> Sort.Unloaded dep
 
   type resolved =
     | Nth of int
@@ -358,15 +340,15 @@ end = struct
     | Path(Some ms, p) -> Path(Some (List.map (List.nth ns) ms), p)
 
   let rec resolve root t =
-    match normalize root t with
-    | Definition { definition = Defined | Unknown } -> Path(None, t)
-    | Definition { definition = Nth n } -> Nth n
-    | Definition { definition = Subst(p, ns) } -> begin
+    match (normalize root t).definition with
+    | Fresh | Unloaded _ -> Path(None, t)
+    | Nth n -> Nth n
+    | Subst(p, ns) -> begin
         match Graph.find_type root p with
         | exception Not_found -> Path(None, t)
         | aliased -> subst ns (resolve root aliased)
       end
-    | Definition { definition = Indirection _ } -> assert false
+    | Alias _ -> assert false
 
 end
 
@@ -374,11 +356,11 @@ and Class_type : sig
 
   type t
 
-  val base : Origin.t -> Ident.t -> Desc.Class_type.t option -> t
+  val base : Origin.t -> Ident.t -> Desc.Class_type.t -> t
 
-  val child : Module.normalized -> string -> Desc.Class_type.t option -> t
+  val child : Module.Normalized.t -> string -> Desc.Class_type.t -> t
 
-  val declaration : t -> Origin.t option
+  val unloaded : Module.Normalized.t -> string -> t
 
   val origin : Graph.t -> t -> Origin.t
 
@@ -395,79 +377,70 @@ end = struct
   open Desc.Class_type
 
   type definition =
-    | Indirection of Path.t
-    | Defined
+    | Alias of Path.t
+    | Fresh
     | Subst of Path.t * int list
-    | Unknown
+    | Unloaded of Dependency.t
 
   type t =
-    | Definition of
-        { origin : Origin.t;
-          path : Path.t;
-          sort : Sort.t;
-          definition : definition; }
+    { origin : Origin.t;
+      path : Path.t;
+      definition : definition; }
 
-  let definition_of_desc (desc : Desc.Class_type.t option) =
+  let definition_of_desc (desc : Desc.Class_type.t) =
     match desc with
-    | None -> Unknown
-    | Some Fresh -> Defined
-    | Some (Subst(p, ns)) -> Subst(p, ns)
-    | Some (Alias alias) -> Indirection alias
+    | Fresh -> Fresh
+    | (Subst(p, ns)) -> Subst(p, ns)
+    | (Alias alias) -> Alias alias
 
   let base origin id desc =
     let path = Path.Pident id in
-    let sort = Sort.Defined in
     let definition = definition_of_desc desc in
-    Definition { origin; path; sort; definition }
+    { origin; path; definition }
 
   let child md name desc =
-    let origin = Module.raw_origin md in
-    let sort = Module.raw_sort md in
-    let path = Path.Pdot(Module.raw_path md, name, 0) in
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
     let definition = definition_of_desc desc in
-    Definition { origin; path; sort; definition }
+    { origin; path; definition }
 
-  let declaration t =
-    match t with
-    | Definition _ -> None
-
-  let raw_origin t =
-    match t with
-    | Definition { origin; _ } -> origin
-
-  let raw_path t =
-    match t with
-    | Definition { path; _ } -> path
-
-  let raw_sort t =
-    match t with
-    | Definition { sort; _ } -> sort
+  let unloaded md name =
+    match Module.Normalized.sort md with
+    | Sort.Defined -> assert false
+    | Sort.Unloaded dep ->
+        let origin = Module.Normalized.origin md in
+        let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+        let definition = Unloaded dep in
+        { origin; path; definition }
 
   let rec normalize_loop root t =
-    match t with
-    | Definition { definition = Defined | Unknown | Subst _ } -> t
-    | Definition ({ definition = Indirection alias } as r) -> begin
+    match t.definition with
+    | Fresh | Unknown | Subst _ -> t
+    | Alias alias -> begin
         match Graph.find_class_type root alias with
-        | exception Not_found -> Definition { r with definition = Unknown }
+        | exception Not_found -> { t with definition = Unknown }
         | aliased -> normalize_loop root aliased
       end
 
   let normalize root t =
-    match t with
-    | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Unloaded _ } ->
-        match Graph.find_class_type root (raw_path t) with
-        | exception Not_found -> normalize_loop root t
-        | t -> normalize_loop root t
+    let t =
+      match t.definition with
+      | Fresh | Subst _ | Alias alias -> t
+      | Unloaded _ ->
+          match Graph.find_class_type root t.path with
+          | exception Not_found -> t
+          | t -> t
+    in
+    normalize_loop root t
 
   let origin root t =
-    raw_origin (normalize root t)
+    (normalize root t).origin
 
   let path root t =
-    raw_path (normalize root t)
+    (normalize root t).path
 
   let sort root t =
-    raw_sort (normalize root t)
+    (normalize root t).sort
 
   type resolved = int list option * t
 
@@ -476,14 +449,14 @@ end = struct
     | (Some ms, p) -> (Some (List.map (List.nth ns) ms), p)
 
   let rec resolve root t =
-    match normalize root t with
-    | Definition { definition = Defined | Unknown } -> (None, t)
-    | Definition { definition = Subst(p, ns) } -> begin
+    match (normalize root t).definition with
+    | Fresh | Unloaded _ -> (None, t)
+    | Subst(p, ns) -> begin
         match Graph.find_class_type root p with
         | exception Not_found -> (None, t)
         | aliased -> subst ns (resolve root aliased)
       end
-    | Definition { definition = Indirection _ } -> assert false
+    | Alias _ -> assert false
 
 end
 
@@ -491,11 +464,11 @@ and Module_type : sig
 
   type t
 
-  val base : Origin.t -> Ident.t -> Desc.Module_type.t option -> t
+  val base : Origin.t -> Ident.t -> Desc.Module_type.t -> t
 
-  val child : Module.normalized -> string -> Desc.Module_type.t option -> t
+  val child : Module.Normalized.t -> string -> Desc.Module_type.t -> t
 
-  val declaration : t -> Origin.t option
+  val unknown : Module.Normalized.t -> string -> t
 
   val origin : Graph.t -> t -> Origin.t
 
@@ -508,80 +481,62 @@ end = struct
   open Desc.Module_type
 
   type definition =
-    | Indirection of Path.t
-    | Defined
+    | Alias of Path.t
+    | Fresh
     | Unknown
 
   type t =
-    | Definition of
-        { origin : Origin.t;
-          path : Path.t;
-          sort : Sort.t;
-          definition : definition; }
+    { origin : Origin.t;
+      path : Path.t;
+      definition : definition; }
+
+  let definition_of_desc (desc : Desc.Module_type.t) =
+    match desc with
+    | Fresh -> Fresh
+    | Alias alias -> Alias alias
 
   let base origin id desc =
     let path = Path.Pident id in
-    let sort = Sort.Defined in
-    let definition =
-      match desc with
-      | None -> Unknown
-      | Some Fresh -> Defined
-      | Some (Alias alias) -> Indirection alias
-    in
-    Definition { origin; path; sort; definition }
+    let definition = definition_of_desc desc in
+    { origin; path; definition }
 
   let child md name desc =
-    let origin = Module.raw_origin md in
-    let sort = Module.raw_sort md in
-    let path = Path.Pdot (Module.raw_path md, name, 0) in
-    let definition =
-      match desc with
-      | None -> Unknown
-      | Some Fresh -> Defined
-      | Some (Alias alias) -> Indirection alias
-    in
-    Definition { origin; path; sort; definition }
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot (Module.Normalized.path md, name, 0) in
+    let definition = definition_of_desc desc in
+    { origin; path; definition }
 
-  let declaration t =
-    match t with
-    | Definition _ -> None
-
-  let raw_origin t =
-    match t with Definition { origin; _ } -> origin
-
-  let raw_path t =
-    match t with
-    | Definition { path; _ } -> path
-
-  let raw_sort t =
-    match t with
-    | Definition { sort; _ } -> sort
+  let unknown md name =
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot (Module.Normalized.path md, name, 0) in
+    let definition = Unknown in
+    { origin; path; definition }
 
   let rec normalize_loop root t =
-    match t with
-    | Definition { definition = Defined | Unknown } -> t
-    | Definition ({ definition = Indirection alias } as r) -> begin
+    match t.definition with
+    | Fresh | Unknown -> t
+    | Alias alias -> begin
         match Graph.find_module_type root alias with
-        | exception Not_found -> Definition { r with definition = Unknown }
+        | exception Not_found -> { t with definition = Unknown }
         | aliased -> normalize_loop root aliased
       end
 
   let normalize root t =
-    match t with
-    | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Unloaded _ } ->
-        match Graph.find_module_type root (raw_path t) with
+    match t.sort with
+    | Sort.Defined -> normalize_loop root t
+    | Sort.Unloaded _ ->
+        match Graph.find_module_type root t.path with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
 
   let origin root t =
-    raw_origin (normalize root t)
+    (normalize root t).origin
 
   let path root t =
-    raw_path (normalize root t)
+    (normalize root t).path
 
   let sort root t =
-    raw_sort (normalize root t)
+    (normalize root t).sort
 
 end
 
@@ -589,13 +544,27 @@ and Module : sig
 
   type t
 
-  type normalized
+  module Normalized : sig
 
-  val base : Origin.t -> Ident.t -> Desc.Module.t option -> t
+    type t
 
-  val child : normalized -> string -> Desc.Module.t option -> t
+    val origin : t -> Origin.t
 
-  val application : normalized -> t -> Desc.Module.t option -> t
+    val path : t -> Path.t
+
+    val sort : t -> Sort.t
+
+  end
+
+  val base : Origin.t -> Ident.t -> Desc.Module.t -> t
+
+  val child : Normalized.t -> string -> Desc.Module.t -> t
+
+  val unknown : Normalized.t -> string -> t
+
+  val application : Normalized.t -> t -> Desc.Module.t -> t
+
+  val unknown_application : Normalized.t -> t -> t
 
   val declare : Origin.t -> Ident.t -> t
 
@@ -625,15 +594,9 @@ and Module : sig
 
   val find_application : Graph.t -> t -> Path.t -> Module.t
 
-  val normalize : Graph.t -> t -> normalized
+  val normalize : Graph.t -> t -> Normalized.t
 
-  val unnormalize : normalized -> t
-
-  val raw_origin : normalized -> Origin.t
-
-  val raw_path : normalized -> Path.t
-
-  val raw_sort : normalized -> Sort.t
+  val unnormalize : Normalized.t -> t
 
 end = struct
 
@@ -648,7 +611,7 @@ end = struct
           modules : t String_map.t; }
 
   and definition =
-    | Indirection of Path.t
+    | Alias of Path.t
     | Signature of
         { mutable components : components }
     | Functor of
@@ -657,133 +620,136 @@ end = struct
     | Unknown
 
   and t =
-    | Definition of
-        { origin : Origin.t;
-          path : Path.t;
-          sort : Sort.t;
-          definition : definition; }
+    { origin : Origin.t;
+      path : Path.t;
+      definition : definition; }
+
+  module Normalized = struct
+
+    type nonrec t = t
+
+    let origin t = t.origin
+
+    let path t = t.path
+
+    let sort t =
+      match t.sort with
+      | 
+
+  end
+
+  let definition_of_desc (desc : Desc.Module.t) =
+    match desc with
+    | Fresh (Signature components) ->
+        let components = Unforced components in
+        Signature { components }
+    | Fresh (Functor apply) ->
+        let applications = Path_map.empty in
+        Functor { apply; applications }
+    | Alias alias ->
+        Alias alias
 
   let base origin id desc =
     let path = Path.Pident id in
-    let sort = Sort.Defined in
-    let definition =
-      match desc with
-      | None -> Unknown
-      | Some (Fresh (Signature components)) ->
-          let components = Unforced components in
-          Signature { components }
-      | Some (Fresh (Functor apply)) ->
-          let applications = Path_map.empty in
-          Functor { apply; applications }
-      | Some (Alias alias) ->
-          Indirection alias
-    in
-    Definition { origin; path; sort; definition }
+    let definition = definition_of_desc desc in
+    { origin; path; definition }
 
   let child md name desc =
-    let origin = Module.raw_origin md in
-    let sort = Module.raw_sort md in
-    let path = Path.Pdot(Module.raw_path md, name, 0) in
-    let definition =
-      match desc with
-      | None -> Unknown
-      | Some (Fresh (Signature components)) ->
-          let components = Unforced components in
-          Signature { components }
-      | Some (Fresh (Functor apply)) ->
-          let applications = Path_map.empty in
-          Functor { apply; applications }
-      | Some (Alias alias) ->
-          Indirection alias
-    in
-    Definition { origin; path; sort; definition }
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+    let definition = definition_of_desc desc in
+    { origin; path; definition }
+
+  let unknown md name =
+    let origin = Module.Normalized.origin md in
+    let sort = Module.Normalized.sort md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+    let definition = Unknown in
+    { origin; path; sort; definition }
 
   let application func arg desc =
-    let func_origin = Module.raw_origin func in
-    let arg_origin = Module.raw_origin arg in
+    let func_origin = Module.Normalized.origin func in
+    let arg_origin = Module.Normalized.origin arg in
     let origin = Origin.application func_origin arg_origin in
-    let func_sort = Module.raw_sort func in
-    let arg_sort = Module.raw_sort arg in
+    let func_sort = Module.Normalized.sort func in
+    let arg_sort = Module.Normalized.sort arg in
     let sort = Sort.application func_sort arg_sort in
-    let func_path = Module.raw_path func in
-    let arg_path = Module.raw_path arg in
+    let func_path = Module.Normalized.path func in
+    let arg_path = Module.Normalized.path arg in
     let path = Path.Papply(func_path, arg_path) in
     let definition =
       match desc with
-      | None -> Unknown
-      | Some (Fresh (Signature components)) ->
+      | Fresh (Signature components) ->
           let components = Unforced components in
           Signature { components }
-      | Some (Fresh (Functor apply)) ->
+      | Fresh (Functor apply) ->
           let applications = Path_map.empty in
           Functor { apply; applications }
-      | Some (Alias alias) ->
-          Indirection alias
+      | Alias alias ->
+          Alias alias
     in
-    Definition { origin; path; sort; definition }
+    { origin; path; sort; definition }
+
+  let unknown_application func arg =
+    let func_origin = Module.Normalized.origin func in
+    let arg_origin = Module.Normalized.origin arg in
+    let origin = Origin.application func_origin arg_origin in
+    let func_sort = Module.Normalized.sort func in
+    let arg_sort = Module.Normalized.sort arg in
+    let sort = Sort.application func_sort arg_sort in
+    let func_path = Module.Normalized.path func in
+    let arg_path = Module.Normalized.path arg in
+    let path = Path.Papply(func_path, arg_path) in
+    let definition = Unknown in
+    { origin; path; sort; definition }
 
   let declare origin id =
     let path = Path.Pident id in
     let sort = Sort.Unloaded (Ident_set.singleton id) in
     let definition = Unknown in
-    Definition { origin; path; sort; definition }
+    { origin; path; sort; definition }
 
   let declaration t =
     match t with
-    | Definition { origin; path = Path.Pident _; sort = Sort.Unloaded _; _ } ->
+    | { origin; path = Path.Pident _; sort = Sort.Unloaded _; _ } ->
         Some origin
-    | Definition _ -> None
-
-  let raw_origin t =
-    match t with
-    | Definition { origin; _ } -> origin
-
-  let raw_path t =
-    match t with
-    | Definition { path; _ } -> path
-
-  let raw_sort t =
-    match t with
-    | Definition { sort; _ } -> sort
-
-  type normalized = t
+    | _ -> None
 
   let rec normalize_loop root t =
-    match t with
-    | Definition { definition = Signature _ | Functor _ | Unknown } -> t
-    | Definition ({ definition = Indirection alias } as r) -> begin
+    match t.definition with
+    | Signature _ | Functor _ | Unknown -> t
+    | Alias alias -> begin
         match Graph.find_module root alias with
-        | exception Not_found -> Definition { r with definition = Unknown }
+        | exception Not_found -> { t with definition = Unknown }
         | aliased -> normalize_loop root aliased
       end
 
   let normalize root t =
-    match t with
-    | Definition { sort = Sort.Defined } -> normalize_loop root t
-    | Definition { sort = Sort.Unloaded _ } ->
-        match Graph.find_module root (raw_path t) with
+    match t.sort with
+    | Sort.Defined -> normalize_loop root t
+    | Sort.Unloaded _ ->
+        match Graph.find_module root t.path with
         | exception Not_found -> normalize_loop root t
         | t -> normalize_loop root t
 
   let unnormalize t = t
 
   let origin root t =
-    raw_origin (normalize root t)
+    (normalize root t).origin
 
   let path root t =
-    raw_path (normalize root t)
+    (normalize root t).path
 
   let sort root t =
-    raw_sort (normalize root t)
+    (normalize root t).sort
 
   let definition t =
-    match Module.unnormalize t with
-    | Definition { definition; _ } -> definition
+    (Module.unnormalize t).definition
 
   let force root t =
     let t = Module.normalize root t in
     match definition t with
-    | Indirection _ -> assert false
+    | Alias _ -> assert false
     | Unknown
     | Functor _
     | Signature { components = Forced _ } -> t
@@ -791,19 +757,19 @@ end = struct
         let rec loop types class_types module_types modules = function
           | [] -> Forced { types; class_types; module_types; modules }
           | Type(name, desc) :: rest ->
-              let typ = Type.child t name (Some desc) in
+              let typ = Type.child t name desc in
               let types = String_map.add name typ types in
               loop types class_types module_types modules rest
           | Class_type(name, desc) :: rest ->
-              let clty = Class_type.child t name (Some desc) in
+              let clty = Class_type.child t name desc in
               let class_types = String_map.add name clty class_types in
               loop types class_types module_types modules rest
           | Module_type(name, desc) :: rest ->
-              let mty = Module_type.child t name (Some desc) in
+              let mty = Module_type.child t name desc in
               let module_types = String_map.add name mty module_types in
               loop types class_types module_types modules rest
           | Module(name, desc) :: rest ->
-              let md = Module.child t name (Some desc) in
+              let md = Module.child t name desc in
               let modules = String_map.add name md modules in
               loop types class_types module_types modules rest
         in
@@ -816,7 +782,7 @@ end = struct
   let types root t =
     let t = force root t in
     match definition t with
-    | Indirection _ | Signature { components = Unforced _ } ->
+    | Alias _ | Signature { components = Unforced _ } ->
         assert false
     | Unknown | Functor _ ->
         None
@@ -826,7 +792,7 @@ end = struct
   let class_types root t =
     let t = force root t in
     match definition t with
-    | Indirection _ | Signature { components = Unforced _ } ->
+    | Alias _ | Signature { components = Unforced _ } ->
         assert false
     | Unknown | Functor _ ->
         None
@@ -836,7 +802,7 @@ end = struct
   let module_types root t =
     let t = force root t in
     match definition t with
-    | Indirection _ | Signature { components = Unforced _ } ->
+    | Alias _ | Signature { components = Unforced _ } ->
         assert false
     | Unknown | Functor _ ->
         None
@@ -846,7 +812,7 @@ end = struct
   let modules root t =
     let t = force root t in
     match definition t with
-    | Indirection _ | Signature { components = Unforced _ } ->
+    | Alias _ | Signature { components = Unforced _ } ->
         assert false
     | Unknown | Functor _ ->
         None
@@ -856,11 +822,11 @@ end = struct
   let find_type root t name =
     let t = force root t in
     match definition t with
-    | Indirection _
+    | Alias _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Type.child t name None
+        Type.unknown t name
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { types; _ }; _ } ->
@@ -869,11 +835,11 @@ end = struct
   let find_class_type root t name =
     let t = force root t in
     match definition t with
-    | Indirection _
+    | Alias _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Class_type.child t name None
+        Class_type.unknown t name
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { class_types; _ }; _ } ->
@@ -882,11 +848,11 @@ end = struct
   let find_module_type root t name =
     let t = force root t in
     match definition t with
-    | Indirection _
+    | Alias _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Module_type.child t name None
+        Module_type.unknown t name
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { module_types; _ }; _ } ->
@@ -895,11 +861,11 @@ end = struct
   let find_module root t name =
     let t = force root t in
     match definition t with
-    | Indirection _
+    | Alias _
     | Signature { components = Unforced _ } ->
         assert false
     | Unknown ->
-        Module.child t name None
+        Module.unknown t name
     | Functor _ ->
         raise Not_found
     | Signature { components = Forced { modules; _ }; _ } ->
@@ -908,18 +874,18 @@ end = struct
   let find_application root t path =
     let t = Module.normalize root t in
     match definition t with
-    | Indirection _ -> assert false
+    | Alias _ -> assert false
     | Signature _ -> raise Not_found
     | Unknown ->
         let arg = Graph.find_module root path in
-        Module.application t arg None
+        Module.unknown_application t arg
     | Functor ({ apply; applications } as r)->
         let arg = Graph.find_module root path in
         let arg_path = Module.path root arg in
         match Path_map.find arg_path applications with
         | md -> md
         | exception Not_found ->
-            let md = Module.application t arg (Some (apply arg_path)) in
+            let md = Module.application t arg (apply arg_path) in
             r.applications <- Path_map.add arg_path md applications;
             md
 
@@ -1052,26 +1018,17 @@ end = struct
   let previous_type t id =
     match Ident_map.find id t.types with
     | exception Not_found -> None
-    | prev ->
-      match Type.declaration prev with
-      | None -> failwith "Graph.add: type already defined"
-      | Some _ as o -> o
+    | _ -> failwith "Graph.add: type already defined"
 
   let previous_class_type t id =
     match Ident_map.find id t.class_types with
     | exception Not_found -> None
-    | prev ->
-      match Class_type.declaration prev with
-      | None -> failwith "Graph.add: class type already defined"
-      | Some _ as o -> o
+    | _ -> failwith "Graph.add: class type already defined"
 
   let previous_module_type t id =
     match Ident_map.find id t.module_types with
     | exception Not_found -> None
-    | prev ->
-      match Module_type.declaration prev with
-      | None -> failwith "Graph.add: module type already defined"
-      | Some _ as o -> o
+    | _ -> failwith "Graph.add: module type already defined"
 
   let previous_module t id =
     match Ident_map.find id t.modules with
@@ -1110,7 +1067,7 @@ end = struct
       | [] -> loop_declarations acc diff declarations
       | Component.Type(origin, id, desc, source) :: rest ->
           let prev = previous_type acc id in
-          let typ = Type.base origin id (Some desc) in
+          let typ = Type.base origin id desc in
           let types = Ident_map.add id typ acc.types in
           let type_names = add_name source id acc.type_names in
           let item = Diff.Item.Type(id, typ, prev) in
@@ -1119,7 +1076,7 @@ end = struct
           loop acc diff declarations rest
       | Component.Class_type(origin,id, desc, source) :: rest ->
           let prev = previous_class_type acc id in
-          let clty = Class_type.base origin id (Some desc) in
+          let clty = Class_type.base origin id desc in
           let class_types = Ident_map.add id clty acc.class_types in
           let class_type_names = add_name source id acc.class_type_names in
           let item = Diff.Item.Class_type(id, clty, prev) in
@@ -1128,7 +1085,7 @@ end = struct
           loop acc diff declarations rest
       | Component.Module_type(origin,id, desc, source) :: rest ->
           let prev = previous_module_type acc id in
-          let mty = Module_type.base origin id (Some desc) in
+          let mty = Module_type.base origin id desc in
           let module_types = Ident_map.add id mty acc.module_types in
           let module_type_names = add_name source id acc.module_type_names in
           let item = Diff.Item.Module_type(id, mty, prev) in
@@ -1137,7 +1094,7 @@ end = struct
           loop acc diff declarations rest
       | Component.Module(origin,id, desc, source) :: rest ->
           let prev = previous_module acc id in
-          let md = Module.base origin id (Some desc) in
+          let md = Module.base origin id desc in
           let modules = Ident_map.add id md acc.modules in
           let module_names = add_name source id acc.module_names in
           let item = Diff.Item.Module(id, md, prev) in

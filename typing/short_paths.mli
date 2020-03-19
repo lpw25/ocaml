@@ -33,7 +33,6 @@ module Basis : sig
 
 end
 
-
 type t
 
 val initial : Basis.t -> t

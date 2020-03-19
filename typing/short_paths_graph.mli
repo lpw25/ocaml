@@ -173,23 +173,6 @@ module Desc : sig
 
 end
 
-module Sort : sig
-
-  (** Each item (type, module, class type, ...) comes with a sort.
-      The sorts are used to compute updates in [Short_paths.Forward_path_map].
-  *)
-  type t =
-    | Defined
-    (** Environment entries (a top-level [type t]) have sort [Defined]. *)
-    | Unloaded of Ident_set.t
-    (** Sub-entries of modules (such as [String.t]) have sort [Unloaded ids],
-        where [ids] is the set of identifiers of modules that participate in
-        the declaration of the entry.
-        In [String.t] it is the singleton [String], but it can grow in entries
-        that result from functor applications.  In [Map.Make(String).t] the
-        identifiers are {[String], [Map]}. *)
-end
-
 (** [Age] defines when an entry became available.
 
     Somewhat counter-intuitively [Age] actually represents a point in time:
@@ -250,6 +233,24 @@ module Origin : sig
 
 end
 
+module Sort : sig
+
+  (* CR lwhite: These descriptions are not accurate *)
+  (** Each item (type, module, class type, ...) comes with a sort.
+      The sorts are used to compute updates in [Short_paths.Forward_path_map].
+  *)
+  type t =
+    | Defined
+    (** Environment entries (a top-level [type t]) have sort [Defined]. *)
+    | Unloaded of Dependency.t
+    (** Sub-entries of modules (such as [String.t]) have sort [Unloaded ids],
+        where [ids] is the set of identifiers of modules that participate in
+        the declaration of the entry.
+        In [String.t] it is the singleton [String], but it can grow in entries
+        that result from functor applications.  In [Map.Make(String).t] the
+        identifiers are {[String], [Map]}. *)
+end
+
 module Component : sig
 
   type source =
@@ -260,7 +261,8 @@ module Component : sig
     | Open
     (** Component comes from an open item. *)
 
-  (** A [Component.t] augments a [Desc.t] with an origin and a source. *)
+  (** A [Component.t] augments a [Desc.t] with an origin and more
+      detailed source. *)
   type t =
     | Type of Origin.t * Ident.t * Desc.Type.t * source
     | Class_type of Origin.t * Ident.t * Desc.Class_type.t * source
@@ -303,7 +305,7 @@ module Type : sig
     | Path of int list option * t
     (** [Path (None, t)] =>
           type is an alias to (or is) [t].
-        [Path (Subst params, t)] =>
+        [Path (Some params, t)] =>
           type is an alias to [t] with substituted parameters.
     *)
 
