@@ -290,15 +290,19 @@ and type_with_label ctxt f (label, c) =
   | Labelled s -> pp f "%s:%a" s (core_type1 ctxt) c
   | Optional s -> pp f "?%s:%a" s (core_type1 ctxt) c
 
+and arrow_tail f = function
+  | Applicable -> ()
+  | Unapplicable -> pp f "*"
+
 and core_type ctxt f x =
   if x.ptyp_attributes <> [] then begin
     pp f "((%a)%a)" (core_type ctxt) {x with ptyp_attributes=[]}
       (attributes ctxt) x.ptyp_attributes
   end
   else match x.ptyp_desc with
-    | Ptyp_arrow (l, ct1, ct2) ->
-        pp f "@[<2>%a@;->@;%a@]" (* FIXME remove parens later *)
-          (type_with_label ctxt) (l,ct1) (core_type ctxt) ct2
+    | Ptyp_arrow ((l, ap), ct1, ct2) ->
+        pp f "@[<2>%a@;%a->@;%a@]" (* FIXME remove parens later *)
+          (type_with_label ctxt) (l,ct1) arrow_tail ap (core_type ctxt) ct2
     | Ptyp_alias (ct, s) ->
         pp f "@[<2>%a@;as@;%a@]" (core_type1 ctxt) ct tyvar s
     | Ptyp_poly ([], ct) ->
@@ -607,9 +611,9 @@ and expression ctxt f x =
       | Pexp_letexception _ | Pexp_letop _
         when ctxt.semi ->
         paren true (expression reset_ctxt) f x
-    | Pexp_fun (l, e0, p, e) ->
-        pp f "@[<2>fun@;%a->@;%a@]"
-          (label_exp ctxt) (l, e0, p)
+    | Pexp_fun ((l, ap), e0, p, e) ->
+        pp f "@[<2>fun@;%a%a->@;%a@]"
+          (label_exp ctxt) (l, e0, p) arrow_tail ap
           (expression ctxt) e
     | Pexp_newtype (lid, e) ->
         pp f "@[<2>fun@;(type@;%s)@;->@;%a@]" lid.txt
@@ -891,9 +895,9 @@ and class_type ctxt f x =
            | _  -> pp f "[%a]@ " (list (core_type ctxt) ~sep:"," ) l) l
         longident_loc li
         (attributes ctxt) x.pcty_attributes
-  | Pcty_arrow (l, co, cl) ->
-      pp f "@[<2>%a@;->@;%a@]" (* FIXME remove parens later *)
-        (type_with_label ctxt) (l,co)
+  | Pcty_arrow ((l, ap), co, cl) ->
+      pp f "@[<2>%a@;%a->@;%a@]" (* FIXME remove parens later *)
+        (type_with_label ctxt) (l,co) arrow_tail ap
         (class_type ctxt) cl
   | Pcty_extension e ->
       extension ctxt f e;
@@ -998,9 +1002,9 @@ and class_expr ctxt f x =
   end else
     match x.pcl_desc with
     | Pcl_structure (cs) -> class_structure ctxt f cs
-    | Pcl_fun (l, eo, p, e) ->
-        pp f "fun@ %a@ ->@ %a"
-          (label_exp ctxt) (l,eo,p)
+    | Pcl_fun ((l, ap), eo, p, e) ->
+        pp f "fun@ %a@ %a->@ %a"
+          (label_exp ctxt) (l,eo,p) arrow_tail ap
           (class_expr ctxt) e
     | Pcl_let (rf, l, ce) ->
         pp f "%a@ in@ %a"
@@ -1220,7 +1224,7 @@ and binding ctxt f {pvb_pat=p; pvb_expr=x; _} =
   let rec pp_print_pexp_function f x =
     if x.pexp_attributes <> [] then pp f "=@;%a" (expression ctxt) x
     else match x.pexp_desc with
-      | Pexp_fun (label, eo, p, e) ->
+      | Pexp_fun ((label, Applicable), eo, p, e) ->
           if label=Nolabel then
             pp f "%a@ %a" (simple_pattern ctxt) p pp_print_pexp_function e
           else
@@ -1360,7 +1364,7 @@ and structure_item ctxt f x =
   | Pstr_class l ->
       let extract_class_args cl =
         let rec loop acc = function
-          | {pcl_desc=Pcl_fun (l, eo, p, cl'); pcl_attributes = []} ->
+          | {pcl_desc=Pcl_fun ((l, Applicable), eo, p, cl'); pcl_attributes = []} ->
               loop ((l,eo,p) :: acc) cl'
           | cl -> List.rev acc, cl
         in

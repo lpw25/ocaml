@@ -508,6 +508,7 @@ rule token = parse
   | "*"  { STAR }
   | ","  { COMMA }
   | "->" { MINUSGREATER }
+  | "*->" { STARMINUSGREATER }
   | "."  { DOT }
   | ".." { DOTDOT }
   | "." (dotsymbolchar symbolchar* as op) { DOTOP op }

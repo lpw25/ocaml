@@ -92,7 +92,7 @@ and core_type_desc =
         (*  _ *)
   | Ptyp_var of string
         (* 'a *)
-  | Ptyp_arrow of arg_label * core_type * core_type
+  | Ptyp_arrow of param_label * core_type * core_type
         (* T1 -> T2       Simple
            ~l:T1 -> T2    Labelled
            ?l:T1 -> T2    Optional
@@ -277,7 +277,8 @@ and expression_desc =
          *)
   | Pexp_function of case list
         (* function P1 -> E1 | ... | Pn -> En *)
-  | Pexp_fun of arg_label * expression option * pattern * expression
+  | Pexp_fun of
+      param_label * expression option * pattern * expression
         (* fun P -> E1                          (Simple, None)
            fun ~l:P -> E1                       (Labelled l, None)
            fun ?l:P -> E1                       (Optional l, None)
@@ -552,7 +553,7 @@ and class_type_desc =
            ['a1, ..., 'an] c *)
   | Pcty_signature of class_signature
         (* object ... end *)
-  | Pcty_arrow of arg_label * core_type * class_type
+  | Pcty_arrow of param_label * core_type * class_type
         (* T -> CT       Simple
            ~l:T -> CT    Labelled l
            ?l:T -> CT    Optional l
@@ -630,7 +631,7 @@ and class_expr_desc =
            ['a1, ..., 'an] c *)
   | Pcl_structure of class_structure
         (* object ... end *)
-  | Pcl_fun of arg_label * expression option * pattern * class_expr
+  | Pcl_fun of param_label * expression option * pattern * class_expr
         (* fun P -> CE                          (Simple, None)
            fun ~l:P -> CE                       (Labelled l, None)
            fun ?l:P -> CE                       (Optional l, None)

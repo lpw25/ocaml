@@ -154,6 +154,13 @@ let arg_label i ppf = function
   | Optional s -> line i ppf "Optional \"%s\"\n" s
   | Labelled s -> line i ppf "Labelled \"%s\"\n" s
 ;;
+let applicable_flag i ppf = function
+  | Applicable -> line i ppf "Applicable\n"
+  | Unapplicable -> line i ppf "Unapplicable\n"
+;;
+let param_label i ppf (l, ap) =
+  arg_label i ppf l;
+  applicable_flag i ppf ap
 
 let record_representation i ppf = let open Types in function
   | Record_regular -> line i ppf "Record_regular\n"
@@ -182,7 +189,7 @@ let rec core_type i ppf x =
   | Ttyp_var (s) -> line i ppf "Ttyp_var %s\n" s;
   | Ttyp_arrow (l, ct1, ct2) ->
       line i ppf "Ttyp_arrow\n";
-      arg_label i ppf l;
+      param_label i ppf l;
       core_type i ppf ct1;
       core_type i ppf ct2;
   | Ttyp_tuple l ->
@@ -322,9 +329,9 @@ and expression i ppf x =
       line i ppf "Texp_let %a\n" fmt_rec_flag rf;
       list i value_binding ppf l;
       expression i ppf e;
-  | Texp_function { arg_label = p; param = _; cases; partial = _; } ->
+  | Texp_function { param_label = p; param = _; cases; partial = _; } ->
       line i ppf "Texp_function\n";
-      arg_label i ppf p;
+      param_label i ppf p;
       list i case ppf cases;
   | Texp_apply (e, l) ->
       line i ppf "Texp_apply\n";
@@ -529,7 +536,7 @@ and class_type i ppf x =
       class_signature i ppf cs;
   | Tcty_arrow (l, co, cl) ->
       line i ppf "Tcty_arrow\n";
-      arg_label i ppf l;
+      param_label i ppf l;
       core_type i ppf co;
       class_type i ppf cl;
   | Tcty_open (o, e) ->
@@ -600,7 +607,7 @@ and class_expr i ppf x =
       class_structure i ppf cs;
   | Tcl_fun (l, p, _, ce, _) ->
       line i ppf "Tcl_fun\n";
-      arg_label i ppf l;
+      param_label i ppf l;
       pattern i ppf p;
       class_expr i ppf ce
   | Tcl_apply (ce, l) ->

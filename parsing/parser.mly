@@ -654,6 +654,7 @@ let mk_directive ~loc name arg =
 %token MINUS
 %token MINUSDOT
 %token MINUSGREATER
+%token STARMINUSGREATER
 %token MODULE
 %token MUTABLE
 %token NEW
@@ -744,7 +745,7 @@ The precedences must be listed from low to high.
 %left     BAR                           /* pattern (p|p|p) */
 %nonassoc below_COMMA
 %left     COMMA                         /* expr/expr_comma_list (e,e,e) */
-%right    MINUSGREATER                  /* function_type (t -> t -> t) */
+%right    MINUSGREATER STARMINUSGREATER /* function_type (t -> t -> t) */
 %right    OR BARBAR                     /* expr (e || e || e) */
 %right    AMPERSAND AMPERAMPER          /* expr (e && e && e) */
 %nonassoc below_EQUAL
@@ -1744,7 +1745,7 @@ class_fun_binding:
       COLON class_type EQUAL class_expr
         { Pcl_constraint($4, $2) }
     | labeled_simple_pattern class_fun_binding
-      { let (l,o,p) = $1 in Pcl_fun(l, o, p, $2) }
+      { let (l,o,p) = $1 in Pcl_fun((l, Applicable), o, p, $2) }
     ) { $1 }
 ;
 
@@ -1800,7 +1801,9 @@ class_fun_def:
   mkclass(
     labeled_simple_pattern MINUSGREATER e = class_expr
   | labeled_simple_pattern e = class_fun_def
-      { let (l,o,p) = $1 in Pcl_fun(l, o, p, e) }
+      { let (l,o,p) = $1 in Pcl_fun((l, Applicable), o, p, e) }
+  | labeled_simple_pattern STARMINUSGREATER e = class_expr
+      { let (l,o,p) = $1 in Pcl_fun((l, Unapplicable), o, p, e) }
   ) { $1 }
 ;
 %inline class_structure:
@@ -1902,7 +1905,14 @@ class_type:
       domain = tuple_type
       MINUSGREATER
       codomain = class_type
-        { Pcty_arrow(label, domain, codomain) }
+        { Pcty_arrow((label, Applicable), domain, codomain) }
+    ) { $1 }
+  | mkcty(
+      label = arg_label
+      domain = tuple_type
+      STARMINUSGREATER
+      codomain = class_type
+        { Pcty_arrow((label, Unapplicable), domain, codomain) }
     ) { $1 }
  ;
 class_signature:
@@ -2191,9 +2201,10 @@ expr:
       { Pexp_function $3, $2 }
   | FUN ext_attributes labeled_simple_pattern fun_def
       { let (l,o,p) = $3 in
-        Pexp_fun(l, o, p, $4), $2 }
+        let (ap, e) = $4 in
+        Pexp_fun((l, ap), o, p, e), $2 }
   | FUN ext_attributes LPAREN TYPE lident_list RPAREN fun_def
-      { (mk_newtypes ~loc:$sloc $5 $7).pexp_desc, $2 }
+      { (mk_newtypes ~loc:$sloc $5 (snd $7)).pexp_desc, $2 }
   | MATCH ext_attributes seq_expr WITH match_cases
       { Pexp_match($3, $5), $2 }
   | TRY ext_attributes seq_expr WITH match_cases
@@ -2510,7 +2521,8 @@ strict_binding:
     EQUAL seq_expr
       { $2 }
   | labeled_simple_pattern fun_binding
-      { let (l, o, p) = $1 in ghexp ~loc:$sloc (Pexp_fun(l, o, p, $2)) }
+      { let (l, o, p) = $1 in
+        ghexp ~loc:$sloc (Pexp_fun((l, Applicable), o, p, $2)) }
   | LPAREN TYPE lident_list RPAREN fun_binding
       { mk_newtypes ~loc:$sloc $3 $5 }
 ;
@@ -2528,18 +2540,25 @@ match_case:
 ;
 fun_def:
     MINUSGREATER seq_expr
-      { $2 }
+      { Applicable, $2 }
+  | STARMINUSGREATER seq_expr
+      { Unapplicable, $2 }
   | mkexp(COLON atomic_type MINUSGREATER seq_expr
       { Pexp_constraint ($4, $2) })
-      { $1 }
+      { Applicable, $1 }
+  | mkexp(COLON atomic_type STARMINUSGREATER seq_expr
+      { Pexp_constraint ($4, $2) })
+      { Unapplicable, $1 }
 /* Cf #5939: we used to accept (fun p when e0 -> e) */
   | labeled_simple_pattern fun_def
       {
        let (l,o,p) = $1 in
-       ghexp ~loc:$sloc (Pexp_fun(l, o, p, $2))
+       let (ap, e) = $2 in
+       ap, ghexp ~loc:$sloc (Pexp_fun((l, ap), o, p, e))
       }
   | LPAREN TYPE lident_list RPAREN fun_def
-      { mk_newtypes ~loc:$sloc $3 $5 }
+      { let (ap, e) = $5 in
+        ap, mk_newtypes ~loc:$sloc $3 e }
 ;
 %inline expr_comma_list:
   es = separated_nontrivial_llist(COMMA, expr)
@@ -3229,7 +3248,15 @@ function_type:
       domain = extra_rhs(tuple_type)
       MINUSGREATER
       codomain = function_type
-        { Ptyp_arrow(label, domain, codomain) }
+        { Ptyp_arrow((label, Applicable), domain, codomain) }
+    )
+    { $1 }
+  | mktyp(
+      label = arg_label
+      domain = extra_rhs(tuple_type)
+      STARMINUSGREATER
+      codomain = function_type
+        { Ptyp_arrow((label, Unapplicable), domain, codomain) }
     )
     { $1 }
 ;

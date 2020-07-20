@@ -66,7 +66,7 @@ and type_desc =
   (** [Tvar (Some "a")] ==> ['a] or ['_a]
       [Tvar None]       ==> [_] *)
 
-  | Tarrow of arg_label * type_expr * type_expr * commutable
+  | Tarrow of param_label * type_expr * type_expr * commutable
   (** [Tarrow (Nolabel,      e1, e2, c)] ==> [e1    -> e2]
       [Tarrow (Labelled "l", e1, e2, c)] ==> [l:e1  -> e2]
       [Tarrow (Optional "l", e1, e2, c)] ==> [?l:e1 -> e2]
@@ -439,7 +439,7 @@ module Concr : Set.S with type elt = string
 type class_type =
     Cty_constr of Path.t * type_expr list * class_type
   | Cty_signature of class_signature
-  | Cty_arrow of arg_label * type_expr * class_type
+  | Cty_arrow of param_label * type_expr * class_type
 
 and class_signature =
   { csig_self: type_expr;

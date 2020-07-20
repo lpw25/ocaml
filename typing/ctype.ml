@@ -2263,8 +2263,9 @@ let rec mcomp type_pairs env t1 t2 =
         | (Tvar _, _)
         | (_, Tvar _)  ->
             ()
-        | (Tarrow (l1, t1, u1, _), Tarrow (l2, t2, u2, _))
-          when l1 = l2 || not (is_optional l1 || is_optional l2) ->
+        | (Tarrow ((l1, ap1), t1, u1, _), Tarrow ((l2, ap2), t2, u2, _))
+          when ap1 = ap2
+            && (l1 = l2 || not (is_optional l1 || is_optional l2)) ->
             mcomp type_pairs env t1 t2;
             mcomp type_pairs env u1 u2;
         | (Ttuple tl1, Ttuple tl2) ->
@@ -2684,9 +2685,11 @@ and unify3 env t1 t1' t2 t2' =
     end;
     try
       begin match (d1, d2) with
-        (Tarrow (l1, t1, u1, c1), Tarrow (l2, t2, u2, c2)) when l1 = l2 ||
-        (!Clflags.classic || !umode = Pattern) &&
-        not (is_optional l1 || is_optional l2) ->
+        (Tarrow ((l1, ap1), t1, u1, c1), Tarrow ((l2, ap2), t2, u2, c2))
+        when ap1 = ap2
+          && (l1 = l2 ||
+              (!Clflags.classic || !umode = Pattern) &&
+              not (is_optional l1 || is_optional l2)) ->
           unify  env t1 t2; unify env  u1 u2;
           begin match commu_repr c1, commu_repr c2 with
             Clink r, c2 -> set_commu r c2
@@ -3164,17 +3167,18 @@ let expand_head_trace env t =
    (2) the original label is not optional
 *)
 
-let filter_arrow env t l =
+let filter_arrow env t ((l, ap) as pl)=
   let t = expand_head_trace env t in
   match t.desc with
     Tvar _ ->
       let lv = t.level in
       let t1 = newvar2 lv and t2 = newvar2 lv in
-      let t' = newty2 lv (Tarrow (l, t1, t2, Cok)) in
+      let t' = newty2 lv (Tarrow (pl, t1, t2, Cok)) in
       link_type t t';
       (t1, t2)
-  | Tarrow(l', t1, t2, _)
-    when l = l' || !Clflags.classic && l = Nolabel && not (is_optional l') ->
+  | Tarrow((l', ap'), t1, t2, _)
+    when ap = ap'
+      && (l = l' || !Clflags.classic && l = Nolabel && not (is_optional l')) ->
       (t1, t2)
   | _ ->
       raise (Unify [])
@@ -3295,8 +3299,10 @@ let rec moregen inst_nongen type_pairs env t1 t2 =
               moregen_occur env t1'.level t2;
               update_scope t1'.scope t2;
               link_type t1' t2
-          | (Tarrow (l1, t1, u1, _), Tarrow (l2, t2, u2, _)) when l1 = l2
-            || !Clflags.classic && not (is_optional l1 || is_optional l2) ->
+          | (Tarrow ((l1, ap1), t1, u1, _), Tarrow ((l2, ap2), t2, u2, _))
+            when ap1 = ap2 &&
+                 (l1 = l2
+                  || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
               moregen inst_nongen type_pairs env t1 t2;
               moregen inst_nongen type_pairs env u1 u2
           | (Ttuple tl1, Ttuple tl2) ->
@@ -3567,8 +3573,10 @@ let rec eqtype rename type_pairs subst env t1 t2 =
                 then raise (Unify []);
                 subst := (t1', t2') :: !subst
               end
-          | (Tarrow (l1, t1, u1, _), Tarrow (l2, t2, u2, _)) when l1 = l2
-            || !Clflags.classic && not (is_optional l1 || is_optional l2) ->
+          | (Tarrow ((l1, ap1), t1, u1, _), Tarrow ((l2, ap2), t2, u2, _))
+            when ap1 = ap2
+              && (l1 = l2
+                  || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
               eqtype rename type_pairs subst env t1 t2;
               eqtype rename type_pairs subst env u1 u2;
           | (Ttuple tl1, Ttuple tl2) ->
@@ -3988,8 +3996,9 @@ let match_class_declarations env patt_params patt_type subj_params subj_type =
           (Cty_signature sign1) (Cty_signature sign2);
         (* Use moregeneral for class parameters, need to recheck everything to
            keeps relationships (PR#4824) *)
+        let label = (Labelled "*", Applicable) in
         let clty_params =
-          List.fold_right (fun ty cty -> Cty_arrow (Labelled "*",ty,cty)) in
+          List.fold_right (fun ty cty -> Cty_arrow (label,ty,cty)) in
         match_class_types ~trace:false env
           (clty_params patt_params patt_type)
           (clty_params subj_params subj_type)
@@ -4244,8 +4253,10 @@ let rec subtype_rec env trace t1 t2 cstrs =
     match (t1.desc, t2.desc) with
       (Tvar _, _) | (_, Tvar _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
-    | (Tarrow(l1, t1, u1, _), Tarrow(l2, t2, u2, _)) when l1 = l2
-      || !Clflags.classic && not (is_optional l1 || is_optional l2) ->
+    | (Tarrow((l1, ap1), t1, u1, _), Tarrow((l2, ap2), t2, u2, _))
+      when ap1 = ap2
+        && (l1 = l2
+            || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
         let cstrs = subtype_rec env (Trace.diff t2 t1::trace) t2 t1 cstrs in
         subtype_rec env (Trace.diff u1 u2::trace) u1 u2 cstrs
     | (Ttuple tl1, Ttuple tl2) ->

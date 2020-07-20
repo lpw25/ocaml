@@ -2246,9 +2246,9 @@ let is_prim ~name funct =
 
 let rec approx_type env sty =
   match sty.ptyp_desc with
-    Ptyp_arrow (p, _, sty) ->
-      let ty1 = if is_optional p then type_option (newvar ()) else newvar () in
-      newty (Tarrow (p, ty1, approx_type env sty, Cok))
+    Ptyp_arrow ((l, _) as pl, _, sty) ->
+      let ty1 = if is_optional l then type_option (newvar ()) else newvar () in
+      newty (Tarrow (pl, ty1, approx_type env sty, Cok))
   | Ptyp_tuple args ->
       newty (Ttuple (List.map (approx_type env) args))
   | Ptyp_constr (lid, ctl) ->
@@ -2265,11 +2265,11 @@ let rec approx_type env sty =
 let rec type_approx env sexp =
   match sexp.pexp_desc with
     Pexp_let (_, _, e) -> type_approx env e
-  | Pexp_fun (p, _, _, e) ->
-      let ty = if is_optional p then type_option (newvar ()) else newvar () in
-      newty (Tarrow(p, ty, type_approx env e, Cok))
+  | Pexp_fun ((l, _) as pl, _, _, e) ->
+      let ty = if is_optional l then type_option (newvar ()) else newvar () in
+      newty (Tarrow(pl, ty, type_approx env e, Cok))
   | Pexp_function ({pc_rhs=e}::_) ->
-      newty (Tarrow(Nolabel, newvar (), type_approx env e, Cok))
+      newty (Tarrow((Nolabel, Applicable), newvar (), type_approx env e, Cok))
   | Pexp_match (_, {pc_rhs=e}::_) -> type_approx env e
   | Pexp_try (e, _) -> type_approx env e
   | Pexp_tuple l -> newty (Ttuple(List.map (type_approx env) l))
@@ -2706,7 +2706,7 @@ and type_expect_
         exp_type = body.exp_type;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
-  | Pexp_fun (l, Some default, spat, sbody) ->
+  | Pexp_fun ((l, _) as pl, Some default, spat, sbody) ->
       assert(is_optional l); (* default allowed only with optional argument *)
       let open Ast_helper in
       let default_loc = default.pexp_loc in
@@ -2741,13 +2741,14 @@ and type_expect_
           [Vb.mk spat smatch] sbody
       in
       type_function ?in_function loc sexp.pexp_attributes env
-                    ty_expected_explained l [Exp.case pat body]
-  | Pexp_fun (l, None, spat, sbody) ->
+                    ty_expected_explained pl [Exp.case pat body]
+  | Pexp_fun (pl, None, spat, sbody) ->
       type_function ?in_function loc sexp.pexp_attributes env
-                    ty_expected_explained l [Ast_helper.Exp.case spat sbody]
+                    ty_expected_explained pl [Ast_helper.Exp.case spat sbody]
   | Pexp_function caselist ->
       type_function ?in_function
-        loc sexp.pexp_attributes env ty_expected_explained Nolabel caselist
+        loc sexp.pexp_attributes env ty_expected_explained
+        (Nolabel, Applicable) caselist
   | Pexp_apply(sfunct, sargs) ->
       assert (sargs <> []);
       begin_def (); (* one more level for non-returning functions *)
@@ -3247,7 +3248,9 @@ and type_expect_
                     filter_self_method env met Private meths privty
                   in
                   let method_type = newvar () in
-                  let (obj_ty, res_ty) = filter_arrow env method_type Nolabel in
+                  let (obj_ty, res_ty) =
+                    filter_arrow env method_type (Nolabel, Applicable)
+                  in
                   unify env obj_ty desc.val_type;
                   unify env res_ty (instance typ);
                   let method_desc =
@@ -3642,13 +3645,16 @@ and type_expect_
       let op_path, op_desc = type_binding_op_ident env slet.pbop_op in
       let op_type = instance op_desc.val_type in
       let spat_params, ty_params = loop slet.pbop_pat (newvar ()) sands in
+      let no_label = Nolabel, Applicable in
       let ty_func_result = newvar () in
-      let ty_func = newty (Tarrow(Nolabel, ty_params, ty_func_result, Cok)) in
+      let ty_func =
+        newty (Tarrow(no_label, ty_params, ty_func_result, Cok))
+      in
       let ty_result = newvar () in
       let ty_andops = newvar () in
       let ty_op =
-        newty (Tarrow(Nolabel, ty_andops,
-          newty (Tarrow(Nolabel, ty_func, ty_result, Cok)), Cok))
+        newty (Tarrow(no_label, ty_andops,
+          newty (Tarrow(no_label, ty_func, ty_result, Cok)), Cok))
       in
       begin try
         unify env op_type ty_op
@@ -3773,7 +3779,7 @@ and type_function ?in_function loc attrs env ty_expected_explained l caselist =
     with Unify _ ->
       match expand_head env ty_expected with
         {desc = Tarrow _} as ty ->
-          raise(Error(loc, env, Abstract_wrong_label(l, ty, explanation)))
+          raise(Error(loc, env, Abstract_wrong_label(fst l, ty, explanation)))
       | _ ->
           raise(Error(loc_fun, env,
                       Too_many_arguments (in_function <> None,
@@ -3781,7 +3787,7 @@ and type_function ?in_function loc attrs env ty_expected_explained l caselist =
                                           explanation)))
   in
   let ty_arg =
-    if is_optional l then
+    if is_optional_param l then
       let tv = newvar() in
       begin
         try unify env ty_arg (type_option tv)
@@ -3802,12 +3808,12 @@ and type_function ?in_function loc attrs env ty_expected_explained l caselist =
     let ls, tvar = list_labels env ty in
     ls = [] && not tvar
   in
-  if is_optional l && not_function ty_res then
+  if is_optional_param l && not_function ty_res then
     Location.prerr_warning (List.hd cases).c_lhs.pat_loc
       Warnings.Unerasable_optional_argument;
   let param = name_cases "param" cases in
   re {
-    exp_desc = Texp_function { arg_label = l; param; cases; partial; };
+    exp_desc = Texp_function { param_label = l; param; cases; partial; };
     exp_loc = loc; exp_extra = [];
     exp_type = instance (newgenty (Tarrow(l, ty_arg, ty_res, Cok)));
     exp_attributes = attrs;
@@ -4144,7 +4150,7 @@ and type_argument ?explanation ?recarg env sarg ty_expected' ty_expected =
   (* ty_expected' may be generic *)
   let no_labels ty =
     let ls, tvar = list_labels env ty in
-    not tvar && List.for_all ((=) Nolabel) ls
+    not tvar && List.for_all ((=) (Nolabel, Applicable)) ls
   in
   let rec is_inferred sexp =
     match sexp.pexp_desc with
@@ -4155,7 +4161,7 @@ and type_argument ?explanation ?recarg env sarg ty_expected' ty_expected =
     | _ -> false
   in
   match expand_head env ty_expected' with
-    {desc = Tarrow(Nolabel,ty_arg,ty_res,_); level = lv}
+    {desc = Tarrow((Nolabel, Applicable),ty_arg,ty_res,_); level = lv}
     when is_inferred sarg ->
       (* apply optional arguments when expected type is "" *)
       (* we must be very careful about not breaking the semantics *)
@@ -4167,10 +4173,11 @@ and type_argument ?explanation ?recarg env sarg ty_expected' ty_expected =
       end;
       let rec make_args args ty_fun =
         match (expand_head env ty_fun).desc with
-        | Tarrow (l,ty_arg,ty_fun,_) when is_optional l ->
+        | Tarrow ((l, Applicable),ty_arg,ty_fun,_) when is_optional l ->
             let ty = option_none env (instance ty_arg) sarg.pexp_loc in
             make_args ((l, Some ty) :: args) ty_fun
-        | Tarrow (l,_,ty_res',_) when l = Nolabel || !Clflags.classic ->
+        | Tarrow ((l, Applicable),_,ty_res',_)
+          when l = Nolabel || !Clflags.classic ->
             List.rev args, ty_fun, no_labels ty_res'
         | Tvar _ ->  List.rev args, ty_fun, false
         |  _ -> [], texp.exp_type, false
@@ -4216,7 +4223,7 @@ and type_argument ?explanation ?recarg env sarg ty_expected' ty_expected =
         let cases = [case eta_pat e] in
         let param = name_cases "param" cases in
         { texp with exp_type = ty_fun; exp_desc =
-          Texp_function { arg_label = Nolabel; param; cases;
+          Texp_function { param_label = (Nolabel, Applicable); param; cases;
             partial = Total; } }
       in
       Location.prerr_warning texp.exp_loc

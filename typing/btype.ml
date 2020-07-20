@@ -680,6 +680,8 @@ let check_memorized_abbrevs () =
 
 let is_optional = function Optional _ -> true | _ -> false
 
+let is_optional_param (l, _) = is_optional l
+
 let label_name = function
     Nolabel -> ""
   | Labelled s

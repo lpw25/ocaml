@@ -258,6 +258,10 @@ let pr_var = Pprintast.tyvar
 let pr_vars =
   print_list pr_var (fun ppf -> fprintf ppf "@ ")
 
+let pr_arrow_tail ppf = function
+  | Asttypes.Applicable -> pp_print_string ppf " "
+  | Asttypes.Unapplicable -> pp_print_string ppf " *"
+
 let rec print_out_type ppf =
   function
   | Otyp_alias (ty, s) ->
@@ -271,11 +275,12 @@ let rec print_out_type ppf =
 
 and print_out_type_1 ppf =
   function
-    Otyp_arrow (lab, ty1, ty2) ->
+    Otyp_arrow (lab, ap, ty1, ty2) ->
       pp_open_box ppf 0;
       if lab <> "" then (pp_print_string ppf lab; pp_print_char ppf ':');
       print_out_type_2 ppf ty1;
-      pp_print_string ppf " ->";
+      pr_arrow_tail ppf ap;
+      pp_print_string ppf "->";
       pp_print_space ppf ();
       print_out_type_1 ppf ty2;
       pp_close_box ppf ()
@@ -425,9 +430,9 @@ let rec print_out_class_type ppf =
             fprintf ppf "@[<1>[%a]@]@ " (print_typlist !out_type ",") tyl
       in
       fprintf ppf "@[%a%a@]" pr_tyl tyl print_ident id
-  | Octy_arrow (lab, ty, cty) ->
-      fprintf ppf "@[%s%a ->@ %a@]" (if lab <> "" then lab ^ ":" else "")
-        print_out_type_2 ty print_out_class_type cty
+  | Octy_arrow (lab, ap, ty, cty) ->
+      fprintf ppf "@[%s%a%a->@ %a@]" (if lab <> "" then lab ^ ":" else "")
+        print_out_type_2 ty pr_arrow_tail ap print_out_class_type cty
   | Octy_signature (self_ty, csil) ->
       let pr_param ppf =
         function

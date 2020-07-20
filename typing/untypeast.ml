@@ -398,17 +398,23 @@ let expression sub exp =
 
     (* Pexp_function can't have a label, so we split in 3 cases. *)
     (* One case, no guard: It's a fun. *)
-    | Texp_function { arg_label; cases = [{c_lhs=p; c_guard=None; c_rhs=e}];
+    | Texp_function { param_label; cases = [{c_lhs=p; c_guard=None; c_rhs=e}];
           _ } ->
-        Pexp_fun (arg_label, None, sub.pat sub p, sub.expr sub e)
+        Pexp_fun (param_label, None, sub.pat sub p, sub.expr sub e)
     (* No label: it's a function. *)
-    | Texp_function { arg_label = Nolabel; cases; _; } ->
+    | Texp_function { param_label = (Nolabel, Applicable); cases; _; } ->
         Pexp_function (List.map (sub.case sub) cases)
     (* Mix of both, we generate `fun ~label:$name$ -> match $name$ with ...` *)
-    | Texp_function { arg_label = Labelled s | Optional s as label; cases;
+    | Texp_function { param_label; cases;
           _ } ->
+        let s =
+          match param_label with
+          | Labelled s, _ -> s
+          | Optional s, _ -> s
+          | Nolabel, _ -> "param"
+        in
         let name = fresh_name s exp.exp_env in
-        Pexp_fun (label, None, Pat.var ~loc {loc;txt = name },
+        Pexp_fun (param_label, None, Pat.var ~loc {loc;txt = name },
           Exp.match_ ~loc (Exp.ident ~loc {loc;txt= Lident name})
                           (List.map (sub.case sub) cases))
     | Texp_apply (exp, list) ->
@@ -813,7 +819,8 @@ let class_field sub cf =
     | Tcf_method (lab, priv, Tcfk_concrete (o, exp)) ->
         let remove_fun_self = function
           | { exp_desc =
-              Texp_function { arg_label = Nolabel; cases = [case]; _ } }
+              Texp_function { param_label = (Nolabel, Applicable);
+                              cases = [case]; _ } }
             when is_self_pat case.c_lhs && case.c_guard = None -> case.c_rhs
           | e -> e
         in
@@ -822,7 +829,8 @@ let class_field sub cf =
     | Tcf_initializer exp ->
         let remove_fun_self = function
           | { exp_desc =
-              Texp_function { arg_label = Nolabel; cases = [case]; _ } }
+              Texp_function { param_label = (Nolabel, Applicable);
+                              cases = [case]; _ } }
             when is_self_pat case.c_lhs && case.c_guard = None -> case.c_rhs
           | e -> e
         in
