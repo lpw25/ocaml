@@ -2298,7 +2298,7 @@ let rec short_paths_module_desc env mpath mty comp =
   | Mty_alias(_, path) -> Alias path
   | Mty_ident path -> begin
       match find_modtype_expansion path env with
-      | exception Not_found -> Fresh (Signature (lazy []))
+      | exception Not_found -> Fresh Abstract
       | mty -> short_paths_module_desc env mpath mty comp
     end
   | Mty_signature _ ->

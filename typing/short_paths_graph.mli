@@ -136,6 +136,7 @@ module Desc : sig
     (** a signature is a list of component *)
 
     and kind =
+      | Abstract
       | Signature of components Lazy.t
       (** The contents of a signature are computed lazily, this allows to skip
           a significant amount of computation. *)
@@ -251,29 +252,35 @@ module Sort : sig
         identifiers are {[String], [Map]}. *)
 end
 
-module Component : sig
+module Local_component : sig
 
   type source =
-    | Global
-    (** Component comes from a global import. Only applicable to modules. *)
-    | Local
+    | Definition
     (** Component comes from a local definition. *)
     | Open
     (** Component comes from an open item. *)
 
-  (** A [Component.t] augments a [Desc.t] with an origin and more
+  (** A [Local_component.t] augments a [Desc.t] with an origin and more
       detailed source. *)
   type t =
     | Type of Origin.t * Ident.t * Desc.Type.t * source
     | Class_type of Origin.t * Ident.t * Desc.Class_type.t * source
     | Module_type of Origin.t * Ident.t * Desc.Module_type.t * source
     | Module of Origin.t * Ident.t * Desc.Module.t * source
-    | Declare_module of Origin.t * Ident.t
 
 end
 
+module Persistent_component : sig
+
+  type t =
+    | Declare of Dependency.t * Ident.t
+    | Load of Dependency.t * Ident.t * Desc.Module.t
+
+end
+
+
 (** The [graph] is the short-path specific representation of an environment.
-    It aggregates components and do name resolution.
+    It aggregates components and does name resolution.
 
     Resolution turns syntactic descriptions into abstract values:
     - Desc.Type.t        -> Type.t
@@ -387,21 +394,19 @@ end
     [Graph.rebase] will insert definitions at the right point in "time".
 *)
 
-module Diff : sig
+module Additions : sig
 
   module Item : sig
 
     type t =
-      | Type of Ident.t * Type.t * Origin.t option
-      | Class_type of Ident.t * Class_type.t * Origin.t option
-      | Module_type of Ident.t * Module_type.t * Origin.t option
-      | Module of Ident.t * Module.t * Origin.t option
+      | Type of Ident.t * Type.t
+      | Class_type of Ident.t * Class_type.t
+      | Module_type of Ident.t * Module_type.t
+      | Module of Ident.t * Module.t
 
     val origin : graph -> t -> Origin.t
 
     val id : graph -> t -> Ident.t
-
-    val previous : graph -> t -> Origin.t option
 
   end
 
@@ -409,13 +414,29 @@ module Diff : sig
 
 end
 
+module Diff : sig
+
+  type t
+
+end
+
+module Basis : sig
+
+  type t
+
+  val empty : t
+
+  val add : t -> Persistent_component.t list -> t * Diff.t
+
+end
+
 module Graph : sig
 
   type t = graph
 
-  val empty : t
+  val create : Basis.t -> t
 
-  val add : t -> Component.t list -> t * Diff.t
+  val add : t -> Local_component.t list -> t * Additions.t
 
   val rebase : t -> Diff.t -> t
 
