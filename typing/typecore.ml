@@ -4255,7 +4255,7 @@ and type_application env funct sargs =
   in
   let has_label l ty_fun =
     let ls, tvar = list_labels env ty_fun in
-    tvar || List.mem l ls
+    tvar || List.mem (l, Applicable) ls
   in
   let eliminated_optional_arguments = ref [] in
   let omitted_parameters = ref [] in
@@ -4269,9 +4269,10 @@ and type_application env funct sargs =
              not (is_prim ~name:"%identity" funct)
           then
             Location.prerr_warning sarg.pexp_loc Warnings.Unused_argument;
-          unify env ty_fun (newty (Tarrow(lbl,t1,t2,Clink(ref Cunknown))));
+          unify env ty_fun
+            (newty (Tarrow((lbl, Applicable),t1,t2,Clink(ref Cunknown))));
           (t1, t2)
-      | Tarrow (l,t1,t2,_) when l = lbl
+      | Tarrow ((l, Applicable),t1,t2,_) when l = lbl
         || !Clflags.classic && lbl = Nolabel && not (is_optional l) ->
           (t1, t2)
       | td ->
@@ -4304,9 +4305,13 @@ and type_application env funct sargs =
     begin
       let ls, tvar = list_labels env funct.exp_type in
       not tvar &&
-      let labels = List.filter (fun l -> not (is_optional l)) ls in
+      let labels =
+        List.filter
+          (fun (l, ap) -> not (is_optional l) || ap = Unapplicable) ls
+      in
       List.length labels = List.length sargs &&
       List.for_all (fun (l,_) -> l = Nolabel) sargs &&
+      List.for_all (fun (_,ap) -> ap = Applicable) labels &&
       List.exists (fun l -> l <> Nolabel) labels &&
       (Location.prerr_warning
          funct.exp_loc
@@ -4319,7 +4324,7 @@ and type_application env funct sargs =
   let warned = ref false in
   let rec type_args args ty_fun ty_fun0 sargs =
     match expand_head env ty_fun, expand_head env ty_fun0 with
-    | {desc=Tarrow (l, ty, ty_fun, com); level=lv} as ty_fun',
+    | {desc=Tarrow ((l, ap), ty, ty_fun, com); level=lv} as ty_fun',
       {desc=Tarrow (_, ty0, ty_fun0, _)}
       when sargs <> [] && commu_repr com = Cok ->
         let may_warn loc w =
@@ -4331,6 +4336,7 @@ and type_application env funct sargs =
         in
         let name = label_name l
         and optional = is_optional l in
+        let unapplicable = ap = Unapplicable in
         let use_arg sarg l' =
           Some (
             if not optional || is_optional l' then
