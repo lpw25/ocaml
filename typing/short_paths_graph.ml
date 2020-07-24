@@ -879,7 +879,7 @@ end = struct
     | Unloaded _ ->
         let arg = Graph.find_module root path in
         let arg = Module.normalize root arg in
-        unloaded_application t arg
+        Module.unloaded_application t arg
     | Functor ({ apply; applications } as r)->
         let arg = Graph.find_module root path in
         let arg = Module.normalize root arg in
@@ -954,7 +954,7 @@ end = Diff
 and Local_component : sig
 
   type source =
-    | Local
+    | Definition
     | Open
 
   type t =
@@ -966,10 +966,6 @@ and Local_component : sig
 end = Local_component
 
 and Persistent_component : sig
-
-  type source =
-    | Local
-    | Open
 
   type t =
     | Declare of Dependency.t * Ident.t
@@ -985,8 +981,8 @@ and Graph : sig
 
   val create : t -> t
 
-  val add_persitent :
-    t -> Persistent_component.t -> Ident.t -> t * Additions.t * Diff.t
+  val add_persistent :
+    t -> Persistent_component.t list -> t * Additions.t * Diff.t
 
   val add : t -> Local_component.t list -> t * Additions.t
 
@@ -1007,6 +1003,14 @@ and Graph : sig
   val is_module_type_path_visible : t -> Path.t -> bool
 
   val is_module_path_visible : t -> Path.t -> bool
+
+  val get_visible_type_path : t -> Path.t list -> Path.t option
+
+  val get_visible_class_type_path : t -> Path.t list -> Path.t option
+
+  val get_visible_module_type_path : t -> Path.t list -> Path.t option
+
+  val get_visible_module_path : t -> Path.t list -> Path.t option
 
 end = struct
 
@@ -1062,8 +1066,8 @@ end = struct
     let name = Ident.name id in
     let defs =
       match source with
-      | Component.Local -> Local id
-      | Component.Open -> begin
+      | Local_component.Definition -> Local id
+      | Local_component.Open -> begin
         match String_map.find name names with
         | exception Not_found -> Unambiguous id
         | Global _ -> Unambiguous id
@@ -1087,132 +1091,94 @@ end = struct
     | _ -> names
 
   let add_persistent t descs =
-    let rec loop acc additions diff declarations = function
-      | [] -> loop_declarations acc diff declarations
+    let rec loop_loads acc additions diff = function
+      | [] -> acc, additions, diff
       | Persistent_component.Load(dep, id, desc) :: rest ->
           check_module_not_defined acc id;
           let origin = Origin.Dependency dep in
           let md = Module.base origin id desc in
           let modules = Ident_map.add id md acc.modules in
           let module_names = add_global_name id acc.module_names in
-          let addition_item = Addition.Item.Module(id, md) in
+          let addition_item = Additions.Item.Module(id, md) in
           let additions = addition_item :: additions in
           let diff_item = id, md in
-          let diff = item :: diff in
+          let diff = diff_item :: diff in
           let acc = { acc with modules; module_names } in
-          loop acc additions diff declarations rest
-      | Component.Declare(_, id) as decl :: rest ->
-          let declarations = decl :: declarations in
-          let module_names = add_global_name id acc.module_names in
-          let acc = { acc with module_names } in
-          loop acc diff declarations rest
-    and loop_declarations acc additions diff = function
-      | [] -> acc, additions, diff
-      | Component.Declare(dep, id) :: rest ->
+          loop_loads acc additions diff rest
+      | Persistent_component.Declare _ :: rest ->
+          loop_loads acc additions diff rest
+    in
+    let rec loop_declarations acc diff = function
+      | [] -> acc, diff
+      | Persistent_component.Declare(dep, id) :: rest ->
           if Ident_map.mem id acc.modules then begin
             loop_declarations acc diff rest
           end else begin
-            let origin = Origin.Dependency dep in
-            let md = Module.declare origin id in
+            let md = Module.unloaded_base dep id in
             let modules = Ident_map.add id md acc.modules in
-            let acc = { acc with modules } in
+            let module_names = add_global_name id acc.module_names in
+            let diff_item = id, md in
+            let diff = diff_item :: diff in
+            let acc = { acc with modules; module_names } in
             loop_declarations acc diff rest
           end
-      | ( Component.Type _
-        | Component.Class_type _
-        | Component.Module_type _
-        | Component.Module _) :: _ -> assert false
+      | Persistent_component.Load _ :: rest ->
+          loop_declarations acc diff rest
     in
-    loop t [] [] descs
+    let t, additions, diff = loop_loads t [] [] descs in
+    let t, diff = loop_declarations t diff descs in
+    t, additions, diff
 
   let add t descs =
-    let rec loop acc diff declarations = function
-      | [] -> loop_declarations acc diff declarations
-      | Component.Type(origin, id, desc, source) :: rest ->
+    let rec loop acc additions = function
+      | [] -> acc, additions
+      | Local_component.Type(origin, id, desc, source) :: rest ->
           check_type_not_defined acc id;
           let typ = Type.base origin id desc in
           let types = Ident_map.add id typ acc.types in
           let type_names = add_name source id acc.type_names in
-          let item = Diff.Item.Type(id, typ) in
-          let diff = item :: diff in
+          let addition = Additions.Item.Type(id, typ) in
+          let additions = addition :: additions in
           let acc = { acc with types; type_names } in
-          loop acc diff declarations rest
-      | Component.Class_type(origin,id, desc, source) :: rest ->
+          loop acc additions rest
+      | Local_component.Class_type(origin,id, desc, source) :: rest ->
           check_class_type_not_defined acc id;
           let clty = Class_type.base origin id desc in
           let class_types = Ident_map.add id clty acc.class_types in
           let class_type_names = add_name source id acc.class_type_names in
-          let item = Diff.Item.Class_type(id, clty) in
-          let diff = item :: diff in
+          let addition = Additions.Item.Class_type(id, clty) in
+          let additions = addition :: additions in
           let acc = { acc with class_types; class_type_names } in
-          loop acc diff declarations rest
-      | Component.Module_type(origin,id, desc, source) :: rest ->
+          loop acc additions rest
+      | Local_component.Module_type(origin,id, desc, source) :: rest ->
           check_module_type_not_defined acc id;
           let mty = Module_type.base origin id desc in
           let module_types = Ident_map.add id mty acc.module_types in
           let module_type_names = add_name source id acc.module_type_names in
-          let item = Diff.Item.Module_type(id, mty) in
-          let diff = item :: diff in
+          let addition = Additions.Item.Module_type(id, mty) in
+          let additions = addition :: additions in
           let acc = { acc with module_types; module_type_names } in
-          loop acc diff declarations rest
-      | Component.Module(origin, id, desc, source) :: rest ->
+          loop acc additions rest
+      | Local_component.Module(origin, id, desc, source) :: rest ->
           check_module_not_defined acc id;
           let md = Module.base origin id desc in
           let modules = Ident_map.add id md acc.modules in
           let module_names = add_name source id acc.module_names in
-          let item = Diff.Item.Module(id, md, None) in
-          let diff = item :: diff in
+          let addition = Additions.Item.Module(id, md) in
+          let additions = addition :: additions in
           let acc = { acc with modules; module_names } in
-          loop acc diff declarations rest
-      | Component.Declare_module(_, id) as decl :: rest ->
-          let declarations = decl :: declarations in
-          let module_names =
-            (* CR lwhite: This should probably not always be [Global] *)
-            add_name Component.Global id acc.module_names
-          in
-          let acc = { acc with module_names } in
-          loop acc diff declarations rest
-    and loop_declarations acc diff = function
-      | [] -> acc, diff
-      | Component.Declare_module(origin, id) :: rest ->
-          if Ident_map.mem id acc.modules then begin
-            loop_declarations acc diff rest
-          end else begin
-            let md = Module.declare origin id in
-            let modules = Ident_map.add id md acc.modules in
-            let acc = { acc with modules } in
-            loop_declarations acc diff rest
-          end
-      | ( Component.Type _
-        | Component.Class_type _
-        | Component.Module_type _
-        | Component.Module _) :: _ -> assert false
+          loop acc additions rest
     in
-    loop t [] [] descs
+    loop t [] descs
 
   let rebase t diff =
     let rec loop acc = function
       | [] -> acc
-      | Diff.Item.Type(id, typ, _) :: rest ->
-          let types = Ident_map.add id typ acc.types in
-          let type_names = merge_global_name id acc.type_names in
-          let acc = { acc with types; type_names } in
-          loop acc rest
-      | Diff.Item.Class_type(id, clty, _) :: rest ->
-          let class_types = Ident_map.add id clty acc.class_types in
-          let class_type_names = merge_global_name id acc.class_type_names in
-          let acc = { acc with class_types; class_type_names } in
-          loop acc rest
-      | Diff.Item.Module_type(id, mty, _) :: rest ->
-          let module_types = Ident_map.add id mty acc.module_types in
-          let module_type_names = merge_global_name id acc.module_type_names in
-          let acc = { acc with module_types; module_type_names } in
-          loop acc rest
-      | Diff.Item.Module(id, md, _) :: rest ->
-          let modules = Ident_map.add id md acc.modules in
-          let module_names = merge_global_name id acc.module_names in
-          let acc = { acc with modules; module_names } in
-          loop acc rest
+      | (id, md) :: rest ->
+        let modules = Ident_map.add id md acc.modules in
+        let module_names = merge_global_name id acc.module_names in
+        let acc = { acc with modules; module_names } in
+        loop acc rest
     in
     loop t diff
 
@@ -1364,6 +1330,34 @@ end = struct
         failwith
           "Short_paths_graph.Graph.is_module_type_path_visible: \
            invalid module type path"
+
+    let rec get_visible_type_path graph = function
+      | [] -> None
+      | path :: rest ->
+          let visible = is_type_path_visible graph path in
+          if visible then Some path
+          else get_visible_type_path graph rest
+
+    let rec get_visible_class_type_path graph = function
+      | [] -> None
+      | path :: rest ->
+          let visible = is_class_type_path_visible graph path in
+          if visible then Some path
+          else get_visible_class_type_path graph rest
+
+    let rec get_visible_module_type_path graph = function
+      | [] -> None
+      | path :: rest ->
+          let visible = is_module_type_path_visible graph path in
+          if visible then Some path
+          else get_visible_module_type_path graph rest
+
+    let rec get_visible_module_path graph = function
+      | [] -> None
+      | path :: rest ->
+          let visible = is_module_path_visible graph path in
+          if visible then Some path
+          else get_visible_module_path graph rest
 
 end
 

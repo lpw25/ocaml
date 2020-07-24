@@ -426,7 +426,7 @@ module Basis : sig
 
   val empty : t
 
-  val add : t -> Persistent_component.t list -> t * Diff.t
+  val add : t -> Persistent_component.t list -> t * Additions.t * Diff.t
 
 end
 
@@ -455,5 +455,13 @@ module Graph : sig
   val is_module_type_path_visible : t -> Path.t -> bool
 
   val is_module_path_visible : t -> Path.t -> bool
+
+  val get_visible_type_path : t -> Path.t list -> Path.t option
+
+  val get_visible_class_type_path : t -> Path.t list -> Path.t option
+
+  val get_visible_module_type_path : t -> Path.t list -> Path.t option
+
+  val get_visible_module_path : t -> Path.t list -> Path.t option
 
 end

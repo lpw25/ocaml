@@ -167,12 +167,9 @@ end = struct
 end
 
 (** A priority queue-like data structure where data is ordered by [Origin.t].
-    Popping retrieve everything that is as old or younger [Origin.t]
-    (that was added after).
+    Popping retrieves everything that is as old or younger than the
+    given [Origin.t] (i.e. that was added after).
     Adding finds a point as young as possible to add the data.
-
-    WIP: Not sure about correction criteria, the meaning of Dependencies case
-         is not clear yet.
 *)
 module Origin_range_tbl : sig
 
@@ -368,6 +365,7 @@ module Height = struct
 
 end
 
+(** A worklist for updating a short-paths mapping *)
 module Todo : sig
   module Item : sig
     type t =
@@ -376,9 +374,9 @@ module Todo : sig
       | Update of { id : Ident.t; origin : Origin.t; }
   end
   type t
-  val create : graph -> Rev_deps.t -> Diff.Item.t list -> t
-  val merge : graph -> Rev_deps.t -> t -> Diff.Item.t list -> unit
-  val mutate : graph -> Rev_deps.t -> t -> Diff.Item.t list -> unit
+  val create : graph -> Rev_deps.t -> Additions.t -> t
+  val merge : graph -> Rev_deps.t -> t -> Additions.t -> unit
+  val mutate : graph -> Rev_deps.t -> t -> Additions.t -> unit
   val add_children : graph -> Rev_deps.t -> t -> Height.t -> Module.t -> Path.t -> unit
   val add_next_update : Rev_deps.t -> t -> Height.t -> Origin.t -> Ident.t -> unit
   val pop : Rev_deps.t -> t -> Height.Array.index -> Origin.t -> Item.t list option
@@ -387,7 +385,7 @@ end = struct
   module Item = struct
 
     type t =
-      | Base of Diff.Item.t
+      | Base of Additions.Item.t
       | Children of Module.t * Path.t
       | Update of
           { id : Ident.t;
@@ -504,31 +502,37 @@ end = struct
 
 end
 
-module Forward_path_map : sig
+(** A map from paths which is built on-top of a parent map which can be
+   "rebased", to replace all the parent entries.
 
-  type t
+    The map also keeps track of the sets of its new keys which are
+    unloaded for a particular unloaded dependency *)
+module Rebasable_path_map : sig
 
-  val empty : t
+  type 'a t
 
-  val add : t -> Sort.t -> Path.t -> Path.t -> t
+  val empty : 'a t
 
-  val find : t -> Path.t -> Path.t list
+  val add : 'a t -> Sort.t -> Path.t -> 'a -> 'a t
 
-  val rebase : t -> t -> t
+  val find : 'a t -> Path.t -> 'a list
 
-  val iter_updates : (Path.t -> Path.t -> unit) -> t -> Ident.t -> unit
+  val rebase : t -> parent:t -> t
+
+  val iter_unloaded_entries :
+    (Path.t -> 'a -> unit) -> t -> Dependency.t -> unit
 
 end = struct
 
   type t =
-    { new_paths : Path.t list Path_map.t;
-      old_paths : Path.t list Path_map.t;
-      updates : Path_set.t Ident_map.t; }
+    { new_paths : 'a list Path_map.t;
+      parent_paths : 'a list Path_map.t;
+      unloaded_keys : Path_set.t Dependency.Map.t; }
 
   let empty =
     { new_paths = Path_map.empty;
-      old_paths = Path_map.empty;
-      updates = Ident_map.empty; }
+      parent_paths = Path_map.empty;
+      unloaded_keys = Dependency.Map.empty; }
 
   let add t sort path data =
     let new_paths = t.new_paths in
@@ -538,38 +542,35 @@ end = struct
       | exception Not_found -> []
     in
     let new_paths = Path_map.add path (data :: prev) new_paths in
-    let updates = t.updates in
-    let updates =
+    let unloaded_keys = t.unloaded_keys in
+    let unloaded_keys =
       match sort with
-      | Sort.Defined -> updates
-      | Sort.Unloaded ids ->
-          Ident_set.fold
-            (fun id acc ->
-               let prev =
-                 match Ident_map.find id updates with
-                 | prev -> prev
-                 | exception Not_found -> Path_set.empty
-               in
-               Ident_map.add id (Path_set. add path prev) acc)
-            ids updates
+      | Sort.Defined -> unloaded_keys
+      | Sort.Unloaded dep ->
+          let prev =
+            match Dependency.Map.find dep updates with
+            | prev -> prev
+            | exception Not_found -> Path_set.empty
+          in
+          Dependency.Map.add dep (Path_set.add path prev) unloaded_keys
     in
-    { t with new_paths; updates }
+    { t with new_paths; unloaded_keys }
 
   let find t path =
     match Path_map.find path t.new_paths with
-    | exception Not_found -> Path_map.find path t.old_paths
+    | exception Not_found -> Path_map.find path t.parent_paths
     | new_paths ->
-      match Path_map.find path t.old_paths with
+      match Path_map.find path t.parent_paths with
       | exception Not_found -> new_paths
-      | old_paths -> new_paths @ old_paths
+      | parent_paths -> new_paths @ parent_paths
 
-  let rebase t base =
-    let old_paths =
+  let rebase t ~parent =
+    let parent_paths =
       Path_map.union
         (fun _ paths1 paths2 -> Some (paths1 @ paths2))
-        base.new_paths base.old_paths
+        parent.new_paths parent.parent_paths
     in
-    { t with old_paths }
+    { t with parent_paths }
 
   let iter_updates f t id =
     match Ident_map.find id t.updates with
@@ -583,6 +584,107 @@ end = struct
           pset
 
 end
+
+(** A set of four [Rebasable_path_map.t]s which map
+    canonical paths of different kinds to aliased
+    paths. *)
+module Short_paths_map : sig
+
+  type t
+
+  val create : unit -> t
+
+  val add_type : graph -> t -> Type.t -> Path.t -> unit
+
+  val add_class_type : graph -> t -> Class_type.t -> Path.t -> unit
+
+  val add_module_type : graph -> t -> Module_type.t -> Path.t -> unit
+
+  val add_module : graph -> t -> Module.t -> Path.t -> unit
+
+  val rebase : t -> parent:t -> unit
+
+  val find_type : graph -> t -> Type.t -> Path.t list
+
+  val find_class_type : graph -> t -> Class_type.t -> Path.t list
+
+  val find_module_type : graph -> t -> Module_type.t -> Path.t list
+
+  val find_module : graph -> t -> Module.t -> Path.t list
+
+  val iter_unloaded_entries :
+    type_:(Path.t -> Path.t -> unit) ->
+    class_type:(Path.t -> Path.t -> unit) ->
+    module_type:(Path.t -> Path.t -> unit) ->
+    module_:(Path.t -> Path.t -> unit) ->
+    Dependency.t ->
+    unit
+
+end = struct
+
+    type t =
+      { mutable types : Path.t Rebasable_path_map.t;
+        mutable class_types : Path.t Rebasable_path_map.t;
+        mutable module_types : Path.t Rebasable_path_map.t;
+        mutable modules : Path.t Rebasable_path_map.t; }
+
+    let create () =
+      let types = Forward_path_map.empty in
+      let class_types = Forward_path_map.empty in
+      let module_types = Forward_path_map.empty in
+      let modules = Forward_path_map.empty in
+      { types; class_types; module_types; modules }
+
+    let add_type graph t typ path =
+      let canonical = Type.path graph typ in
+      let sort = Type.sort graph typ in
+      t.types <- Forward_path_map.add t.types sort canonical path
+
+    let add_class_type graph t mty path =
+      let canonical = Class_type.path graph mty in
+      let sort = Class_type.sort graph mty in
+      t.class_types <- Forward_path_map.add t.class_types sort canonical path
+
+    let add_module_type graph t mty path =
+      let canonical = Module_type.path graph mty in
+      let sort = Module_type.sort graph mty in
+      t.module_types <- Forward_path_map.add t.module_types sort canonical path
+
+    let add_module graph t md path =
+      let canonical = Module.path graph md in
+      let sort = Module.sort graph md in
+      t.modules <- Forward_path_map.add t.modules sort canonical path
+
+    let rebase t ~parent =
+      t.types <- Forward_path_map.rebase t.types parent.types;
+      t.class_types <- Forward_path_map.rebase t.class_types parent.class_types;
+      t.module_types <- Forward_path_map.rebase t.module_types parent.module_types;
+      t.modules <- Forward_path_map.rebase t.modules parent.modules
+
+    let find_type graph t typ =
+      let canonical = Type.path graph typ in
+      Forward_path_map.find t.types canonical
+
+    let find_class_type graph t mty =
+      let canonical = Class_type.path graph mty in
+      Forward_path_map.find t.class_types canonical
+
+    let find_module_type graph t mty =
+      let canonical = Module_type.path graph mty in
+      Forward_path_map.find t.module_types canonical
+
+    let find_module graph t md =
+      let canonical = Module.path graph md in
+      Forward_path_map.find t.modules canonical
+
+    let iter_unloaded_entries ~type_ ~class_type ~module_type ~module_ t dep =
+      Forward_path_map.iter_unloaded_entries type_ t.types dep;
+      Forward_path_map.iter_unloaded_entries class_type t.class_types dep;
+      Forward_path_map.iter_unloaded_entries module_type t.module_types dep;
+      Forward_path_map.iter_unloaded_entries module_ t.modules dep
+
+  end
+
 
 module Origin_tbl = Hashtbl.Make(Origin)
 
@@ -598,19 +700,17 @@ module History : sig
 
     val diff : t -> Diff.t
 
-    val rev_deps : t -> Rev_deps.t
-
     val next : t -> t option
 
   end
 
   type t
 
-  val init : Rev_deps.t ->  Diff.t -> t
+  val init : Diff.t -> t
 
   val head : t -> Revision.t
 
-  val commit : t -> Rev_deps.t ->  Diff.t -> unit
+  val commit : t -> Diff.t -> unit
 
 end = struct
 
@@ -654,84 +754,6 @@ end = struct
     t.head <- rev
 
 end
-
-type type_resolution =
-  | Nth of int
-  | Subst of int list
-  | Id
-
-type type_result =
-  | Nth of int
-  | Path of int list option * Path.t
-
-type class_type_result = int list option * Path.t
-
-module Shortest = struct
-
-  module Section = struct
-
-    type t =
-      { mutable types : Forward_path_map.t;
-        mutable class_types : Forward_path_map.t;
-        mutable module_types : Forward_path_map.t;
-        mutable modules : Forward_path_map.t; }
-
-    let create () =
-      let types = Forward_path_map.empty in
-      let class_types = Forward_path_map.empty in
-      let module_types = Forward_path_map.empty in
-      let modules = Forward_path_map.empty in
-      { types; class_types; module_types; modules }
-
-    let add_type graph t typ path =
-      let canonical = Type.path graph typ in
-      let sort = Type.sort graph typ in
-      t.types <- Forward_path_map.add t.types sort canonical path
-
-    let add_class_type graph t mty path =
-      let canonical = Class_type.path graph mty in
-      let sort = Class_type.sort graph mty in
-      t.class_types <- Forward_path_map.add t.class_types sort canonical path
-
-    let add_module_type graph t mty path =
-      let canonical = Module_type.path graph mty in
-      let sort = Module_type.sort graph mty in
-      t.module_types <- Forward_path_map.add t.module_types sort canonical path
-
-    let add_module graph t md path =
-      let canonical = Module.path graph md in
-      let sort = Module.sort graph md in
-      t.modules <- Forward_path_map.add t.modules sort canonical path
-
-    let rebase t parent =
-      t.types <- Forward_path_map.rebase t.types parent.types;
-      t.class_types <- Forward_path_map.rebase t.class_types parent.class_types;
-      t.module_types <- Forward_path_map.rebase t.module_types parent.module_types;
-      t.modules <- Forward_path_map.rebase t.modules parent.modules
-
-    let iter_updates ~type_ ~class_type ~module_type ~module_ t id =
-      Forward_path_map.iter_updates type_ t.types id;
-      Forward_path_map.iter_updates class_type t.class_types id;
-      Forward_path_map.iter_updates module_type t.module_types id;
-      Forward_path_map.iter_updates module_ t.modules id
-
-    let find_type graph t typ =
-      let canonical = Type.path graph typ in
-      Forward_path_map.find t.types canonical
-
-    let find_class_type graph t mty =
-      let canonical = Class_type.path graph mty in
-      Forward_path_map.find t.class_types canonical
-
-    let find_module_type graph t mty =
-      let canonical = Module_type.path graph mty in
-      Forward_path_map.find t.module_types canonical
-
-    let find_module graph t md =
-      let canonical = Module.path graph md in
-      Forward_path_map.find t.modules canonical
-
-  end
 
   module Sections = struct
 
@@ -941,34 +963,6 @@ module Shortest = struct
       | Not_found_here_or_later
       | Found of Path.t
 
-    let rec get_visible_type graph = function
-      | [] -> None
-      | path :: rest ->
-          let visible = Graph.is_type_path_visible graph path in
-          if visible then Some path
-          else get_visible_type graph rest
-
-    let rec get_visible_class_type graph = function
-      | [] -> None
-      | path :: rest ->
-          let visible = Graph.is_class_type_path_visible graph path in
-          if visible then Some path
-          else get_visible_class_type graph rest
-
-    let rec get_visible_module_type graph = function
-      | [] -> None
-      | path :: rest ->
-          let visible = Graph.is_module_type_path_visible graph path in
-          if visible then Some path
-          else get_visible_module_type graph rest
-
-    let rec get_visible_module graph = function
-      | [] -> None
-      | path :: rest ->
-          let visible = Graph.is_module_path_visible graph path in
-          if visible then Some path
-          else get_visible_module graph rest
-
     let find_type graph t height typ =
       check_initialised t height;
       check_completed t height;
@@ -1039,9 +1033,22 @@ module Shortest = struct
 
   end
 
-  type basis
+type type_resolution =
+  | Nth of int
+  | Subst of int list
+  | Id
 
-  type env
+type type_result =
+  | Nth of int
+  | Path of int list option * Path.t
+
+type class_type_result = int list option * Path.t
+
+module Shortest = struct
+
+  type basis = private Basis
+
+  type env = private Env
 
   type _ kind =
     | Basis :
@@ -1291,7 +1298,7 @@ module Shortest = struct
         Todo.add_next_update (rev_deps t) t.todos height origin id
       end
 
-  and initialise : type k. k t -> _ =
+  let rec initialise : type k. k t -> _ =
     fun t sections origin height ->
       if not (Sections.is_initialised sections height) then begin
         begin match Height.pred height with
@@ -1892,6 +1899,7 @@ let add parent desc =
   ref (Unforced { parent; desc })
 
 type ext_shortest = Shortest : 'k Shortest.t -> ext_shortest
+[@@unboxed]
 
 let shortest t =
   match force t with
