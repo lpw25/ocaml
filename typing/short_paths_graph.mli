@@ -15,9 +15,9 @@
     computing it efficiently.
 *)
 
-(* Generic definitions *)
+open Short_paths_loads
 
-module String_map : Map.S with type key = string
+(* Generic definitions *)
 
 module Ident : sig
 
@@ -174,84 +174,6 @@ module Desc : sig
 
 end
 
-(** [Age] defines when an entry became available.
-
-    Somewhat counter-intuitively [Age] actually represents a point in time:
-    - global definitions have age [Age.zero]
-    - each time an environment is extended, the age is incremented.
-    So older entries have lower [Age], most recent entries have the highest
-    [Age].
-
-    While [Age] values are stored in the [Graph], they are always introduced by
-    [Short_paths].
-    [Short_path_graphs] only ensure that the proper [Age] is computed for
-    results of functor applications.
-*)
-module Age : Natural.S
-
-(** Each global module referenced by the environment is given a [Dependency.t]
-    number.  This also applies to modules that are aliased but not used (hence
-    not loaded).
-
-    The number itself has no semantic meaning ([Dependency] is an
-    instance of [Natural.S] just to have an infinite set of values to pick
-    from, it is used as a gensym).
-
-    Dependency numbers are attributed during [Basis] update.
-    Each time a global module is loaded, [Env] will append the module to the
-    [Basis].
-    The updates are done lazily: next time the [Basis] is queried, dependency
-    numbers will be chosen.
-*)
-module Dependency : Natural.S
-
-(** The [Origin] of an item tells when it became well-defined.
-    If the item depends only on global modules, its origin will list these
-    modules.
-    If the item depends on some local definitions, then its origin will be the
-    smallest [Age] at which all these definitions are available.
-*)
-module Origin : sig
-
-  type t =
-    | Dependency of Dependency.t
-    (** Item originates from a global dependency. *)
-    | Dependencies of Dependency.t list
-    (** Item originates from more than one global dependency.  This is possible
-        with functor applications: items from [Map.Make(String)] will have
-        [Dependencies [Map; String]].
-        The list is sorted in increasing order (it is actually a set).
-
-        While [Dependency d] should behave exactly like [Dependencies [d]],
-        this case is distinguished for performance.
-    *)
-    | Environment of Age.t
-    (** Item originates from local environment, at a specific [Age]. *)
-
-  val equal : t -> t -> bool
-
-  val hash : t -> int
-
-end
-
-module Sort : sig
-
-  (* CR lwhite: These descriptions are not accurate *)
-  (** Each item (type, module, class type, ...) comes with a sort.
-      The sorts are used to compute updates in [Short_paths.Forward_path_map].
-  *)
-  type t =
-    | Defined
-    (** Environment entries (a top-level [type t]) have sort [Defined]. *)
-    | Unloaded of Dependency.t
-    (** Sub-entries of modules (such as [String.t]) have sort [Unloaded ids],
-        where [ids] is the set of identifiers of modules that participate in
-        the declaration of the entry.
-        In [String.t] it is the singleton [String], but it can grow in entries
-        that result from functor applications.  In [Map.Make(String).t] the
-        identifiers are {[String], [Map]}. *)
-end
-
 module Local_component : sig
 
   type source =
@@ -292,7 +214,7 @@ end
 type graph
 
 (* Abstract definitions for each item.
-   [origin], [path] and [sort] are available for all kinds of item.
+   [origin] and [path] are available for all kinds of item.
 *)
 
 module Type : sig
@@ -302,8 +224,6 @@ module Type : sig
   val origin : graph -> t -> Origin.t
 
   val path : graph -> t -> Path.t
-
-  val sort : graph -> t -> Sort.t
 
   (** Reminiscent of [Desc.Type.t] *)
   type resolved =
@@ -328,8 +248,6 @@ module Class_type : sig
 
   val path : graph -> t -> Path.t
 
-  val sort : graph -> t -> Sort.t
-
   type resolved = int list option * t
 
   val resolve : graph -> t -> resolved
@@ -344,8 +262,6 @@ module Module_type : sig
 
   val path : graph -> t -> Path.t
 
-  val sort : graph -> t -> Sort.t
-
 end
 
 (** For a module, entries of each kind can be additionnally queried. *)
@@ -357,8 +273,6 @@ module Module : sig
   val origin : graph -> t -> Origin.t
 
   val path : graph -> t -> Path.t
-
-  val sort : graph -> t -> Sort.t
 
   (** Entries are [None] when a module is not a structure (a functor...). *)
 

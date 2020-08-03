@@ -1,6 +1,6 @@
-(* Generic definitions *)
+open Short_paths_loads
 
-module String_map = Map.Make(String)
+(* Generic definitions *)
 
 module Ident = struct
 
@@ -147,94 +147,6 @@ module Desc = struct
 
 end
 
-module Age = Natural.Make()
-
-module Dependency = Natural.Make()
-
-module Origin = struct
-
-  type t =
-    | Dependency of Dependency.t
-    | Dependencies of Dependency.t list
-    | Environment of Age.t
-
-  let rec deps_add dep deps =
-    match deps with
-    | [] -> [dep]
-    | dep' :: rest ->
-      if Dependency.equal dep dep' then
-        deps
-      else if Dependency.less_than dep dep' then
-        dep :: deps
-      else
-        dep' :: deps_add dep rest
-
-  let rec deps_union deps1 deps2 =
-    match deps1, deps2 with
-    | [], _ -> deps2
-    | _, [] -> deps1
-    | dep1 :: rest1, dep2 :: rest2 ->
-        if Dependency.equal dep1 dep2 then
-          dep1 :: deps_union rest1 rest2
-        else if Dependency.less_than dep1 dep2 then
-          dep1 :: deps_union rest1 deps2
-        else
-          dep2 :: deps_union deps1 rest2
-
-  let rec deps_equal deps1 deps2 =
-    match deps1, deps2 with
-    | [], [] -> true
-    | [], _ :: _ -> false
-    | _ :: _, [] -> false
-    | dep1 :: rest1, dep2 :: rest2 ->
-        Dependency.equal dep1 dep2
-        && deps_equal rest1 rest2
-
-  let application t1 t2 =
-    match t1, t2 with
-    | Dependency dep1, Dependency dep2 ->
-        if Dependency.equal dep1 dep2 then t1
-        else if Dependency.less_than dep1 dep2 then
-          Dependencies [dep1; dep2]
-        else
-          Dependencies [dep2; dep1]
-    | Dependency dep1, Dependencies deps2 ->
-        Dependencies (deps_add dep1 deps2)
-    | Dependency _, Environment _ -> t2
-    | Dependencies deps1, Dependency dep2 ->
-        Dependencies (deps_add dep2 deps1)
-    | Dependencies deps1, Dependencies deps2 ->
-        Dependencies (deps_union deps1 deps2)
-    | Dependencies _, Environment _ -> t2
-    | Environment _, Dependency _ -> t1
-    | Environment _, Dependencies _ -> t1
-    | Environment age1, Environment age2 ->
-        Environment (Age.max age1 age2)
-
-  let equal t1 t2 =
-    match t1, t2 with
-    | Dependency dep1, Dependency dep2 -> Dependency.equal dep1 dep2
-    | Dependency _, Dependencies _ -> false
-    | Dependency _, Environment _ -> false
-    | Dependencies _, Dependency _ -> false
-    | Dependencies deps1, Dependencies deps2 -> deps_equal deps1 deps2
-    | Dependencies _, Environment _ -> false
-    | Environment _, Dependency _ -> false
-    | Environment _, Dependencies _ -> false
-    | Environment env1, Environment env2 -> Age.equal env1 env2
-
-  let hash = Hashtbl.hash
-
-end
-
-module Sort = struct
-
-  type t =
-    | Defined
-    | Unloaded of Dependency.t
-
-end
-
 module rec Type : sig
 
   type t
@@ -248,8 +160,6 @@ module rec Type : sig
   val origin : Graph.t -> t -> Origin.t
 
   val path : Graph.t -> t -> Path.t
-
-  val sort : Graph.t -> t -> Sort.t
 
   type resolved =
     | Nth of int
@@ -266,7 +176,7 @@ end = struct
     | Fresh
     | Nth of int
     | Subst of Path.t * int list
-    | Unloaded of Dependency.t
+    | Unloaded
 
   type t =
     { origin : Origin.t;
@@ -292,17 +202,14 @@ end = struct
     { origin; path; definition }
 
   let unloaded md name =
-    match Module.Normalized.sort md with
-    | Sort.Defined -> assert false
-    | Sort.Unloaded dep ->
-        let origin = Module.Normalized.origin md in
-        let path = Path.Pdot(Module.Normalized.path md, name, 0) in
-        let definition = Unloaded dep in
-        { origin; path; definition }
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+    let definition = Unloaded in
+    { origin; path; definition }
 
   let rec normalize_loop root t =
     match t.definition with
-    | Fresh | Unloaded _ | Nth _ | Subst _ -> t
+    | Fresh | Unloaded | Nth _ | Subst _ -> t
     | Alias alias -> begin
         match Graph.find_type root alias with
         | exception Not_found -> { t with definition = Fresh }
@@ -313,7 +220,7 @@ end = struct
     let t =
       match t.definition with
       | Fresh | Nth _ | Subst _ | Alias _ -> t
-      | Unloaded _ ->
+      | Unloaded ->
           match Graph.find_type root t.path with
           | exception Not_found -> t
           | t -> t
@@ -326,11 +233,6 @@ end = struct
   let path root t =
     (normalize root t).path
 
-  let sort root t =
-    match (normalize root t).definition with
-    | Fresh | Nth _ | Subst _ | Alias _ -> Sort.Defined
-    | Unloaded dep -> Sort.Unloaded dep
-
   type resolved =
     | Nth of int
     | Path of int list option * t
@@ -342,7 +244,7 @@ end = struct
 
   let rec resolve root t =
     match (normalize root t).definition with
-    | Fresh | Unloaded _ -> Path(None, t)
+    | Fresh | Unloaded -> Path(None, t)
     | Nth n -> Nth n
     | Subst(p, ns) -> begin
         match Graph.find_type root p with
@@ -367,8 +269,6 @@ and Class_type : sig
 
   val path : Graph.t -> t -> Path.t
 
-  val sort : Graph.t -> t -> Sort.t
-
   type resolved = int list option * t
 
   val resolve : Graph.t -> t -> resolved
@@ -381,7 +281,7 @@ end = struct
     | Alias of Path.t
     | Fresh
     | Subst of Path.t * int list
-    | Unloaded of Dependency.t
+    | Unloaded
 
   type t =
     { origin : Origin.t;
@@ -406,17 +306,14 @@ end = struct
     { origin; path; definition }
 
   let unloaded md name =
-    match Module.Normalized.sort md with
-    | Sort.Defined -> assert false
-    | Sort.Unloaded dep ->
-        let origin = Module.Normalized.origin md in
-        let path = Path.Pdot(Module.Normalized.path md, name, 0) in
-        let definition = Unloaded dep in
-        { origin; path; definition }
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+    let definition = Unloaded in
+    { origin; path; definition }
 
   let rec normalize_loop root t =
     match t.definition with
-    | Fresh | Unloaded _ | Subst _ -> t
+    | Fresh | Unloaded | Subst _ -> t
     | Alias alias -> begin
         match Graph.find_class_type root alias with
         | exception Not_found -> { t with definition = Fresh }
@@ -427,7 +324,7 @@ end = struct
     let t =
       match t.definition with
       | Fresh | Subst _ | Alias _ -> t
-      | Unloaded _ ->
+      | Unloaded ->
           match Graph.find_class_type root t.path with
           | exception Not_found -> t
           | t -> t
@@ -440,11 +337,6 @@ end = struct
   let path root t =
     (normalize root t).path
 
-  let sort root t =
-    match (normalize root t).definition with
-    | Fresh | Subst _ | Alias _ -> Sort.Defined
-    | Unloaded dep -> Sort.Unloaded dep
-
   type resolved = int list option * t
 
   let subst ns = function
@@ -453,7 +345,7 @@ end = struct
 
   let rec resolve root t =
     match (normalize root t).definition with
-    | Fresh | Unloaded _ -> (None, t)
+    | Fresh | Unloaded -> (None, t)
     | Subst(p, ns) -> begin
         match Graph.find_class_type root p with
         | exception Not_found -> (None, t)
@@ -477,8 +369,6 @@ and Module_type : sig
 
   val path : Graph.t -> t -> Path.t
 
-  val sort : Graph.t -> t -> Sort.t
-
 end = struct
 
   open Desc.Module_type
@@ -486,7 +376,7 @@ end = struct
   type definition =
     | Alias of Path.t
     | Fresh
-    | Unloaded of Dependency.t
+    | Unloaded
 
   type t =
     { origin : Origin.t;
@@ -510,17 +400,14 @@ end = struct
     { origin; path; definition }
 
   let unloaded md name =
-    match Module.Normalized.sort md with
-    | Sort.Defined -> assert false
-    | Sort.Unloaded dep ->
-        let origin = Module.Normalized.origin md in
-        let path = Path.Pdot (Module.Normalized.path md, name, 0) in
-        let definition = Unloaded dep in
-        { origin; path; definition }
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot (Module.Normalized.path md, name, 0) in
+    let definition = Unloaded in
+    { origin; path; definition }
 
   let rec normalize_loop root t =
     match t.definition with
-    | Fresh | Unloaded _ -> t
+    | Fresh | Unloaded -> t
     | Alias alias -> begin
         match Graph.find_module_type root alias with
         | exception Not_found -> { t with definition = Fresh }
@@ -531,7 +418,7 @@ end = struct
     let t =
       match t.definition with
       | Fresh | Alias _ -> t
-      | Unloaded _ ->
+      | Unloaded ->
           match Graph.find_module_type root t.path with
           | exception Not_found -> t
           | t -> t
@@ -543,11 +430,6 @@ end = struct
 
   let path root t =
     (normalize root t).path
-
-  let sort root t =
-    match (normalize root t).definition with
-    | Fresh | Alias _ -> Sort.Defined
-    | Unloaded dep -> Sort.Unloaded dep
 
 end
 
@@ -562,8 +444,6 @@ and Module : sig
     val origin : t -> Origin.t
 
     val path : t -> Path.t
-
-    val sort : t -> Sort.t
 
   end
 
@@ -582,8 +462,6 @@ and Module : sig
   val origin : Graph.t -> t -> Origin.t
 
   val path : Graph.t -> t -> Path.t
-
-  val sort : Graph.t -> t -> Sort.t
 
   val types : Graph.t -> t -> Type.t String_map.t option
 
@@ -627,7 +505,7 @@ end = struct
     | Functor of
         { apply : Path.t -> Desc.Module.t;
           mutable applications : t Path_map.t; }
-    | Unloaded of Dependency.t
+    | Unloaded
 
   and t =
     { origin : Origin.t;
@@ -641,11 +519,6 @@ end = struct
     let origin t = t.origin
 
     let path t = t.path
-
-    let sort t =
-      match t.definition with
-      | Abstract | Signature _ | Functor _ | Alias _ -> Sort.Defined
-      | Unloaded dep -> Sort.Unloaded dep
 
   end
 
@@ -670,7 +543,7 @@ end = struct
   let unloaded_base dep id =
     let origin = Origin.Dependency dep in
     let path = Path.Pident id in
-    let definition = Unloaded dep in
+    let definition = Unloaded in
     { origin; path; definition }
 
   let child md name desc =
@@ -680,13 +553,10 @@ end = struct
     { origin; path; definition }
 
   let unloaded_child md name =
-    match Module.Normalized.sort md with
-    | Sort.Defined -> assert false
-    | Sort.Unloaded dep ->
-        let origin = Module.Normalized.origin md in
-        let path = Path.Pdot(Module.Normalized.path md, name, 0) in
-        let definition = Unloaded dep in
-        { origin; path; definition }
+    let origin = Module.Normalized.origin md in
+    let path = Path.Pdot(Module.Normalized.path md, name, 0) in
+    let definition = Unloaded in
+    { origin; path; definition }
 
   let application func arg desc =
     let func_origin = Module.Normalized.origin func in
@@ -699,21 +569,18 @@ end = struct
     { origin; path; definition }
 
   let unloaded_application func arg =
-    match Module.Normalized.sort func with
-    | Sort.Defined -> assert false
-    | Sort.Unloaded dep ->
-        let func_origin = Module.Normalized.origin func in
-        let arg_origin = Module.Normalized.origin arg in
-        let origin = Origin.application func_origin arg_origin in
-        let func_path = Module.Normalized.path func in
-        let arg_path = Module.Normalized.path arg in
-        let path = Path.Papply(func_path, arg_path) in
-        let definition = Unloaded dep in
-        { origin; path; definition }
+    let func_origin = Module.Normalized.origin func in
+    let arg_origin = Module.Normalized.origin arg in
+    let origin = Origin.application func_origin arg_origin in
+    let func_path = Module.Normalized.path func in
+    let arg_path = Module.Normalized.path arg in
+    let path = Path.Papply(func_path, arg_path) in
+    let definition = Unloaded in
+    { origin; path; definition }
 
   let rec normalize_loop root t =
     match t.definition with
-    | Abstract | Signature _ | Functor _ | Unloaded _ -> t
+    | Abstract | Signature _ | Functor _ | Unloaded -> t
     | Alias alias -> begin
         match Graph.find_module root alias with
         | exception Not_found -> { t with definition = Abstract }
@@ -724,7 +591,7 @@ end = struct
     let t =
       match t.definition with
       | Abstract | Signature _ | Functor _ | Alias _ -> t
-      | Unloaded _ ->
+      | Unloaded ->
           match Graph.find_module root t.path with
           | exception Not_found -> t
           | t -> t
@@ -739,9 +606,6 @@ end = struct
   let path root t =
     (normalize root t).path
 
-  let sort root t =
-    Normalized.sort (normalize root t)
-
   let definition t =
     (Module.unnormalize t).definition
 
@@ -750,7 +614,7 @@ end = struct
     match definition t with
     | Alias _ -> assert false
     | Abstract
-    | Unloaded _
+    | Unloaded
     | Functor _
     | Signature { components = Forced _ } -> t
     | Signature ({ components = Unforced components; _} as r) -> begin
@@ -784,7 +648,7 @@ end = struct
     match definition t with
     | Alias _ | Signature { components = Unforced _ } ->
         assert false
-    | Unloaded _ | Abstract | Functor _ ->
+    | Unloaded | Abstract | Functor _ ->
         None
     | Signature { components = Forced { types; _ }; _ } ->
         Some types
@@ -794,7 +658,7 @@ end = struct
     match definition t with
     | Alias _ | Signature { components = Unforced _ } ->
         assert false
-    | Unloaded _ | Abstract | Functor _ ->
+    | Unloaded | Abstract | Functor _ ->
         None
     | Signature { components = Forced { class_types; _ } } ->
         Some class_types
@@ -804,7 +668,7 @@ end = struct
     match definition t with
     | Alias _ | Signature { components = Unforced _ } ->
         assert false
-    | Unloaded _ | Abstract | Functor _ ->
+    | Unloaded | Abstract | Functor _ ->
         None
     | Signature { components = Forced { module_types; _ } } ->
         Some module_types
@@ -814,7 +678,7 @@ end = struct
     match definition t with
     | Alias _ | Signature { components = Unforced _ } ->
         assert false
-    | Unloaded _ | Abstract | Functor _ ->
+    | Unloaded | Abstract | Functor _ ->
         None
     | Signature { components = Forced { modules; _ } } ->
         Some modules
@@ -827,7 +691,7 @@ end = struct
         assert false
     | Abstract | Functor _ ->
         raise Not_found
-    | Unloaded _ ->
+    | Unloaded ->
         Type.unloaded t name
     | Signature { components = Forced { types; _ }; _ } ->
         String_map.find name types
@@ -840,7 +704,7 @@ end = struct
         assert false
     | Abstract | Functor _ ->
         raise Not_found
-    | Unloaded _ ->
+    | Unloaded ->
         Class_type.unloaded t name
     | Signature { components = Forced { class_types; _ }; _ } ->
         String_map.find name class_types
@@ -853,7 +717,7 @@ end = struct
         assert false
     | Abstract | Functor _ ->
         raise Not_found
-    | Unloaded _ ->
+    | Unloaded ->
         Module_type.unloaded t name
     | Signature { components = Forced { module_types; _ }; _ } ->
         String_map.find name module_types
@@ -866,7 +730,7 @@ end = struct
         assert false
     | Abstract | Functor _ ->
         raise Not_found
-    | Unloaded _ ->
+    | Unloaded ->
         Module.unloaded_child t name
     | Signature { components = Forced { modules; _ }; _ } ->
         String_map.find name modules
@@ -876,7 +740,7 @@ end = struct
     match definition t with
     | Alias _ -> assert false
     | Abstract | Signature _ -> raise Not_found
-    | Unloaded _ ->
+    | Unloaded ->
         let arg = Graph.find_module root path in
         let arg = Module.normalize root arg in
         Module.unloaded_application t arg

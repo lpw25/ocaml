@@ -1,170 +1,7 @@
+open Short_paths_loads
 open Short_paths_graph
 
 module Desc = Desc
-
-(** [Rev_deps] keeps track of the reverse dependencies of each global module
-    (represented as a [Dependency.t]).  *)
-module Rev_deps : sig
-
-  type t
-
-  val create : unit -> t
-
-  (** Implementation detail:
-      [extend_up_to t dep] allocates space for storing dependencies
-      information up to [dep]. *)
-  val extend_up_to : t -> Dependency.t -> unit
-
-  (** Get the transitive set of reverse dependencies of a module
-      (node: a module is part of its own reverse dependencies).  *)
-  val get : t -> Dependency.t -> Dependency.Set.t
-
-  (* Register a concrete reverse dependency (target depends on source) *)
-  val add : t -> source:Dependency.t -> target:Dependency.t -> unit
-
-  (* Register an alias reverse dependency (target has an alias to source) *)
-  val add_alias : t -> source:Dependency.t -> target:Dependency.t -> unit
-
-  (* [before t o1 o2] is true if [o2] exists only in environments where [o1]
-     has already been defined.
-     This is the case if [o2] is a local definition made after [o1],
-     or if [o2] comes from a global module that depends on [o1].
-
-     Thus, [before] defines a total ordering on local definitions and
-     a partial ordering on global dependencies. *)
-  val before : t -> Origin.t -> Origin.t -> bool
-
-end = struct
-
-  (* Stamps are used to update lazily: each modification increases the stamp.
-     Each dependency comes with the last stamp at which it has been updated.
-     At query-time, the dependency set is refreshed if the stamp is out of
-     date.
-  *)
-  module Stamp = Natural.Make()
-
-  type item = {
-    mutable set : Dependency.Set.t;
-    (** output: reflexive & transitive closure of reverse dependencies *)
-    mutable edges : Dependency.t list;
-    (** input: immediate concrete reverse dependencies *)
-    mutable alias_edges : Dependency.t list;
-    (** input: immediate alias reverse dependencies *)
-    mutable last : Stamp.t;
-    (** last update time *)
-  }
-
-  type t =
-    { mutable stamp : Stamp.t;
-      mutable items : item Dependency.Array.t; }
-
-  let create () =
-    { stamp = Stamp.one;
-      items = Dependency.Array.empty; }
-
-  let extend_up_to t next =
-    match Dependency.pred next with
-    | None -> ()
-    | Some curr ->
-      if not (Dependency.Array.contains t.items curr) then begin
-        let items =
-          Dependency.Array.extend t.items curr
-            (fun _ -> { set = Dependency.Set.empty;
-                        edges = [];
-                        alias_edges = [];
-                        last = Stamp.zero; })
-        in
-        t.items <- items
-      end
-
-  let add t ~source ~target =
-    let item = Dependency.Array.get t.items source in
-    item.edges <- target :: item.edges;
-    t.stamp <- Stamp.succ t.stamp
-
-  let add_alias t ~source ~target =
-    let item = Dependency.Array.get t.items source in
-    item.alias_edges <- target :: item.alias_edges;
-    t.stamp <- Stamp.succ t.stamp
-
-  let update t dep item =
-    if Stamp.less_than item.last t.stamp then begin
-      (* Recompute closure *)
-      let rec add_edges t item acc =
-        let rec loop t acc added = function
-          | [] ->
-              List.fold_left
-                (fun acc dep ->
-                   let item = Dependency.Array.get t.items dep in
-                   add_alias_edges t item acc)
-                acc added
-          | dep :: rest ->
-              if Dependency.Set.mem dep acc then loop t acc added rest
-              else begin
-                let acc = Dependency.Set.add dep acc in
-                let added = dep :: added in
-                loop t acc added rest
-              end
-        in
-        loop t acc [] item.edges
-      and add_alias_edges t item acc =
-        List.fold_left
-          (fun acc dep ->
-             if Dependency.Set.mem dep acc then acc
-             else begin
-               let acc = Dependency.Set.add dep acc in
-               let item = Dependency.Array.get t.items dep in
-               let acc = add_edges t item acc in
-               add_alias_edges t item acc
-             end)
-          acc item.alias_edges
-      in
-      let set = Dependency.Set.singleton dep in
-      let set = add_edges t item set in
-      let set = add_alias_edges t item set in
-      item.set <- set;
-      item.last <- t.stamp
-    end
-
-  let get t dep =
-    let item = Dependency.Array.get t.items dep in
-    update t dep item;
-    item.set
-
-  let before t origin1 origin2 =
-    let open Origin in
-    match origin1, origin2 with
-    | Environment age1, Environment age2 -> Age.less_than age1 age2
-    | Environment _, Dependency _ -> false
-    | Environment _, Dependencies _ -> false
-    | Dependency _, Environment _ -> true
-    | Dependency dep1, Dependency dep2 ->
-        let rev_dep = get t dep1 in
-        Dependency.Set.mem dep2 rev_dep
-    | Dependency dep1, Dependencies deps2 ->
-        let rev_dep = get t dep1 in
-        List.exists
-          (fun dep2 -> Dependency.Set.mem dep2 rev_dep)
-          deps2
-    | Dependencies _, Environment _ -> true
-    | Dependencies deps1, Dependency dep2 ->
-        List.for_all
-          (fun dep1 -> Dependency.Set.mem dep2 (get t dep1))
-          deps1
-    | Dependencies deps1, Dependencies deps2 ->
-        let rev_dep =
-          match deps1 with
-          | [] -> failwith "Rev_deps.before: invalid origin"
-          | dep1 :: deps1 ->
-              List.fold_left
-                (fun acc dep1 -> Dependency.Set.inter acc (get t dep1))
-                (get t dep1) deps1
-        in
-        List.exists
-          (fun dep2 -> Dependency.Set.mem dep2 rev_dep)
-          deps2
-
-end
 
 (** A priority queue-like data structure where data is ordered by [Origin.t].
     Popping retrieves everything that is as old or younger than the
@@ -188,12 +25,12 @@ module Origin_range_tbl : sig
 end = struct
 
   type 'a t =
-    { mutable envs : 'a list Age.Map.t;
+    { mutable envs : 'a list Time.Map.t;
       mutable dep_keys : Dependency.Set.t;
       deps : 'a list Dependency.Tbl.t; }
 
   let create () =
-    { envs = Age.Map.empty;
+    { envs = Time.Map.empty;
       dep_keys = Dependency.Set.empty;
       deps = Dependency.Tbl.create 0; }
 
@@ -219,11 +56,11 @@ end = struct
 
   let add_age age data t =
     let prev =
-      match Age.Map.find age t.envs with
+      match Time.Map.find age t.envs with
       | exception Not_found -> []
       | prev -> prev
     in
-    t.envs <- Age.Map.add age (data :: prev) t.envs
+    t.envs <- Time.Map.add age (data :: prev) t.envs
 
   let add rev_deps origin data t =
     match origin with
@@ -250,7 +87,7 @@ end = struct
               | exception Not_found ->
                   (* the intersection of reverse dependencies is empty:
                      add item to the initial environment *)
-                  add_age Age.zero data t
+                  add_age Time.zero data t
         end
 
   let pop_dependency rev_dep t =
@@ -266,22 +103,22 @@ end = struct
         []
     in
     let items =
-      Age.Map.fold
+      Time.Map.fold
         (fun _ data acc -> List.rev_append data acc)
         t.envs items
     in
-    t.envs <- Age.Map.empty;
+    t.envs <- Time.Map.empty;
     items
 
   let pop_age age t =
-    let envs, first, matching = Age.Map.split age t.envs in
+    let envs, first, matching = Time.Map.split age t.envs in
     let items =
       match first with
       | None -> []
       | Some first -> first
     in
     let items =
-      Age.Map.fold
+      Time.Map.fold
         (fun _ data acc -> List.rev_append data acc)
         matching items
     in
@@ -302,26 +139,26 @@ end = struct
   let is_origin_empty rev_deps origin t =
     match origin with
     | Origin.Dependency dep ->
-        if not (Age.Map.is_empty t.envs) then false
+        if not (Time.Map.is_empty t.envs) then false
         else begin
           let rev_dep = Rev_deps.get rev_deps dep in
           let matching = Dependency.Set.inter rev_dep t.dep_keys in
           Dependency.Set.is_empty matching
         end
     | Origin.Dependencies deps ->
-        if not (Age.Map.is_empty t.envs) then false
+        if not (Time.Map.is_empty t.envs) then false
         else begin
           let rev_dep = intersect_reverse_dependencies rev_deps deps in
           let matching = Dependency.Set.inter rev_dep t.dep_keys in
           Dependency.Set.is_empty matching
         end
     | Origin.Environment age ->
-        match Age.Map.max_binding t.envs with
+        match Time.Map.max_binding t.envs with
         | exception Not_found -> true
-        | (max, _) -> Age.less_than max age
+        | (max, _) -> Time.less_than max age
 
   let is_completely_empty t =
-    Age.Map.is_empty t.envs
+    Time.Map.is_empty t.envs
     && Dependency.Set.is_empty t.dep_keys
 
 end
@@ -503,10 +340,7 @@ end = struct
 end
 
 (** A map from paths which is built on-top of a parent map which can be
-   "rebased", to replace all the parent entries.
-
-    The map also keeps track of the sets of its new keys which are
-    unloaded for a particular unloaded dependency *)
+   "rebased", to replace all the parent entries. *)
 module Rebasable_path_map : sig
 
   type 'a t
@@ -517,22 +351,19 @@ module Rebasable_path_map : sig
 
   val find : 'a t -> Path.t -> 'a list
 
-  val rebase : t -> parent:t -> t
+  val rebase : 'a t -> parent:t -> 'a t
 
-  val iter_unloaded_entries :
-    (Path.t -> 'a -> unit) -> t -> Dependency.t -> unit
+  val iter_new_entries : (Path.t -> 'a -> unit) -> 'a t -> unit
 
 end = struct
 
   type t =
     { new_paths : 'a list Path_map.t;
-      parent_paths : 'a list Path_map.t;
-      unloaded_keys : Path_set.t Dependency.Map.t; }
+      parent_paths : 'a list Path_map.t; }
 
   let empty =
     { new_paths = Path_map.empty;
-      parent_paths = Path_map.empty;
-      unloaded_keys = Dependency.Map.empty; }
+      parent_paths = Path_map.empty; }
 
   let add t sort path data =
     let new_paths = t.new_paths in
@@ -542,18 +373,6 @@ end = struct
       | exception Not_found -> []
     in
     let new_paths = Path_map.add path (data :: prev) new_paths in
-    let unloaded_keys = t.unloaded_keys in
-    let unloaded_keys =
-      match sort with
-      | Sort.Defined -> unloaded_keys
-      | Sort.Unloaded dep ->
-          let prev =
-            match Dependency.Map.find dep updates with
-            | prev -> prev
-            | exception Not_found -> Path_set.empty
-          in
-          Dependency.Map.add dep (Path_set.add path prev) unloaded_keys
-    in
     { t with new_paths; unloaded_keys }
 
   let find t path =
@@ -572,7 +391,7 @@ end = struct
     in
     { t with parent_paths }
 
-  let iter_updates f t id =
+  let iter_new_entries t =
     match Ident_map.find id t.updates with
     | exception Not_found -> ()
     | pset ->
@@ -585,175 +404,107 @@ end = struct
 
 end
 
-(** A set of four [Rebasable_path_map.t]s which map
-    canonical paths of different kinds to aliased
-    paths. *)
-module Short_paths_map : sig
+(** A map from the different kinds of graph components which is built
+    on-top of a parent map which can be "rebased", to replace all the
+    parent entries. *)
+module Rebasable_component_map : sig
 
-  type t
+  type 'a t
 
-  val create : unit -> t
+  val create : unit -> 'a t
 
-  val add_type : graph -> t -> Type.t -> Path.t -> unit
+  val add_type : graph -> 'a t -> Type.t -> 'a -> unit
 
-  val add_class_type : graph -> t -> Class_type.t -> Path.t -> unit
+  val add_class_type : graph -> 'a t -> Class_type.t -> 'a -> unit
 
-  val add_module_type : graph -> t -> Module_type.t -> Path.t -> unit
+  val add_module_type : graph -> 'a t -> Module_type.t -> 'a -> unit
 
-  val add_module : graph -> t -> Module.t -> Path.t -> unit
+  val add_module : graph -> 'a t -> Module.t -> 'a -> unit
 
-  val rebase : t -> parent:t -> unit
+  val rebase : 'a t -> parent:'a t -> unit
 
-  val find_type : graph -> t -> Type.t -> Path.t list
+  val find_type : graph -> t -> Type.t -> 'a list
 
-  val find_class_type : graph -> t -> Class_type.t -> Path.t list
+  val find_class_type : graph -> t -> Class_type.t -> 'a list
 
-  val find_module_type : graph -> t -> Module_type.t -> Path.t list
+  val find_module_type : graph -> t -> Module_type.t -> 'a list
 
-  val find_module : graph -> t -> Module.t -> Path.t list
+  val find_module : graph -> t -> Module.t -> 'a list
 
-  val iter_unloaded_entries :
-    type_:(Path.t -> Path.t -> unit) ->
-    class_type:(Path.t -> Path.t -> unit) ->
-    module_type:(Path.t -> Path.t -> unit) ->
-    module_:(Path.t -> Path.t -> unit) ->
+  val iter_new_entries :
+    type_:(Path.t -> 'a -> unit) ->
+    class_type:(Path.t -> 'a -> unit) ->
+    module_type:(Path.t -> 'a -> unit) ->
+    module_:(Path.t -> 'a -> unit) ->
     Dependency.t ->
     unit
 
 end = struct
 
-    type t =
-      { mutable types : Path.t Rebasable_path_map.t;
-        mutable class_types : Path.t Rebasable_path_map.t;
-        mutable module_types : Path.t Rebasable_path_map.t;
-        mutable modules : Path.t Rebasable_path_map.t; }
+  type 'a t =
+    { mutable types : 'a Rebasable_path_map.t;
+      mutable class_types : 'a Rebasable_path_map.t;
+      mutable module_types : 'a Rebasable_path_map.t;
+      mutable modules : 'a Rebasable_path_map.t; }
 
-    let create () =
-      let types = Forward_path_map.empty in
-      let class_types = Forward_path_map.empty in
-      let module_types = Forward_path_map.empty in
-      let modules = Forward_path_map.empty in
-      { types; class_types; module_types; modules }
+  let create () =
+    let types = Rebasable_path_map.empty in
+    let class_types = Rebasable_path_map.empty in
+    let module_types = Rebasable_path_map.empty in
+    let modules = Rebasable_path_map.empty in
+    { types; class_types; module_types; modules }
 
-    let add_type graph t typ path =
-      let canonical = Type.path graph typ in
-      let sort = Type.sort graph typ in
-      t.types <- Forward_path_map.add t.types sort canonical path
+  let add_type graph t typ data =
+    let canonical = Type.path graph typ in
+    let sort = Type.sort graph typ in
+    t.types <- Rebasable_path_map.add t.types sort canonical data
 
-    let add_class_type graph t mty path =
-      let canonical = Class_type.path graph mty in
-      let sort = Class_type.sort graph mty in
-      t.class_types <- Forward_path_map.add t.class_types sort canonical path
+  let add_class_type graph t mty data =
+    let canonical = Class_type.path graph mty in
+    let sort = Class_type.sort graph mty in
+    t.class_types <- Rebasable_path_map.add t.class_types sort canonical data
 
-    let add_module_type graph t mty path =
-      let canonical = Module_type.path graph mty in
-      let sort = Module_type.sort graph mty in
-      t.module_types <- Forward_path_map.add t.module_types sort canonical path
+  let add_module_type graph t mty data =
+    let canonical = Module_type.path graph mty in
+    let sort = Module_type.sort graph mty in
+    t.module_types <- Rebasable_path_map.add t.module_types sort canonical data
 
-    let add_module graph t md path =
-      let canonical = Module.path graph md in
-      let sort = Module.sort graph md in
-      t.modules <- Forward_path_map.add t.modules sort canonical path
+  let add_module graph t md data =
+    let canonical = Module.path graph md in
+    let sort = Module.sort graph md in
+    t.modules <- Rebasable_path_map.add t.modules sort canonical data
 
-    let rebase t ~parent =
-      t.types <- Forward_path_map.rebase t.types parent.types;
-      t.class_types <- Forward_path_map.rebase t.class_types parent.class_types;
-      t.module_types <- Forward_path_map.rebase t.module_types parent.module_types;
-      t.modules <- Forward_path_map.rebase t.modules parent.modules
+  let rebase t ~parent =
+    t.types <- Rebasable_path_map.rebase t.types parent.types;
+    t.class_types <- Rebasable_path_map.rebase t.class_types parent.class_types;
+    t.module_types <- Rebasable_path_map.rebase t.module_types parent.module_types;
+    t.modules <- Rebasable_path_map.rebase t.modules parent.modules
 
-    let find_type graph t typ =
-      let canonical = Type.path graph typ in
-      Forward_path_map.find t.types canonical
+  let find_type graph t typ =
+    let canonical = Type.path graph typ in
+    Rebasable_path_map.find t.types canonical
 
-    let find_class_type graph t mty =
-      let canonical = Class_type.path graph mty in
-      Forward_path_map.find t.class_types canonical
+  let find_class_type graph t mty =
+    let canonical = Class_type.path graph mty in
+    Rebasable_path_map.find t.class_types canonical
 
-    let find_module_type graph t mty =
-      let canonical = Module_type.path graph mty in
-      Forward_path_map.find t.module_types canonical
+  let find_module_type graph t mty =
+    let canonical = Module_type.path graph mty in
+    Rebasable_path_map.find t.module_types canonical
 
-    let find_module graph t md =
-      let canonical = Module.path graph md in
-      Forward_path_map.find t.modules canonical
+  let find_module graph t md =
+    let canonical = Module.path graph md in
+    Rebasable_path_map.find t.modules canonical
 
-    let iter_unloaded_entries ~type_ ~class_type ~module_type ~module_ t dep =
-      Forward_path_map.iter_unloaded_entries type_ t.types dep;
-      Forward_path_map.iter_unloaded_entries class_type t.class_types dep;
-      Forward_path_map.iter_unloaded_entries module_type t.module_types dep;
-      Forward_path_map.iter_unloaded_entries module_ t.modules dep
-
-  end
-
-
-module Origin_tbl = Hashtbl.Make(Origin)
-
-module History : sig
-
-  module Stamp : Natural.S
-
-  module Revision : sig
-
-    type t
-
-    val stamp : t -> Stamp.t
-
-    val diff : t -> Diff.t
-
-    val next : t -> t option
-
-  end
-
-  type t
-
-  val init : Diff.t -> t
-
-  val head : t -> Revision.t
-
-  val commit : t -> Diff.t -> unit
-
-end = struct
-
-  module Stamp = Natural.Make()
-
-  module Revision = struct
-
-    type t =
-      { stamp : Stamp.t;
-        diff :  Diff.t;
-        rev_deps : Rev_deps.t;
-        mutable next : t option; }
-
-    let stamp t = t.stamp
-
-    let diff t = t.diff
-
-    let rev_deps t = t.rev_deps
-
-    let next t = t.next
-
-  end
-
-  type t =
-    { mutable head : Revision.t; }
-
-  let init rev_deps diff =
-    let stamp = Stamp.zero in
-    let next = None in
-    let head = { Revision.stamp; diff; rev_deps; next } in
-    { head }
-
-  let head t = t.head
-
-  let commit t rev_deps diff =
-    let head = t.head in
-    let stamp = Stamp.succ head.Revision.stamp in
-    let next = None in
-    let rev = { Revision.stamp; diff; rev_deps; next } in
-    head.Revision.next <- Some rev;
-    t.head <- rev
+  let iter_new_entries ~type_ ~class_type ~module_type ~module_ t dep =
+    Rebasable_path_map.iter_new_entries type_ t.types dep;
+    Rebasable_path_map.iter_new_entries class_type t.class_types dep;
+    Rebasable_path_map.iter_new_entries module_type t.module_types dep;
+    Rebasable_path_map.iter_new_entries module_ t.modules dep
 
 end
+
+module Origin_tbl = Hashtbl.Make(Origin)
 
   module Sections = struct
 
@@ -776,13 +527,13 @@ end
       let sections = Height.Array.empty in
       let completed = Until Height.one in
       let initialised, versioning =
-        if Age.equal age Age.zero then begin
+        if Time.equal age Time.zero then begin
           All, Completion History.Stamp.zero
         end else begin
           match origin with
           | Origin.Environment age' ->
               let initialised =
-                if Age.less_than_or_equal age age' then All
+                if Time.less_than_or_equal age age' then All
                 else Until Height.one
               in
               initialised, Unversioned
@@ -1057,7 +808,7 @@ module Shortest = struct
     | Env :
         { mutable revision : History.Revision.t;
           parent : 'a t;
-          age : Age.t; }
+          age : Time.t; }
       -> env kind
 
   and 'a t =
@@ -1068,7 +819,7 @@ module Shortest = struct
 
   let age (type k) (t : k t) =
     match t.kind with
-    | Basis _ -> Age.zero
+    | Basis _ -> Time.zero
     | Env { age; _ } -> age
 
   let revision (type k) (t : k t) =
@@ -1115,7 +866,7 @@ module Shortest = struct
 
   let env parent desc =
     update parent;
-    let age = Age.succ (age parent) in
+    let age = Time.succ (age parent) in
     let origin = Origin.Environment age in
     let components =
       List.map
@@ -1755,8 +1506,6 @@ module Shortest = struct
     Search.perform t search
 
 end
-
-module String_set = Set.Make(String)
 
 module Basis = struct
 

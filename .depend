@@ -325,16 +325,24 @@ typing/printtyped.cmi : typing/typedtree.cmi
 typing/short_paths.cmo : typing/short_paths_graph.cmi typing/predef.cmi \
     typing/path.cmi utils/natural.cmi typing/ident.cmi utils/clflags.cmi \
     typing/short_paths.cmi
-typing/short_paths.cmx : typing/short_paths_graph.cmx typing/predef.cmx \
+typing/short_paths.cmx : typing/short_paths_loads.cmx \
+    typing/short_paths_graph.cmx typing/predef.cmx \
     typing/path.cmx utils/natural.cmx typing/ident.cmx utils/clflags.cmx \
     typing/short_paths.cmi
-typing/short_paths.cmi : typing/short_paths_graph.cmi typing/path.cmi
+typing/short_paths.cmi : typing/short_paths_loads.cmi \
+    typing/short_paths_graph.cmi typing/path.cmi
 typing/short_paths_graph.cmo : typing/path.cmi utils/natural.cmi \
-    typing/ident.cmi typing/short_paths_graph.cmi
+    typing/ident.cmi typing/short_paths_loads.cmi typing/short_paths_graph.cmi
 typing/short_paths_graph.cmx : typing/path.cmx utils/natural.cmx \
-    typing/ident.cmx typing/short_paths_graph.cmi
+    typing/ident.cmx typing/short_paths_loads.cmi typing/short_paths_graph.cmi
 typing/short_paths_graph.cmi : typing/path.cmi utils/natural.cmi \
-    typing/ident.cmi
+    typing/ident.cmi typing/short_paths_loads.cmi
+typing/short_paths_loads.cmo : utils/natural.cmi \
+    typing/short_paths_loads.cmi
+typing/short_paths_graph.cmx : utils/natural.cmx \
+    typing/short_paths_loads.cmi
+typing/short_paths_graph.cmi : utils/natural.cmi \
+    typing/short_paths_loads.cmi
 typing/stypes.cmo : typing/typedtree.cmi typing/printtyp.cmi \
     parsing/location.cmi utils/clflags.cmi typing/annot.cmi typing/stypes.cmi
 typing/stypes.cmx : typing/typedtree.cmx typing/printtyp.cmx \
