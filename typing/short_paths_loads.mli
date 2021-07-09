@@ -33,26 +33,16 @@ module Dependency : Natural.S
 *)
 module Time : Natural.S
 
-(** The [Origin] of an item tells when it became well-defined.
-    If the item depends only on global modules, its origin will list these
-    modules.
-    If the item depends on some local definitions, then its origin will be the
-    earliest [Time] at which all these definitions are available.
-*)
+(** The [Origin] of an item tells when it became well-defined.  For
+    simple paths this is the point at which the underlying identifier
+    was defined: either as a global dependency or a [Time.t] in the
+    local environment. Extended paths can depend on multiple identifiers
+    and so may be a list of global dependencies. *)
 module Origin : sig
 
   type t =
     | Dependency of Dependency.t
     (** Item originates from a global dependency. *)
-    | Dependencies of Dependency.t list
-    (** Item originates from more than one global dependency.  This is possible
-        with functor applications: items from [Map.Make(String)] will have
-        [Dependencies [Map; String]].
-        The list is sorted in increasing order (it is actually a set).
-
-        While [Dependency d] should behave exactly like [Dependencies [d]],
-        this case is distinguished for performance.
-    *)
     | Environment of Time.t
     (** Item originates from local environment, at a specific [Time]. *)
 
@@ -60,9 +50,37 @@ module Origin : sig
 
   val hash : t -> int
 
-  (** The origin of a functor application given the origins
-      of its functor and argument *)
-  val application : t -> t -> t
+  (** The origin of an extended path (i.e. one including functor
+      applications) If the item depends only on global modules, its
+      origin will list these modules. If the item depends on some local
+      definitions, then its origin will be the earliest [Time] at which
+      all these definitions are available. *)
+  module Extended : sig
+
+    type t =
+      | Dependency of Dependency.t
+      (** Item originates from a global dependency. *)
+      | Dependencies of Dependency.t list
+      (** Item originates from more than one global dependency.  This is possible
+          with functor applications: items from [Map.Make(String)] will have
+          [Dependencies [Map; String]].
+          The list is sorted in increasing order (it is actually a set).
+
+          While [Dependency d] should behave exactly like [Dependencies [d]],
+          this case is distinguished for performance.
+      *)
+      | Environment of Time.t
+      (** Item originates from local environment, at a specific [Time]. *)
+
+    val equal : t -> t -> bool
+
+    val hash : t -> int
+
+    (** The origin of a functor application given the origins
+        of its functor and argument *)
+    val application : t -> t -> t
+
+  end
 
 end
 

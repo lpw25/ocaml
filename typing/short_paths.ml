@@ -373,7 +373,7 @@ end = struct
       | exception Not_found -> []
     in
     let new_paths = Path_map.add path (data :: prev) new_paths in
-    { t with new_paths; unloaded_keys }
+    { t with new_paths }
 
   let find t path =
     match Path_map.find path t.new_paths with
@@ -503,8 +503,6 @@ end = struct
     Rebasable_path_map.iter_new_entries module_ t.modules dep
 
 end
-
-module Origin_tbl = Hashtbl.Make(Origin)
 
   module Sections = struct
 
@@ -794,6 +792,8 @@ type type_result =
   | Path of int list option * Path.t
 
 type class_type_result = int list option * Path.t
+
+module Origin_tbl = Hashtbl.Make(Origin)
 
 module Shortest = struct
 
