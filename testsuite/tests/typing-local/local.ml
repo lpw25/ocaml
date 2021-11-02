@@ -1430,6 +1430,93 @@ Error: Signature mismatch:
        The first is global and the second is not.
 |}]
 
+(* Special handling of tuples in matches and let bindings *)
+let escape : string -> unit = fun x -> ()
+
+let foo (local_ x) y =
+  match x, y with
+  | Some _, Some b -> escape b
+  | None, _ -> ()
+  | pr  -> let _, _ = pr in ();;
+[%%expect{|
+val escape : string -> unit = <fun>
+val foo : local_ 'a option -> string option -> unit = <fun>
+|}]
+
+let foo (local_ x) y =
+  let pr = x, y in
+  match pr with
+  | Some _, Some b -> escape b
+  | None, _ -> ()
+  | _  -> ();;
+[%%expect{|
+Line 4, characters 29-30:
+4 |   | Some _, Some b -> escape b
+                                 ^
+Error: This value escapes its region
+|}]
+
+let foo (local_ x) y =
+  match x, y with
+  | pr ->
+    let _, b = pr in
+    escape b
+  | _  -> ();;
+[%%expect{|
+Line 5, characters 11-12:
+5 |     escape b
+               ^
+Error: This value escapes its region
+|}]
+
+let foo p (local_ x) y z =
+  let (_, b) as pr =
+    if p then x, y else z
+  in
+  let _, _ = pr in
+  escape b;;
+[%%expect{|
+val foo : bool -> local_ 'a -> string -> 'a * string -> unit = <fun>
+|}]
+
+let foo p (local_ x) y (local_ z) =
+  let _, b =
+    if p then x, y else z
+  in
+  escape b;;
+[%%expect{|
+Line 5, characters 9-10:
+5 |   escape b;;
+             ^
+Error: This value escapes its region
+|}]
+
+let foo p (local_ x) y z =
+  let a, _ =
+    if p then x, y else z
+  in
+  escape a;;
+[%%expect{|
+Line 5, characters 9-10:
+5 |   escape a;;
+             ^
+Error: This value escapes its region
+|}]
+
+let foo p (local_ x) y z =
+  let pr =
+    if p then x, y else z
+  in
+  let _, b = pr in
+  escape b;;
+[%%expect{|
+Line 6, characters 9-10:
+6 |   escape b;;
+             ^
+Error: This value escapes its region
+|}]
+
+
 (* In debug mode, Gc.minor () checks for minor heap->local pointers *)
 let () = Gc.minor ()
 [%%expect{|
