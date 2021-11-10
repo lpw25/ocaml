@@ -337,11 +337,6 @@ let constant_or_raise env loc cst =
   | Ok c -> c
   | Error err -> raise (Error (loc, env, err))
 
-let is_allocated_constant = function
-  | Const_int _ | Const_char _ -> false
-  | Const_string _ | Const_float _ | Const_int32 _
-  | Const_int64 _ | Const_nativeint _ -> true
-
 (* Specific version of type_option, using newty rather than newgenty *)
 
 let type_option ty =
@@ -2935,8 +2930,6 @@ and type_expect_
     end
   | Pexp_constant cst ->
       let cst = constant_or_raise env loc cst in
-      if is_allocated_constant cst then
-        register_allocation expected_mode;
       rue {
         exp_desc = Texp_constant cst;
         exp_loc = loc; exp_extra = [];
