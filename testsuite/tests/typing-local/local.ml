@@ -701,7 +701,7 @@ Error: This value escapes its region
 |}]
 
 
-
+(* raised exceptions must be global *)
 let no_leak_exn =
   use_locally (fun x -> let _exn = local_ Invalid_argument x in "bluh") "blah"
 [%%expect{|
@@ -716,6 +716,23 @@ Line 2, characters 66-67:
                                                                       ^
 Error: This value escapes its region
 |}]
+
+(* handled exceptions are known to be global *)
+let catch (f : unit -> local_ string) =
+  let a =
+    match f () with
+    | _ -> "hello"
+    | exception (Invalid_argument x) -> x
+  in
+  let b =
+    try let _ = f () in "hello" with
+    | Invalid_argument x -> x
+  in
+  (a, b)
+[%%expect{|
+val catch : (unit -> local_ string) -> string * string = <fun>
+|}]
+
 
 (* same, but this time the function is allowed to return its argument *)
 let use_locally (f : local_ 'a -> local_ 'a) : local_ 'a -> local_ 'a = f

@@ -211,7 +211,10 @@ type expected_mode =
   { position : tail_or_nontail;
     escaping_context : escaping_context option;
     mode : Value_mode.t;
-    tuple_modes : Value_mode.t list; }
+    tuple_modes : Value_mode.t list;
+    (* for t in tuple_modes, t <= regional_to_global mode *)
+  }
+
 
 let mode_return mode =
   let position = Tail in
@@ -281,8 +284,12 @@ let mode_tuple mode tuple_modes =
   { position; escaping_context; mode; tuple_modes }
 
 let submode ~loc ~env mode expected_mode =
-  let modes = expected_mode.mode :: expected_mode.tuple_modes in
-  match Types.Value_mode.submode_meet mode modes  with
+  let res =
+    match expected_mode.tuple_modes with
+    | [] -> Types.Value_mode.submode mode expected_mode.mode
+    | ts -> Types.Value_mode.submode_meet mode ts
+  in
+  match res with
   | Ok () -> ()
   | Error reason ->
       let context = expected_mode.escaping_context in
