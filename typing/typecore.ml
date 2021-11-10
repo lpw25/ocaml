@@ -713,9 +713,9 @@ and build_as_type_aux env p =
           in
           ty, mode
       end
-  | Tpat_constant cst ->
+  | Tpat_constant _ ->
       let mode =
-        if is_allocated_constant cst then p.pat_mode
+        if Ctype.maybe_pointer_type !env p.pat_type then p.pat_mode
         else Value_mode.newvar ()
       in
       p.pat_type, mode
