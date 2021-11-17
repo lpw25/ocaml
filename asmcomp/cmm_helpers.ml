@@ -1811,7 +1811,7 @@ let region e =
   (* [Cregion e] is equivalent to [e] if [e] contains no local allocs *)
   let rec check_local_allocs = function
     | Cregion _ ->
-       (* Local allocations within a nested region do affect this region.
+       (* Local allocations within a nested region do not affect this region.
           Note this prevents O(n^2) behaviour with many nested regions. *)
        ()
     | Cop (Calloc Alloc_local, _, _)

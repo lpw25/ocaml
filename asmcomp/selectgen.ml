@@ -1103,7 +1103,8 @@ method emit_tail (env:environment) exp =
                             (Array.append [|r1.(0)|] loc_arg) loc_res;
                 if endregion && not tail then
                   self#insert env (Iop Iendregion) (List.hd env.regions) [||];
-                self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||];
+                if stack_ofs <> 0 then
+                  self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||];
                 self#insert env Ireturn loc_res [||]
               end
           | Icall_imm { func; } ->
@@ -1132,7 +1133,8 @@ method emit_tail (env:environment) exp =
                 self#insert_debug env (Iop new_op) dbg loc_arg loc_res;
                 if endregion && not tail then
                   self#insert env (Iop Iendregion) (List.hd env.regions) [||];
-               self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||];
+                if stack_ofs <> 0 then
+                  self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||];
                 self#insert env Ireturn loc_res [||]
               end
           | _ -> Misc.fatal_error "Selection.emit_tail"
@@ -1224,9 +1226,12 @@ method emit_tail (env:environment) exp =
       let env = { env with regions = [reg]; region_tail = true } in
       self#emit_tail env e
   | Ctail e ->
-      if env.region_tail then
+      if env.region_tail then begin
         self#insert env (Iop Iendregion) (List.hd env.regions) [||];
-      self#emit_tail env' e
+        self#emit_tail { env with regions = []; region_tail = false } e
+      end else begin
+        self#emit_tail env e
+      end
 
 
 method private emit_tail_sequence env exp =
