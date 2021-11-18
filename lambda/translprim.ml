@@ -712,8 +712,12 @@ let lambda_of_prim prim_name prim loc args arg_exps =
       raise(Error(to_location loc, Wrong_arity_builtin_primitive prim_name))
 
 let check_primitive_arity loc p =
-  (* Assume that arity is not affected by mode or position *)
-  let prim = lookup_primitive loc Alloc_heap Apply_nontail p in
+  let mode =
+    match p.prim_native_repr_res with
+    | Prim_global, _ | Prim_poly, _ -> Alloc_heap
+    | Prim_local, _ -> Alloc_local
+  in
+  let prim = lookup_primitive loc mode Apply_nontail p in
   let ok =
     match prim with
     | Primitive (_,arity) -> arity = p.prim_arity
