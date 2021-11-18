@@ -1084,11 +1084,12 @@ method emit_tail (env:environment) exp =
           match new_op with
             Icall_ind ->
               let r1 = self#emit_tuple env new_args in
+              if endregion && tail then
+                self#insert env (Iop Iendregion) (List.hd env.regions) [||];
+              let endregion = endregion && not tail in
               let rarg = Array.sub r1 1 (Array.length r1 - 1) in
               let (loc_arg, stack_ofs) = Proc.loc_arguments (Reg.typv rarg) in
-              if stack_ofs = 0 && not (endregion && not tail) then begin
-                if endregion then
-                  self#insert env (Iop Iendregion) (List.hd env.regions) [||];
+              if stack_ofs = 0 && not endregion then begin
                 let call = Iop (Itailcall_ind) in
                 self#insert_moves env rarg loc_arg;
                 self#insert_debug env call dbg
@@ -1096,30 +1097,30 @@ method emit_tail (env:environment) exp =
               end else begin
                 let rd = self#regs_for ty in
                 let loc_res = Proc.loc_results (Reg.typv rd) in
-                if endregion && tail then
-                  self#insert env (Iop Iendregion) (List.hd env.regions) [||];
                 self#insert_move_args env rarg loc_arg stack_ofs;
                 self#insert_debug env (Iop new_op) dbg
                             (Array.append [|r1.(0)|] loc_arg) loc_res;
-                if endregion && not tail then
+                if not endregion then begin
+                  self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||]
+                end else begin
+                  self#insert_move_results env loc_res rd stack_ofs;
                   self#insert env (Iop Iendregion) (List.hd env.regions) [||];
-                if stack_ofs <> 0 then
-                  self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||];
+                  self#insert_moves env rd loc_res
+                end;
                 self#insert env Ireturn loc_res [||]
               end
           | Icall_imm { func; } ->
               let r1 = self#emit_tuple env new_args in
+              if endregion && tail then
+                self#insert env (Iop Iendregion) (List.hd env.regions) [||];
+              let endregion = endregion && not tail in
               let (loc_arg, stack_ofs) = Proc.loc_arguments (Reg.typv r1) in
-              if stack_ofs = 0 && not (endregion && not tail) then begin
-                if endregion then
-                  self#insert env (Iop Iendregion) (List.hd env.regions) [||];
+              if stack_ofs = 0 && not endregion then begin
                 let call = Iop (Itailcall_imm { func; }) in
                 self#insert_moves env r1 loc_arg;
                 self#insert_debug env call dbg loc_arg [||];
               end else if func = !current_function_name
-                       && not (endregion && not tail) then begin
-                if endregion then
-                  self#insert env (Iop Iendregion) (List.hd env.regions) [||];
+                       && not endregion then begin
                 let call = Iop (Itailcall_imm { func; }) in
                 let loc_arg' = Proc.loc_parameters (Reg.typv r1) in
                 self#insert_moves env r1 loc_arg';
@@ -1127,14 +1128,15 @@ method emit_tail (env:environment) exp =
               end else begin
                 let rd = self#regs_for ty in
                 let loc_res = Proc.loc_results (Reg.typv rd) in
-                if endregion && tail then
-                  self#insert env (Iop Iendregion) (List.hd env.regions) [||];
                 self#insert_move_args env r1 loc_arg stack_ofs;
                 self#insert_debug env (Iop new_op) dbg loc_arg loc_res;
-                if endregion && not tail then
+                if not endregion then begin
+                  self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||]
+                end else begin
+                  self#insert_move_results env loc_res rd stack_ofs;
                   self#insert env (Iop Iendregion) (List.hd env.regions) [||];
-                if stack_ofs <> 0 then
-                  self#insert env (Iop(Istackoffset(-stack_ofs))) [||] [||];
+                  self#insert_moves env rd loc_res
+                end;
                 self#insert env Ireturn loc_res [||]
               end
           | _ -> Misc.fatal_error "Selection.emit_tail"
