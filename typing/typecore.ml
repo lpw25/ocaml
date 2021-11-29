@@ -3362,6 +3362,9 @@ and type_expect_
       assert(is_optional l); (* default allowed only with optional argument *)
       let open Ast_helper in
       let default_loc = default.pexp_loc in
+      (* Defaults are always global. They can be moved out of the function's
+         region by Simplf.split_default_wrapper, or they could be evaluated
+         later than expected by Translcore.push_defaults *)
       let scases = [
         Exp.case
           (Pat.construct ~loc:default_loc

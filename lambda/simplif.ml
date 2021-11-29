@@ -808,7 +808,7 @@ let simplify_local_functions lam =
      by the outermost lambda for which the the current lambda
      is in tail position. *)
   let current_scope = ref lam in
-  let current_tail_scope = ref lam in
+  let current_region_scope = ref lam in
   let check_static lf =
     if lf.attr.local = Always_local then
       Location.prerr_warning (to_location lf.loc)
@@ -835,7 +835,7 @@ let simplify_local_functions lam =
             let sc =
               (* Do not move higher than current lambda *)
               if scope == !current_scope
-              || scope == !current_tail_scope then cont
+              || scope == !current_region_scope then cont
               else scope
             in
             Hashtbl.add static_id id st;
@@ -852,7 +852,7 @@ let simplify_local_functions lam =
         let curr_scope =
           match ap_position with
           | Apply_nontail -> !current_scope
-          | Apply_tail -> !current_tail_scope
+          | Apply_tail -> !current_region_scope
         in
         begin match Hashtbl.find_opt slots id with
         | Some {func; _}
@@ -880,20 +880,20 @@ let simplify_local_functions lam =
   and non_tail lam =
     with_scope ~scope:lam lam
   and region lam =
-    let old_tail_scope = !current_tail_scope in
-    current_tail_scope := !current_scope;
+    let old_tail_scope = !current_region_scope in
+    current_region_scope := !current_scope;
     current_scope := lam;
     tail lam;
-    current_scope := !current_tail_scope;
-    current_tail_scope := old_tail_scope
+    current_scope := !current_region_scope;
+    current_region_scope := old_tail_scope
   and with_scope ~scope lam =
     let old_scope = !current_scope in
-    let old_tail_scope = !current_tail_scope in
+    let old_tail_scope = !current_region_scope in
     current_scope := scope;
-    current_tail_scope := scope;
+    current_region_scope := scope;
     tail lam;
     current_scope := old_scope;
-    current_tail_scope := old_tail_scope
+    current_region_scope := old_tail_scope
   in
   tail lam;
   let rec rewrite lam0 =
