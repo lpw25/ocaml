@@ -1,0 +1,13 @@
+                  startup: OK
+            function call: OK
+ during indirect tailcall: OK
+  after indirect tailcall: OK
+   during direct tailcall: OK
+    after direct tailcall: OK
+         toplevel binding: OK
+     toplevel rec binding: OK
+            toplevel eval: OK
+          first class mod: OK
+       class d definition: OK
+        class definitions: OK
+      class instantiation: OK

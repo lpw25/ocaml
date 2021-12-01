@@ -171,6 +171,10 @@ let rec expr_size env = function
       | RHS_block blocksize -> RHS_infix { blocksize; offset }
       | RHS_nonrec -> RHS_nonrec
       | _ -> assert false)
+  | Uregion exp ->
+      expr_size env exp
+  | Utail _ ->
+      Misc.fatal_error "Utail in non-tail position"
   | _ -> RHS_nonrec
 
 (* Translate structured constants to Cmm data items *)

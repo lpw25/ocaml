@@ -23,6 +23,7 @@ open Debuginfo.Scoped_location
 
 val pure_module : module_expr -> let_kind
 
+(* Used for translating Alloc_heap values in classes and modules *)
 val transl_exp: scopes:scopes -> expression -> lambda
 val transl_apply: scopes:scopes
                   -> ?tailcall:tailcall_attribute

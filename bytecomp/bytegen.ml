@@ -224,6 +224,7 @@ let rec size_of_lambda env = function
   | Lprim (Pduprecord (Record_float, size), _, _) -> RHS_floatblock size
   | Levent (lam, _) -> size_of_lambda env lam
   | Lsequence (_lam, lam') -> size_of_lambda env lam'
+  | Lregion lam -> size_of_lambda env lam
   | _ -> RHS_nonrec
 
 (**** Merging consecutive events ****)

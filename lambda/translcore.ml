@@ -102,6 +102,7 @@ let maybe_region lam =
   let rec is_trivial lam =
     match lam with
     | Lvar _ | Lconst _ | Lprim(Pgetglobal _, [], _) -> true
+    | Lfunction { mode = Alloc_heap; _ } -> true
     | Lprim(Pfield _, [lam], _)
     | Levent(lam, _) -> is_trivial lam
     | _ -> false
@@ -1032,7 +1033,8 @@ and transl_bound_exp ~scopes ~in_structure pat expr =
   This complication allows choosing any compilation order for the
   bindings and body of let constructs.
 *)
-and transl_let ~scopes ?(in_structure=false) rec_flag pat_expr_list =
+and transl_let ~scopes ?(add_regions=false) ?(in_structure=false)
+               rec_flag pat_expr_list =
   match rec_flag with
     Nonrecursive ->
       let rec transl = function
@@ -1041,6 +1043,7 @@ and transl_let ~scopes ?(in_structure=false) rec_flag pat_expr_list =
       | {vb_pat=pat; vb_expr=expr; vb_attributes=attr; vb_loc} :: rem ->
           let lam = transl_bound_exp ~scopes ~in_structure pat expr in
           let lam = Translattribute.add_function_attributes lam vb_loc attr in
+          let lam = if add_regions then maybe_region lam else lam in
           let mk_body = transl rem in
           fun body ->
             Matching.for_let ~scopes pat.pat_loc lam pat (mk_body body)
@@ -1059,6 +1062,7 @@ and transl_let ~scopes ?(in_structure=false) rec_flag pat_expr_list =
         let lam =
           Translattribute.add_function_attributes lam vb_loc vb_attributes
         in
+        let lam = if add_regions then maybe_region lam else lam in
         begin match transl_value_mode expr.exp_mode, lam with
         | Alloc_heap, _ -> ()
         | Alloc_local, Lfunction _ -> ()
@@ -1322,18 +1326,22 @@ and transl_letop ~scopes loc env let_ ands param case partial =
     ap_specialised = Default_specialise;
   }
 
-(* Wrapper for class compilation *)
+(* Wrapper for class/module compilation,
+   that can only return global values *)
 
-(*
-let transl_exp = transl_exp_wrap
+let transl_exp ~scopes exp =
+  maybe_region (transl_exp ~scopes exp)
 
-let transl_let rec_flag pat_expr_list body =
-  match pat_expr_list with
-    [] -> body
-  | (_, expr) :: _ ->
-      Translobj.oo_wrap expr.exp_env false
-        (transl_let rec_flag pat_expr_list) body
-*)
+let transl_let ~scopes ?in_structure rec_flag pat_expr_list =
+  transl_let ~scopes ~add_regions:true ?in_structure rec_flag pat_expr_list
+
+let transl_scoped_exp ~scopes exp =
+  maybe_region (transl_scoped_exp ~scopes exp)
+
+let transl_apply
+      ~scopes ?tailcall ?inlined ?specialised ?position ?mode fn args loc =
+  maybe_region (transl_apply
+      ~scopes ?tailcall ?inlined ?specialised ?position ?mode fn args loc)
 
 (* Error report *)
 
