@@ -560,7 +560,7 @@ let rec comp_expr env exp sz cont =
                       (Kapply nargs :: cont1))
         end
       end
-  | Lsend(kind, met, obj, args, _, _) ->
+  | Lsend(kind, met, obj, args, _, _, _) ->
       let args = if kind = Cached then List.tl args else args in
       let nargs = List.length args + 1 in
       let getmethod, args' =
@@ -682,6 +682,7 @@ let rec comp_expr env exp sz cont =
         ap_func=func;
         ap_args=[arg];
         ap_position=pos;
+        ap_mode=Alloc_heap;
         ap_tailcall=Default_tailcall;
         ap_inlined=Default_inline;
         ap_specialised=Default_specialise;
@@ -978,7 +979,7 @@ let rec comp_expr env exp sz cont =
             let info =
               match lam with
                 Lapply{ap_args = args}  -> Event_return (List.length args)
-              | Lsend(_, _, _, args, _, _) ->
+              | Lsend(_, _, _, args, _, _, _) ->
                   Event_return (List.length args + 1)
               | Lprim(_,args,_)         -> Event_return (List.length args)
               | _                       -> Event_other

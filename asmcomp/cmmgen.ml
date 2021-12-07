@@ -426,13 +426,13 @@ let rec transl env e =
       let ptr = transl env arg in
       let dbg = Debuginfo.none in
       ptr_offset ptr offset dbg
-  | Udirect_apply(lbl, args, pos, dbg) ->
+  | Udirect_apply(lbl, args, kind, dbg) ->
       let args = List.map (transl env) args in
-      direct_apply lbl args pos dbg
-  | Ugeneric_apply(clos, args, pos, dbg) ->
+      direct_apply lbl args kind dbg
+  | Ugeneric_apply(clos, args, kind, dbg) ->
       let clos = transl env clos in
       let args = List.map (transl env) args in
-      generic_apply (mut_from_env env clos) clos args pos dbg
+      generic_apply (mut_from_env env clos) clos args kind dbg
   | Usend(kind, met, obj, args, pos, dbg) ->
       let met = transl env met in
       let obj = transl env obj in

@@ -314,7 +314,7 @@ type lambda =
   | Lassign of Ident.t * lambda
   | Lsend of
       meth_kind * lambda * lambda * lambda list
-      * apply_position * scoped_location
+      * apply_position * alloc_mode * scoped_location
   | Levent of lambda * lambda_event
   | Lifused of Ident.t * lambda
   | Lregion of lambda
@@ -327,12 +327,13 @@ and lfunction =
     attr: function_attribute; (* specified with [@inline] attribute *)
     loc: scoped_location;
     mode: alloc_mode;
-    ret_mode: alloc_mode; }
+    region: bool; }
 
 and lambda_apply =
   { ap_func : lambda;
     ap_args : lambda list;
     ap_position : apply_position;
+    ap_mode : alloc_mode;
     ap_loc : scoped_location;
     ap_tailcall : tailcall_attribute;
     ap_inlined : inline_attribute;
@@ -381,15 +382,15 @@ let check_lfunction fn =
      A curried function with no local parameters or returns has kind
      [Curried {nlocal=0}]. *)
   let nparams = List.length fn.params in
-  begin match fn.mode, fn.ret_mode, fn.kind with
-  | Alloc_heap, _, Tupled -> ()
-  | Alloc_local, _, Tupled ->
+  begin match fn.mode, fn.kind with
+  | Alloc_heap, Tupled -> ()
+  | Alloc_local, Tupled ->
      (* Tupled optimisation does not apply to local functions *)
      assert false
-  | mode, ret_mode, Curried {nlocal} ->
+  | mode, Curried {nlocal} ->
      assert (0 <= nlocal);
      assert (nlocal <= nparams);
-     if ret_mode = Alloc_local then assert (nlocal >= 1);
+     if not fn.region then assert (nlocal >= 1);
      if mode = Alloc_local then assert (nlocal = nparams)
   end
 
@@ -467,8 +468,8 @@ let make_key e =
         Lsequence (tr_rec env e1,tr_rec env e2)
     | Lassign (x,e) ->
         Lassign (x,tr_rec env e)
-    | Lsend (m,e1,e2,es,pos,_loc) ->
-        Lsend (m,tr_rec env e1,tr_rec env e2,tr_recs env es,pos,Loc_unknown)
+    | Lsend (m,e1,e2,es,pos,mo,_loc) ->
+        Lsend (m,tr_rec env e1,tr_rec env e2,tr_recs env es,pos,mo,Loc_unknown)
     | Lifused (id,e) -> Lifused (id,tr_rec env e)
     | Lregion e -> Lregion (tr_rec env e)
     | Lletrec _|Lfunction _
@@ -563,7 +564,7 @@ let shallow_iter ~tail ~non_tail:f = function
       f e1; f e2; f e3
   | Lassign(_, e) ->
       f e
-  | Lsend (_k, met, obj, args, _, _) ->
+  | Lsend (_k, met, obj, args, _, _, _) ->
       List.iter f (met::obj::args)
   | Levent (e, _evt) ->
       tail e
@@ -639,7 +640,7 @@ let rec free_variables = function
       Ident.Set.union set (Ident.Set.remove v (free_variables body))
   | Lassign(id, e) ->
       Ident.Set.add id (free_variables e)
-  | Lsend (_k, met, obj, args, _, _) ->
+  | Lsend (_k, met, obj, args, _, _, _) ->
       free_variables_list
         (Ident.Set.union (free_variables met) (free_variables obj))
         args
@@ -805,8 +806,9 @@ let subst update_env ?(freshen_bound_variables = false) s input_lam =
         assert (not (Ident.Map.mem id s));
         let id = try Ident.Map.find id l with Not_found -> id in
         Lassign(id, subst s l e)
-    | Lsend (k, met, obj, args, pos, loc) ->
-        Lsend (k, subst s l met, subst s l obj, subst_list s l args, pos, loc)
+    | Lsend (k, met, obj, args, pos, mode, loc) ->
+        Lsend (k, subst s l met, subst s l obj, subst_list s l args,
+               pos, mode, loc)
     | Levent (lam, evt) ->
         let old_env = evt.lev_env in
         let env_updates =
@@ -866,20 +868,21 @@ let duplicate lam =
 let shallow_map f = function
   | Lvar _
   | Lconst _ as lam -> lam
-  | Lapply { ap_func; ap_args; ap_position; ap_loc; ap_tailcall;
+  | Lapply { ap_func; ap_args; ap_position; ap_mode; ap_loc; ap_tailcall;
              ap_inlined; ap_specialised } ->
       Lapply {
         ap_func = f ap_func;
         ap_args = List.map f ap_args;
         ap_position;
+        ap_mode;
         ap_loc;
         ap_tailcall;
         ap_inlined;
         ap_specialised;
       }
-  | Lfunction { kind; params; return; body; attr; loc; mode; ret_mode } ->
+  | Lfunction { kind; params; return; body; attr; loc; mode; region } ->
       Lfunction { kind; params; return; body = f body; attr; loc;
-                  mode; ret_mode }
+                  mode; region }
   | Llet (str, k, v, e1, e2) ->
       Llet (str, k, v, f e1, f e2)
   | Lletrec (idel, e2) ->
@@ -917,8 +920,8 @@ let shallow_map f = function
       Lfor (v, f e1, f e2, dir, f e3)
   | Lassign (v, e) ->
       Lassign (v, f e)
-  | Lsend (k, m, o, el, pos, loc) ->
-      Lsend (k, f m, f o, List.map f el, pos, loc)
+  | Lsend (k, m, o, el, pos, mode, loc) ->
+      Lsend (k, f m, f o, List.map f el, pos, mode, loc)
   | Levent (l, ev) ->
       Levent (f l, ev)
   | Lifused (v, e) ->

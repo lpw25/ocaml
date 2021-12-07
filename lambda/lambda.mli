@@ -300,7 +300,7 @@ type lambda =
   | Lfor of Ident.t * lambda * lambda * direction_flag * lambda
   | Lassign of Ident.t * lambda
   | Lsend of meth_kind * lambda * lambda * lambda list
-             * apply_position * scoped_location
+             * apply_position * alloc_mode * scoped_location
   | Levent of lambda * lambda_event
   | Lifused of Ident.t * lambda
   | Lregion of lambda
@@ -312,13 +312,16 @@ and lfunction =
     body: lambda;
     attr: function_attribute; (* specified with [@inline] attribute *)
     loc : scoped_location;
-    mode : alloc_mode;
-    ret_mode : alloc_mode }
+    mode : alloc_mode;     (* alloc mode of the closure itself *)
+    region : bool;         (* false if this function may locally
+                              allocate in the caller's region *)
+  }
 
 and lambda_apply =
   { ap_func : lambda;
     ap_args : lambda list;
     ap_position : apply_position;
+    ap_mode : alloc_mode;
     ap_loc : scoped_location;
     ap_tailcall : tailcall_attribute;
     ap_inlined : inline_attribute; (* specified with the [@inlined] attribute *)

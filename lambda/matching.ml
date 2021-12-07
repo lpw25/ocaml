@@ -1840,6 +1840,7 @@ let inline_lazy_force_cond arg pos loc =
                       ap_func = force_fun;
                       ap_args = [ varg ];
                       ap_position = pos;
+                      ap_mode = Alloc_heap;
                       ap_inlined = Default_inline;
                       ap_specialised = Default_specialise
                     },
@@ -1873,6 +1874,7 @@ let inline_lazy_force_switch arg pos loc =
                           ap_func = force_fun;
                           ap_args = [ varg ];
                           ap_position = pos;
+                          ap_mode = Alloc_heap;
                           ap_inlined = Default_inline;
                           ap_specialised = Default_specialise
                         } )
@@ -1893,6 +1895,7 @@ let inline_lazy_force arg pos loc =
         ap_func = Lazy.force code_force_lazy;
         ap_args = [ arg ];
         ap_position = pos;
+        ap_mode = Alloc_heap;
         ap_inlined = Default_inline;
         ap_specialised = Default_specialise
       }

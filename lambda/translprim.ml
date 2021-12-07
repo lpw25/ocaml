@@ -699,11 +699,11 @@ let lambda_of_prim prim_name prim loc args arg_exps =
       let lam = lambda_of_loc kind loc in
       Lprim(Pmakeblock(0, Immutable, None, Alloc_heap), [lam; arg], loc)
   | Send pos, [obj; meth] ->
-      Lsend(Public, meth, obj, [], pos, loc)
+      Lsend(Public, meth, obj, [], pos, Alloc_heap, loc)
   | Send_self pos, [obj; meth] ->
-      Lsend(Self, meth, obj, [], pos, loc)
+      Lsend(Self, meth, obj, [], pos, Alloc_heap, loc)
   | Send_cache apos, [obj; meth; cache; pos] ->
-      Lsend(Cached, meth, obj, [cache; pos], apos, loc)
+      Lsend(Cached, meth, obj, [cache; pos], apos, Alloc_heap, loc)
   | Primitive (prim, arity), args when arity = List.length args ->
       Lprim(prim, args, loc)
   | (Raise _ | Raise_with_backtrace
@@ -757,14 +757,14 @@ let transl_primitive loc p env ty ~poly_mode path =
   | _ ->
      let to_alloc_mode m = to_alloc_mode ~poly:poly_mode m in
      let arg_modes = List.map to_alloc_mode p.prim_native_repr_args in
-     let ret_mode = to_alloc_mode p.prim_native_repr_res in
+     let region =
+       match to_alloc_mode p.prim_native_repr_res with
+       | Alloc_heap -> true
+       | Alloc_local -> false
+     in
      let rec count_nlocal = function
        | [] -> assert false
-       | [_] ->
-          begin match ret_mode with
-          | Alloc_local -> 1
-          | Alloc_heap -> 0
-          end
+       | [_] -> if region then 0 else 1
        | Alloc_heap :: args -> count_nlocal args
        | (Alloc_local :: _) as args -> List.length args
      in
@@ -777,7 +777,7 @@ let transl_primitive loc p env ty ~poly_mode path =
          loc;
          body;
          mode = Alloc_heap;
-         ret_mode }
+         region }
      in
      Lambda.check_lfunction lfunc;
      Lfunction lfunc

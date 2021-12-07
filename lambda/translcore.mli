@@ -30,6 +30,7 @@ val transl_apply: scopes:scopes
                   -> ?inlined:inline_attribute
                   -> ?specialised:specialise_attribute
                   -> ?position:apply_position
+                  -> ?mode:alloc_mode
                   -> lambda
                   -> (arg_label * apply_arg) list
                   -> scoped_location -> lambda

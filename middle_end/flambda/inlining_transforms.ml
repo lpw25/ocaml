@@ -96,7 +96,7 @@ let inline_by_copying_function_body ~env ~r
       ~(function_decl : A.function_declaration)
       ~(function_body : A.function_body)
       ~fun_vars
-      ~args ~dbg ~position ~simplify =
+      ~args ~dbg ~position ~mode:_ ~simplify =
   assert (E.mem env lhs_of_application);
   assert (List.for_all (E.mem env) args);
   let r =
@@ -536,7 +536,8 @@ let rewrite_function ~lhs_of_application ~closure_id_being_applied
   in
   let new_function_decl =
     Flambda.create_function_declaration
-      ~params ~alloc_mode:function_decl.alloc_mode ~body
+      ~params ~alloc_mode:function_decl.alloc_mode ~region:function_decl.region
+      ~body
       ~stub:function_body.stub
       ~dbg:function_body.dbg
       ~inline:function_body.inline
@@ -603,6 +604,7 @@ let inline_by_copying_function_declaration
     ~(direct_call_surrogates : Closure_id.t Closure_id.Map.t)
     ~(dbg : Debuginfo.t)
     ~(position : Lambda.apply_position)
+    ~(mode : Lambda.alloc_mode)
     ~(simplify : Inlining_decision_intf.simplify) =
   let state = empty_state in
   let state =
@@ -661,7 +663,7 @@ let inline_by_copying_function_declaration
       in
       let apply : Flambda.apply =
         { func = closure_var; args; kind = Direct closure_id; dbg; position;
-          inline = inline_requested; specialise = Default_specialise; }
+          mode; inline = inline_requested; specialise = Default_specialise; }
       in
       let body =
         Flambda.create_let
