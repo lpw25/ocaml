@@ -1890,7 +1890,7 @@ let placeholder_fun_dbg ~human_name:_ = Debuginfo.none
            (app closN-1.code aN closN-1))))
 *)
 
-let apply_function_body (arity, _mode) =
+let apply_function_body (arity, (mode : Lambda.alloc_mode)) =
   let dbg = placeholder_dbg in
   let arg = Array.make arity (V.create_local "arg") in
   for i = 1 to arity - 1 do arg.(i) <- V.create_local "arg" done;
@@ -1925,7 +1925,9 @@ let apply_function_body (arity, _mode) =
        :: List.map (fun s -> Cvar s) all_args,
        dbg ()),
    dbg (),
-   app_fun clos 0,
+   (match mode with
+    | Alloc_heap -> Cregion (false, app_fun clos 0)
+    | Alloc_local -> app_fun clos 0),
    dbg ()))
 
 let send_function (arity, mode) =

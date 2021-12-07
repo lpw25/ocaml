@@ -892,6 +892,11 @@ and simplify_over_application env r ~args ~args_approxs ~function_decls
   in
   let expr = Lift_code.lift_lets_expr expr ~toplevel:true in
   let expr =
+    match mode, function_decl.A.region with
+    | Lambda.Alloc_heap, false -> Flambda.Region expr
+    | _ -> expr
+  in
+  let expr =
     match position with
     | Lambda.Apply_tail -> Flambda.Tail expr
     | Lambda.Apply_nontail -> expr

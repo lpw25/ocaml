@@ -1063,6 +1063,11 @@ let rec close ({ backend; fenv; cenv ; mutable_vars } as env) lam =
                            rem_args, (Apply_nontail, mode), dbg)
           in
           let body =
+            match mode, fundesc.fun_region with
+            | Alloc_heap, false -> region body
+            | _ -> body
+          in
+          let body =
             match pos with
             | Apply_nontail -> body
             | Apply_tail -> tail body

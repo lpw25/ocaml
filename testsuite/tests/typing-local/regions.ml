@@ -44,6 +44,35 @@ let () =
   check_empty "after direct tailcall"
 
 
+let[@inline never][@specialise never][@local never] do_overtailcall f =
+  let local_ r = ref 42 in
+  let _ = opaque_identity r in
+  f () ()
+let () =
+  do_overtailcall (fun () ->
+    let local_ r = ref 42 in
+    let _ = opaque_identity r in
+    fun () ->
+      check_empty "during indirect overtail");
+  check_empty "after indirect overtail"
+
+let[@inline always] overtailcalled_function () =
+  let local_ r = ref 42 in
+  let _ = opaque_identity r in
+  fun () ->
+    check_empty "during direct overtail"
+let[@inline never] do_direct_overtailcall () =
+  let local_ r = ref 42 in
+  let _ = opaque_identity r in
+  overtailcalled_function () ()
+let () =
+  do_direct_overtailcall ();
+  check_empty "after direct overtail"
+
+
+
+
+
 let () =
   let local_ z = ref 1000 in
   let _ = opaque_identity z in
@@ -127,5 +156,37 @@ let o1 = new c
 let o2 = new d 42
 let o3 = new e
 let () = check_empty "class instantiation"
-  
+
+
+let glob = ref 0
+let[@inline never] local_fn_ret () s = local_
+  incr glob;
+  fun x -> Gc.minor (); string_of_int x ^ s
+
+let globstr = ref ""
+let unknown_fn = ref local_fn_ret
+let gpart_fn = ref (local_fn_ret ())
+let obj = ref (object
+  method local_ret s = local_
+    incr glob;
+    fun x -> Gc.minor (); string_of_int x ^ s
+  end)
+let () =
+  let check s =
+    globstr := s; assert (s = "5!")
+  in
+  check (local_fn_ret () "!" 5);
+  check_empty "static overapply";
+  check (!unknown_fn () "!" 5);
+  check_empty "dynamic overapply";
+  let part_fn = local_fn_ret () in
+  check (part_fn "!" 5);
+  check_empty "static/partial overapply";
+  gpart_fn := local_fn_ret ();
+  check (!gpart_fn "!" 5);
+  check_empty "dynamic/partial overapply";
+  check (!obj#local_ret "!" 5);
+  check_empty "method overapply"
+
+
 let () = Gc.compact ()
