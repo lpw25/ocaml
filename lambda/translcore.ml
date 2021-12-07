@@ -99,26 +99,41 @@ let transl_apply_position position =
   | Tail -> Apply_tail
 
 let maybe_region lam =
-  let rec is_trivial lam =
-    match lam with
-    | Lvar _ | Lconst _ | Lprim(Pgetglobal _, [], _) -> true
-    | Lfunction { mode = Alloc_heap; _ } -> true
-    | Lprim(Pfield _, [lam], _)
-    | Levent(lam, _) -> is_trivial lam
-    | _ -> false
+  let rec loop = function
+    | Lfunction {mode=Alloc_heap} -> ()
+    | Lfunction {mode=Alloc_local} -> raise Exit
+
+    | Lapply {ap_mode=Alloc_local}
+    | Lsend (_,_,_,_,_,Alloc_local,_) -> raise Exit
+
+    | Lprim (prim, args, _) ->
+       begin match Lambda.primitive_may_allocate prim with
+       | Some Alloc_local -> raise Exit
+       | None | Some Alloc_heap ->
+          List.iter loop args
+       end
+    | Lregion _body ->
+       (* [_body] might do local allocations, but not in the current region *)
+       ()
+    | lam ->
+       Lambda.iter_head_constructor loop lam
   in
-  if is_trivial lam then lam
-  else begin
-    match lam with
-    | Lsend(k, lmet, lobj, largs, Apply_tail, mode, loc)
-      when List.for_all is_trivial largs ->
-        Lsend(k, lmet, lobj, largs, Apply_nontail, mode, loc)
-    | Lapply ({ ap_position = Apply_tail; ap_args } as ap)
-      when List.for_all is_trivial ap_args ->
-        Lapply { ap with ap_position = Apply_nontail }
-    | _ ->
-        Lregion lam
-  end
+  let may_allocate_in_region lam =
+    match loop lam with
+    | () -> false
+    | exception Exit -> true
+  in
+  let rec remove_tail_markers = function
+    | Lapply ({ap_position = Apply_tail} as ap) ->
+       Lapply ({ap with ap_position = Apply_nontail})
+    | Lsend (k, lmet, lobj, largs, Apply_tail, mode, loc) ->
+       Lsend (k, lmet, lobj, largs, Apply_nontail, mode, loc)
+    | Lregion _ as lam -> lam
+    | lam ->
+       Lambda.shallow_map ~tail:remove_tail_markers ~non_tail:Fun.id lam
+  in
+  if may_allocate_in_region lam then Lregion lam
+  else remove_tail_markers lam
 
 (* Push the default values under the functional abstractions *)
 (* Also push bindings of module patterns, since this sound *)

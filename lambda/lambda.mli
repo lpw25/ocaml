@@ -432,7 +432,10 @@ val map : (lambda -> lambda) -> lambda -> lambda
   (** Bottom-up rewriting, applying the function on
       each node from the leaves to the root. *)
 
-val shallow_map  : (lambda -> lambda) -> lambda -> lambda
+val shallow_map  :
+  tail:(lambda -> lambda) ->
+  non_tail:(lambda -> lambda) ->
+  lambda -> lambda
   (** Rewrite each immediate sub-term with the function. *)
 
 val bind : let_kind -> Ident.t -> lambda -> lambda -> lambda
@@ -457,6 +460,11 @@ val max_arity : unit -> int
 val join_mode : alloc_mode -> alloc_mode -> alloc_mode
 val sub_mode : alloc_mode -> alloc_mode -> bool
 val eq_mode : alloc_mode -> alloc_mode -> bool
+
+val primitive_may_allocate : primitive -> alloc_mode option
+  (** Whether and where a primitive may allocate.
+      [Some Alloc_local] permits both options: that is, primitives that
+      may allocate on both the GC heap and locally report this value. *)
 
 (***********************)
 (* For static failures *)

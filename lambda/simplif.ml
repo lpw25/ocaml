@@ -916,7 +916,7 @@ let simplify_local_functions lam =
               Lstaticraise (st, List.map rewrite exact_args)
          end
       | lam ->
-          Lambda.shallow_map rewrite lam
+          Lambda.shallow_map ~tail:rewrite ~non_tail:rewrite lam
     in
     List.fold_right
       (fun (st, lf) lam ->

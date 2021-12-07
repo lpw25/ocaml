@@ -221,6 +221,13 @@ let mode_return mode =
   let tuple_modes = [] in
   { position; escaping_context; mode; tuple_modes }
 
+let mode_var () =
+  let position = Nontail in
+  let escaping_context = None in
+  let mode = Value_mode.newvar () in
+  let tuple_modes = [] in
+  { position; escaping_context; mode; tuple_modes }
+
 let mode_local =
   let position = Nontail in
   let escaping_context = None in
@@ -3812,15 +3819,14 @@ and type_expect_
         exp_env = env }
   | Pexp_ifthenelse(scond, sifso, sifnot) ->
       let cond =
-        type_expect env mode_local scond
+        type_expect env (mode_var ()) scond
           (mk_expected ~explanation:If_conditional Predef.type_bool)
       in
       begin match sifnot with
         None ->
           let ifso =
-            type_expect env mode_local sifso
-              (mk_expected ~explanation:If_no_else_branch Predef.type_unit)
-          in
+            type_expect env (mode_var ()) sifso
+              (mk_expected ~explanation:If_no_else_branch Predef.type_unit) in
           rue {
             exp_desc = Texp_ifthenelse(cond, ifso, None);
             exp_loc = loc; exp_extra = [];
@@ -3858,7 +3864,7 @@ and type_expect_
         exp_env = env }
   | Pexp_while(scond, sbody) ->
       let cond =
-        type_expect (Env.add_region_lock env) mode_local scond
+        type_expect (Env.add_region_lock env) (mode_var ()) scond
           (mk_expected ~explanation:While_loop_conditional Predef.type_bool)
       in
       let body =
@@ -3873,11 +3879,11 @@ and type_expect_
         exp_env = env }
   | Pexp_for(param, slow, shigh, dir, sbody) ->
       let low =
-        type_expect env mode_local slow
+        type_expect env (mode_var ()) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
       in
       let high =
-        type_expect env mode_local shigh
+        type_expect env (mode_var ()) shigh
           (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
       in
       let id, new_env =
@@ -4279,7 +4285,7 @@ and type_expect_
 
   | Pexp_assert (e) ->
       let cond =
-        type_expect env mode_local e
+        type_expect env (mode_var ()) e
           (mk_expected ~explanation:Assert_condition Predef.type_bool)
       in
       let exp_type =
@@ -5363,7 +5369,7 @@ and type_construct env (expected_mode : expected_mode) loc lid sarg
 
 and type_statement ?explanation env sexp =
   begin_def();
-  let exp = type_exp env mode_local sexp in
+  let exp = type_exp env (mode_var ()) sexp in
   end_def();
   let ty = expand_head env exp.exp_type and tv = newvar() in
   if is_Tvar ty && ty.level > tv.level then
@@ -5584,7 +5590,7 @@ and type_cases
           | None -> None
           | Some scond ->
               Some
-                (type_unpacks ext_env mode_local unpacks scond
+                (type_unpacks ext_env (mode_var ()) unpacks scond
                    (mk_expected ~explanation:When_guard Predef.type_bool))
         in
         let exp =
