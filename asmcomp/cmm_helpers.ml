@@ -1816,10 +1816,9 @@ let cache_public_method meths tag cache dbg =
 
 let has_local_allocs e =
   let rec loop = function
-    | Cregion(false, _) ->
-        (* Local allocations within a nested region do not affect this region. *)
-        ()
-    | Cregion(true, e) ->
+    | Cregion e ->
+        (* Local allocations within a nested region do not affect this region,
+           except inside a Ctail block *)
         loop_until_tail e
     | Cop (Calloc Alloc_local, _, _)
     | Cop ((Cextcall _ | Capply _), _, _) ->
@@ -1835,45 +1834,31 @@ let has_local_allocs e =
   | () -> false
   | exception Exit -> true
 
-let has_region_tail e =
-  let rec loop = function
+let remove_region_tail e =
+  let rec has_tail = function
     | Ctail _
     | Cop(Capply(_, Apply_tail), _, _) -> raise Exit
     | Cregion _ -> ()
-    | e -> ignore (iter_shallow_tail loop e)
+    | e -> ignore (iter_shallow_tail has_tail e)
   in
-  match loop e with
-  | () -> false
-  | exception Exit -> true
-
-let remove_region_tail e =
-  map_tail_with_regions
-    (function
-       | Ctail e -> e
-       | Cop(Capply(mach, Apply_tail), args, dbg) ->
-           Cop(Capply(mach, Apply_nontail), args, dbg)
-       | e -> e)
-    e
+  let rec remove_tail = function
+    | Ctail e -> e
+    | Cop(Capply(mach, Apply_tail), args, dbg) ->
+       Cop(Capply(mach, Apply_nontail), args, dbg)
+    | Cregion _ as e -> e
+    | e ->
+       map_shallow_tail remove_tail e
+  in
+  match has_tail e with
+  | () -> e
+  | exception Exit -> remove_tail e
 
 let region e =
   (* [Cregion e] is equivalent to [e] if [e] contains no local allocs *)
-  match has_local_allocs e, has_region_tail e with
-  | false, false -> e
-  | false, true -> remove_region_tail e
-  | true, tl -> Cregion(tl, e)
-
-let rec with_regions_naive n e =
-  if n = 0 then e
-  else with_regions_naive (n - 1) (region e)
-
-let with_regions n e =
-  if n = 0 then e
-  else begin
-    match has_local_allocs e, has_region_tail e with
-    | false, false -> e
-    | false, true -> remove_region_tail e
-    | true, tl -> with_regions_naive (n - 1) (Cregion(tl, e))
-  end
+  if has_local_allocs e then
+    Cregion e
+  else
+    remove_region_tail e
 
 (* CR mshinwell: These will be filled in by later pull requests. *)
 let placeholder_dbg () = Debuginfo.none
@@ -1926,7 +1911,7 @@ let apply_function_body (arity, (mode : Lambda.alloc_mode)) =
        dbg ()),
    dbg (),
    (match mode with
-    | Alloc_heap -> Cregion (false, app_fun clos 0)
+    | Alloc_heap -> Cregion (app_fun clos 0)
     | Alloc_local -> app_fun clos 0),
    dbg ()))
 

@@ -88,7 +88,7 @@ and instrument = function
      in
      Ccatch (isrec, cases, instrument body)
   | Cexit (ex, args) -> Cexit (ex, List.map instrument args)
-  | Cregion(tl, e) -> Cregion(tl, instrument e)
+  | Cregion e -> Cregion (instrument e)
   | Ctail e -> Ctail (instrument e)
 
   (* these are base cases and have no logging *)
