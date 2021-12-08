@@ -100,6 +100,8 @@ let transl_apply_position position =
 
 let maybe_region lam =
   let rec loop = function
+    | Lvar _ | Lconst _ -> ()
+
     | Lfunction {mode=Alloc_heap} -> ()
     | Lfunction {mode=Alloc_local} -> raise Exit
 
@@ -115,7 +117,17 @@ let maybe_region lam =
     | Lregion _body ->
        (* [_body] might do local allocations, but not in the current region *)
        ()
-    | lam ->
+    | Lwhile (cond, _body) ->
+       (* [_body] already has a region *)
+       loop cond
+    | Lfor (_var, l, u, _dir, _body) ->
+       (* [_body] already has a region *)
+       loop l; loop u
+
+    | ( Lapply _ | Llet _ | Lletrec _ | Lswitch _ | Lstringswitch _
+      | Lstaticraise _ | Lstaticcatch _ | Ltrywith _
+      | Lifthenelse _ | Lsequence _ | Lassign _ | Lsend _
+      | Levent _ | Lifused _) as lam ->
        Lambda.iter_head_constructor loop lam
   in
   let may_allocate_in_region lam =
