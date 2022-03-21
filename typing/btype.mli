@@ -47,6 +47,8 @@ val newmarkedgenvar: unit -> type_expr
 val is_Tvar: type_expr -> bool
 val is_Tunivar: type_expr -> bool
 val is_Tconstr: type_expr -> bool
+val is_Tpoly: type_expr -> bool
+
 val dummy_method: label
 
 val repr: type_expr -> type_expr
@@ -93,6 +95,12 @@ val hash_variant: label -> int
 val proxy: type_expr -> type_expr
         (* Return the proxy representative of the type: either itself
            or a row variable *)
+
+(* Poly types *)
+
+val is_mono : type_expr -> bool
+val get_mono : type_expr -> type_expr
+val get_poly : type_expr -> type_expr * type_expr list
 
 (**** Utilities for private abbreviations with fixed rows ****)
 val row_of_type: type_expr -> type_expr

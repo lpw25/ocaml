@@ -280,6 +280,8 @@ let newobj fields      = newty (Tobject (fields, ref None))
 
 let newconstr path tyl = newty (Tconstr (path, tyl, ref Mnil))
 
+let newmono ty = newty (Tpoly(ty, []))
+
 let none = newty (Ttuple [])                (* Clearly ill-formed type *)
 
 (**** Representative of a type ****)
@@ -1179,7 +1181,7 @@ let rec copy ?partial ?keep_names scope ty =
       match partial with
         None -> assert false
       | Some (free_univars, keep) ->
-          if TypeSet.is_empty (free_univars ty) then
+          if not (is_Tpoly ty) && TypeSet.is_empty (free_univars ty) then
             if keep then ty.level else !current_level
           else generic_level
     in
@@ -2340,7 +2342,7 @@ let rec mcomp type_pairs env t1 t2 =
         | (_, Tvar _)  ->
             ()
         | (Tarrow ((l1,_,_), t1, u1, _), Tarrow ((l2,_,_), t2, u2, _))
-          when l1 = l2 || not (is_optional l1 || is_optional l2) ->
+          when (l1 = l2 || not (is_optional l1 || is_optional l2)) ->
             mcomp type_pairs env t1 t2;
             mcomp type_pairs env u1 u2;
         | (Ttuple tl1, Ttuple tl2) ->
@@ -2776,9 +2778,9 @@ and unify3 env t1 t1' t2 t2' =
         (Tarrow ((l1,a1,r1), t1, u1, c1),
          Tarrow ((l2,a2,r2), t2, u2, c2))
            when
-             (l1 = l2 ||
+             ((l1 = l2 ||
               (!Clflags.classic || !umode = Pattern) &&
-               not (is_optional l1 || is_optional l2)) ->
+               not (is_optional l1 || is_optional l2))) ->
           unify_alloc_mode a1 a2;
           unify_alloc_mode r1 r2;
           unify  env t1 t2; unify env  u1 u2;
@@ -3258,12 +3260,26 @@ let expand_head_trace env t =
    (2) the original label is not optional
 *)
 
-let filter_arrow env t l =
+let filter_arrow env t l force_poly =
   let t = expand_head_trace env t in
   match t.desc with
     Tvar _ ->
       let lv = t.level in
-      let t1 = newvar2 lv and t2 = newvar2 lv in
+      let t1 =
+        if not force_poly then begin
+          assert (not (is_optional l));
+          newvar2 lv
+        end else begin
+          let t1 =
+            if is_optional l then
+              newty2 lv (Tconstr(Predef.path_option,[newvar2 lv], ref Mnil))
+            else
+              newvar2 lv
+          in
+          newty2 lv (Tpoly(t1, []))
+        end
+      in
+      let t2 = newvar2 lv in
       let marg = Btype.Alloc_mode.newvar () in
       let mret = Btype.Alloc_mode.newvar () in
       let t' = newty2 lv (Tarrow ((l,marg,mret), t1, t2, Cok)) in
@@ -3271,9 +3287,20 @@ let filter_arrow env t l =
       (marg, t1, mret, t2)
   | Tarrow((l', arg, ret), t1, t2, _)
     when (l = l' || !Clflags.classic && l = Nolabel && not (is_optional l)) ->
+      ignore (get_poly t1);
       (arg, t1, ret, t2)
   | _ ->
       raise (Unify [])
+
+let filter_mono ty =
+  match (repr ty).desc with
+  | Tpoly(ty, []) -> ty
+  | _ -> raise (Unify [])
+
+let filter_arrow_mono env t l =
+  let (marg, t1, mret, t2) = filter_arrow env t l true in
+  let t1 = filter_mono t1 in
+  (marg, t1, mret, t2)
 
 (* Used by [filter_method]. *)
 let rec filter_method_field env name priv ty =
@@ -3391,7 +3418,7 @@ let rec moregen inst_nongen type_pairs env t1 t2 =
               link_type t1' t2
           | (Tarrow ((l1,a1,r1), t1, u1, _),
              Tarrow ((l2,a2,r2), t2, u2, _)) when
-               (l1 = l2 
+               (l1 = l2
                 || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
               moregen inst_nongen type_pairs env t1 t2;
               moregen inst_nongen type_pairs env u1 u2;

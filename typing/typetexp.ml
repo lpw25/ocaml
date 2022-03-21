@@ -48,6 +48,7 @@ type error =
   | Opened_object of Path.t option
   | Not_an_object of type_expr
   | Local_not_enabled
+  | Polymorphic_optional_param
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -234,15 +235,24 @@ and transl_type_aux env policy mode styp =
           let ret_cty = loop acc_mode rest in
           let arg_ty = arg_cty.ctyp_type in
           let arg_ty =
-            if Btype.is_optional l
-            then newty (Tconstr(Predef.path_option,[arg_ty], ref Mnil))
-            else arg_ty
+            match (repr arg_ty).desc with
+            | Tpoly _ ->
+                if Btype.is_optional l then
+                  raise (Error (arg.ptyp_loc, env, Polymorphic_optional_param));
+                arg_ty
+            | _ ->
+                let arg_ty =
+                  if Btype.is_optional l
+                  then newty (Tconstr(Predef.path_option,[arg_ty], ref Mnil))
+                  else arg_ty
+                in
+                newmono arg_ty
           in
           let arg_mode = Alloc_mode.of_const arg_mode in
           let ret_mode = Alloc_mode.of_const ret_mode in
+          let arrow_desc = (l, arg_mode, ret_mode) in
           let ty =
-            newty
-              (Tarrow((l,arg_mode,ret_mode), arg_ty, ret_cty.ctyp_type, Cok))
+            newty (Tarrow(arrow_desc, arg_ty, ret_cty.ctyp_type, Cok))
           in
           ctyp (Ttyp_arrow (l, arg_cty, ret_cty)) ty
         | [] -> transl_type env policy ret_mode ret
@@ -845,6 +855,8 @@ let report_error env ppf = function
   | Local_not_enabled ->
       fprintf ppf "@[The local extension is disabled@ \
                      To enable it, pass the '-extension local' flag@]"
+  | Polymorphic_optional_param ->
+      fprintf ppf "@[Optional parameters cannot be polymorphic@]"
 
 let () =
   Location.register_error_of_exn

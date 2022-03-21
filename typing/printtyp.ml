@@ -968,12 +968,14 @@ let rec tree_of_typexp sch ty =
         in
         let t1 =
           if is_optional l then
-            match (repr ty1).desc with
+            match (repr (get_mono ty1)).desc with
             | Tconstr(path, [ty], _)
               when Path.same path Predef.path_option ->
                 tree_of_typexp sch ty
             | _ -> Otyp_stuff "<hidden>"
-          else tree_of_typexp sch ty1 in
+          else
+            tree_of_typexp sch ty1
+        in
         let am =
           match Alloc_mode.check_const marg with
           | Some Global -> Oam_global
@@ -1986,10 +1988,14 @@ let print_tags =
   let comma ppf () = Format.fprintf ppf ",@ " in
   Format.pp_print_list ~pp_sep:comma print_tag
 
-let is_unit env ty =
-  match (Ctype.expand_head env ty).desc with
-  | Tconstr (p, _, _) -> Path.same p Predef.path_unit
-  | _ -> false
+let is_unit_arg env ty =
+  let ty, vars = get_poly ty in
+  if vars <> [] then false
+  else begin
+    match (Ctype.expand_head env ty).desc with
+    | Tconstr (p, _, _) -> Path.same p Predef.path_unit
+    | _ -> false
+  end
 
 let unifiable env ty1 ty2 =
   let snap = Btype.snapshot () in
@@ -2003,12 +2009,12 @@ let unifiable env ty1 ty2 =
 let explanation_diff env t3 t4 : (Format.formatter -> unit) option =
   match t3.desc, t4.desc with
   | Tarrow (_, ty1, ty2, _), _
-    when is_unit env ty1 && unifiable env ty2 t4 ->
+    when is_unit_arg env ty1 && unifiable env ty2 t4 ->
       Some (fun ppf ->
         fprintf ppf
           "@,@[Hint: Did you forget to provide `()' as argument?@]")
   | _, Tarrow (_, ty1, ty2, _)
-    when is_unit env ty1 && unifiable env t3 ty2 ->
+    when is_unit_arg env ty1 && unifiable env t3 ty2 ->
       Some (fun ppf ->
         fprintf ppf
           "@,@[Hint: Did you forget to wrap the expression using \

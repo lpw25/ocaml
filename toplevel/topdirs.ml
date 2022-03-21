@@ -279,7 +279,10 @@ let rec extract_last_arrow desc =
       try extract_last_arrow r
       with Ctype.Unify _ -> res
 
-let extract_target_type ty = fst (extract_last_arrow ty)
+let extract_target_type ty =
+  let ty = fst (extract_last_arrow ty) in
+  Ctype.filter_mono ty
+
 let extract_target_parameters ty =
   let ty = extract_target_type ty |> Ctype.expand_head !toplevel_env in
   match ty.desc with
@@ -321,10 +324,12 @@ let match_generic_printer_type desc path args printer_type =
     List.map (fun ty_var -> Ctype.newconstr printer_type [ty_var]) args in
   let ty_expected =
     List.fold_right
-      (fun ty_arg ty -> Ctype.newty
-         (Tarrow ((Asttypes.Nolabel,Alloc_mode.global,Alloc_mode.global),
-                  ty_arg, ty,
-                  Cunknown)))
+      (fun ty_arg ty ->
+         let arrow_desc =
+           Asttypes.Nolabel,Alloc_mode.global,Alloc_mode.global
+         in
+         Ctype.newty
+           (Tarrow (arrow_desc, Ctype.newmono ty_arg, ty, Cunknown)))
       ty_args (Ctype.newconstr printer_type [ty_target]) in
   Ctype.unify !toplevel_env
     ty_expected

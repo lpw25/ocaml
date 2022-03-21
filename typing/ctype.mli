@@ -132,6 +132,7 @@ val new_global_var: ?name:string -> unit -> type_expr
            (as type variables ['a] in type constraints). *)
 val newobj: type_expr -> type_expr
 val newconstr: Path.t -> type_expr list -> type_expr
+val newmono : type_expr -> type_expr
 val none: type_expr
         (* A dummy type expression *)
 
@@ -277,9 +278,12 @@ val unify_var: Env.t -> type_expr -> type_expr -> unit
         (* Same as [unify], but allow free univars when first type
            is a variable. *)
 val unify_alloc_mode: alloc_mode -> alloc_mode -> unit
-val filter_arrow: Env.t -> type_expr -> arg_label ->
+val filter_arrow: Env.t -> type_expr -> arg_label -> bool ->
                   alloc_mode * type_expr * alloc_mode * type_expr
         (* A special case of unification (with l:'a -> 'b). *)
+val filter_mono: type_expr -> type_expr
+val filter_arrow_mono: Env.t -> type_expr -> arg_label ->
+                  alloc_mode * type_expr * alloc_mode * type_expr
 val filter_method: Env.t -> string -> private_flag -> type_expr -> type_expr
         (* A special case of unification (with {m : 'a; 'b}). *)
 val check_filter_method: Env.t -> string -> private_flag -> type_expr -> unit

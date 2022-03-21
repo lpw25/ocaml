@@ -1314,6 +1314,7 @@ let rec parse_native_repr_attributes env core_type ty rmode ~global_repr =
     raise (Error (core_type.ptyp_loc, Cannot_unbox_or_untag_type kind))
   | Ptyp_arrow (_, ct1, ct2), Tarrow ((_,marg,mret), t1, t2, _), _
     when not (Builtin_attributes.has_curry core_type.ptyp_attributes) ->
+    let t1, _ = Btype.get_poly t1 in
     let repr_arg = make_native_repr env ct1 t1 ~global_repr in
     let mode =
       if Builtin_attributes.has_local_opt ct1.ptyp_attributes
@@ -1334,7 +1335,7 @@ let rec parse_native_repr_attributes env core_type ty rmode ~global_repr =
 
 
 let check_unboxable env loc ty =
-  let check_type acc ty : Path.Set.t =
+  let rec check_type acc ty : Path.Set.t =
     let ty = Ctype.repr (Ctype.expand_head_opt env ty) in
     try match ty.desc with
       | Tconstr (p, _, _) ->
@@ -1342,6 +1343,7 @@ let check_unboxable env loc ty =
         if tydecl.type_unboxed.default then
           Path.Set.add p acc
         else acc
+      | Tpoly (ty, []) -> check_type acc ty
       | _ -> acc
     with Not_found -> acc
   in

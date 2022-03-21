@@ -179,8 +179,9 @@ let rec constructor_type constr cty =
   | Cty_signature _ ->
       constr
   | Cty_arrow (l, ty, cty) ->
-      Ctype.newty (Tarrow ((l, Alloc_mode.global, Alloc_mode.global),
-                           ty, constructor_type constr cty, Cok))
+      let arrow_desc = l, Alloc_mode.global, Alloc_mode.global in
+      let ty = Ctype.newmono ty in
+      Ctype.newty (Tarrow (arrow_desc, ty, constructor_type constr cty, Cok))
 
 let rec class_body cty =
   match cty with
@@ -742,7 +743,7 @@ and class_field_aux self_loc cl_num self_type meths vars
           begin match (Ctype.repr ty).desc with
             Tvar _ ->
               let ty' = Ctype.newvar () in
-              Ctype.unify val_env (Ctype.newty (Tpoly (ty', []))) ty;
+              Ctype.unify val_env (Ctype.newmono ty') ty;
               Ctype.unify val_env (type_approx val_env sbody) ty'
           | Tpoly (ty1, tl) ->
               let _, ty1' = Ctype.instance_poly false tl ty1 in
@@ -764,9 +765,12 @@ and class_field_aux self_loc cl_num self_type meths vars
           (fun () ->
              (* Read the generalized type *)
              let (_, ty) = Meths.find lab.txt !meths in
+             let arrow_desc =
+               Nolabel, Alloc_mode.global, Alloc_mode.global
+             in
+             let self_param_type = Btype.newgenty (Tpoly(self_type, [])) in
              let meth_type = mk_expected (
-               Btype.newgenty (Tarrow((Nolabel, Alloc_mode.global, Alloc_mode.global),
-                                      self_type, ty, Cok))
+               Btype.newgenty (Tarrow(arrow_desc, self_param_type, ty, Cok))
              ) in
              Ctype.raise_nongen_level ();
              vars := vars_local;
@@ -791,9 +795,13 @@ and class_field_aux self_loc cl_num self_type meths vars
       let field =
         lazy begin
           Ctype.raise_nongen_level ();
+          let arrow_desc =
+            Nolabel, Alloc_mode.global, Alloc_mode.global
+          in
+          let self_param_type = Btype.newgenty (Tpoly(self_type, [])) in
           let meth_type = mk_expected (
             Ctype.newty
-              (Tarrow ((Nolabel, Alloc_mode.global, Alloc_mode.global), self_type,
+              (Tarrow (arrow_desc, self_param_type,
                        Ctype.instance Predef.type_unit, Cok))
           ) in
           vars := vars_local;
@@ -1299,16 +1307,19 @@ and class_expr_aux cl_num val_env met_env scl =
 (* Approximate the type of the constructor to allow recursive use *)
 (* of optional parameters                                         *)
 
-let var_option = Predef.type_option (Btype.newgenvar ())
+let var_option =
+  Predef.type_option (Btype.newgenvar ())
 
 let rec approx_declaration cl =
   match cl.pcl_desc with
     Pcl_fun (l, _, _, cl) ->
       let arg =
         if Btype.is_optional l then Ctype.instance var_option
-        else Ctype.newvar () in
-      Ctype.newty (Tarrow ((l, Alloc_mode.global, Alloc_mode.global),
-                           arg, approx_declaration cl, Cok))
+        else Ctype.newvar ()
+      in
+      let arrow_desc = l, Alloc_mode.global, Alloc_mode.global in
+      Ctype.newty
+        (Tarrow (arrow_desc, Ctype.newmono arg, approx_declaration cl, Cok))
   | Pcl_let (_, _, cl) ->
       approx_declaration cl
   | Pcl_constraint (cl, _) ->
@@ -1320,9 +1331,11 @@ let rec approx_description ct =
     Pcty_arrow (l, _, ct) ->
       let arg =
         if Btype.is_optional l then Ctype.instance var_option
-        else Ctype.newvar () in
-      Ctype.newty (Tarrow ((l, Alloc_mode.global, Alloc_mode.global),
-                           arg, approx_description ct, Cok))
+        else Ctype.newvar ()
+      in
+      let arrow_desc = l, Alloc_mode.global, Alloc_mode.global in
+      Ctype.newty
+        (Tarrow (arrow_desc, Ctype.newmono arg, approx_description ct, Cok))
   | _ -> Ctype.newvar ()
 
 (*******************************)

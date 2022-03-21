@@ -22,6 +22,11 @@ open Typedtree
 open Lambda
 
 let scrape_ty env ty =
+  let ty =
+    match (Btype.repr ty).desc with
+    | Tpoly(ty, _) -> ty
+    | _ -> ty
+  in
   let ty = Ctype.expand_head_opt env (Ctype.correct_levels ty) in
   match ty.desc with
   | Tconstr (p, _, _) ->
@@ -265,7 +270,7 @@ let value_kind env ty =
 
 let function_return_value_kind env ty =
   match is_function_type env ty with
-  | Some (_lhs, rhs) -> value_kind env rhs
+  | Some (_, rhs) -> value_kind env rhs
   | None -> Pgenval
 
 (** Whether a forward block is needed for a lazy thunk on a value, i.e.

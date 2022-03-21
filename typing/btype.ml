@@ -61,6 +61,7 @@ let newmarkedgenvar () =
 let is_Tvar = function {desc=Tvar _} -> true | _ -> false
 let is_Tunivar = function {desc=Tunivar _} -> true | _ -> false
 let is_Tconstr = function {desc=Tconstr _} -> true | _ -> false
+let is_Tpoly = function {desc=Tpoly _} -> true | _ -> false
 
 let dummy_method = "*dummy method*"
 
@@ -718,6 +719,28 @@ let rec extract_label_aux hd l = function
 
 let extract_label l ls = extract_label_aux [] l ls
 
+
+                  (********************************)
+                  (*  Utilities for poly types    *)
+                  (********************************)
+
+let is_mono ty =
+  match (repr ty).desc with
+  | Tpoly(_, []) -> true
+  | Tpoly(_, _ :: _) -> false
+  | _ -> assert false
+
+let get_poly ty =
+  match (repr ty).desc with
+  | Tpoly(ty, vars) -> (ty, vars)
+  | _ ->
+    Format.eprintf "type: %a\n%!" !print_raw ty;
+    assert false
+
+let get_mono ty =
+  match (repr ty).desc with
+  | Tpoly(ty, []) -> ty
+  | _ -> assert false
 
                   (**********************************)
                   (*  Utilities for backtracking    *)
