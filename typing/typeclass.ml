@@ -179,8 +179,8 @@ let rec constructor_type constr cty =
   | Cty_signature _ ->
       constr
   | Cty_arrow (l, ty, cty) ->
-      Ctype.newty (Tarrow ((l, Alloc_mode.global, Alloc_mode.global),
-                           ty, constructor_type constr cty, Cok))
+      let arrow_desc = l, Alloc_mode.global, Alloc_mode.global, Amono in
+      Ctype.newty (Tarrow (arrow_desc, ty, constructor_type constr cty, Cok))
 
 let rec class_body cty =
   match cty with
@@ -764,9 +764,11 @@ and class_field_aux self_loc cl_num self_type meths vars
           (fun () ->
              (* Read the generalized type *)
              let (_, ty) = Meths.find lab.txt !meths in
+             let arrow_desc =
+               Nolabel, Alloc_mode.global, Alloc_mode.global, Amono
+             in
              let meth_type = mk_expected (
-               Btype.newgenty (Tarrow((Nolabel, Alloc_mode.global, Alloc_mode.global),
-                                      self_type, ty, Cok))
+               Btype.newgenty (Tarrow(arrow_desc, self_type, ty, Cok))
              ) in
              Ctype.raise_nongen_level ();
              vars := vars_local;
@@ -791,9 +793,12 @@ and class_field_aux self_loc cl_num self_type meths vars
       let field =
         lazy begin
           Ctype.raise_nongen_level ();
+          let arrow_desc =
+            Nolabel, Alloc_mode.global, Alloc_mode.global, Amono
+          in
           let meth_type = mk_expected (
             Ctype.newty
-              (Tarrow ((Nolabel, Alloc_mode.global, Alloc_mode.global), self_type,
+              (Tarrow (arrow_desc, self_type,
                        Ctype.instance Predef.type_unit, Cok))
           ) in
           vars := vars_local;
@@ -1035,15 +1040,9 @@ and class_expr_aux cl_num val_env met_env scl =
       in
       class_expr cl_num val_env met_env sfun
   | Pcl_fun (l, None, spat, scl') ->
-      if !Clflags.principal then Ctype.begin_def ();
       let (pat, pv, val_env', met_env) =
         Typecore.type_class_arg_pattern cl_num val_env met_env l spat
       in
-      if !Clflags.principal then begin
-        Ctype.end_def ();
-        let gen {pat_type = ty} = Ctype.generalize_structure ty in
-        iter_pattern gen pat
-      end;
       let pv =
         List.map
           begin fun (id, id', _ty) ->
@@ -1307,8 +1306,8 @@ let rec approx_declaration cl =
       let arg =
         if Btype.is_optional l then Ctype.instance var_option
         else Ctype.newvar () in
-      Ctype.newty (Tarrow ((l, Alloc_mode.global, Alloc_mode.global),
-                           arg, approx_declaration cl, Cok))
+      let arrow_desc = l, Alloc_mode.global, Alloc_mode.global, Amono in
+      Ctype.newty (Tarrow (arrow_desc, arg, approx_declaration cl, Cok))
   | Pcl_let (_, _, cl) ->
       approx_declaration cl
   | Pcl_constraint (cl, _) ->
@@ -1321,8 +1320,8 @@ let rec approx_description ct =
       let arg =
         if Btype.is_optional l then Ctype.instance var_option
         else Ctype.newvar () in
-      Ctype.newty (Tarrow ((l, Alloc_mode.global, Alloc_mode.global),
-                           arg, approx_description ct, Cok))
+      let arrow_desc = l, Alloc_mode.global, Alloc_mode.global, Amono in
+      Ctype.newty (Tarrow (arrow_desc, arg, approx_description ct, Cok))
   | _ -> Ctype.newvar ()
 
 (*******************************)

@@ -1204,8 +1204,7 @@ and transl_let ~scopes ?(add_regions=false) ?(in_structure=false)
       let idlist =
         List.map
           (fun {vb_pat=pat} -> match pat.pat_desc with
-              Tpat_var (id,_) -> id
-            | Tpat_alias ({pat_desc=Tpat_any}, id,_) -> id
+            | Tpat_var (id,_) -> id
             | _ -> assert false)
         pat_expr_list in
       let transl_case {vb_expr=expr; vb_attributes; vb_loc; vb_pat} id =

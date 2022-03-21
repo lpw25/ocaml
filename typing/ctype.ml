@@ -1547,7 +1547,7 @@ let prim_mode mvar = function
 
 let rec instance_prim_locals locals mvar macc finalret ty =
   match locals, (repr ty).desc with
-  | l :: locals, Tarrow ((lbl,_,mret),arg,ret,commu) ->
+  | l :: locals, Tarrow ((lbl,_,mret,sort),arg,ret,commu) ->
      let marg = prim_mode mvar l in
      let macc = Alloc_mode.join [marg; mret; macc] in
      let mret =
@@ -1556,7 +1556,7 @@ let rec instance_prim_locals locals mvar macc finalret ty =
        | _ :: _ -> macc (* curried arrow *)
      in
      let ret = instance_prim_locals locals mvar macc finalret ret in
-     newty2 ty.level (Tarrow ((lbl,marg,mret),arg,ret, commu))
+     newty2 ty.level (Tarrow ((lbl,marg,mret,sort),arg,ret, commu))
   | _ :: _, _ -> assert false
   | [], _ ->
      ty
@@ -2339,8 +2339,8 @@ let rec mcomp type_pairs env t1 t2 =
         | (Tvar _, _)
         | (_, Tvar _)  ->
             ()
-        | (Tarrow ((l1,_,_), t1, u1, _), Tarrow ((l2,_,_), t2, u2, _))
-          when l1 = l2 || not (is_optional l1 || is_optional l2) ->
+        | (Tarrow ((l1,_,_,s1), t1, u1, _), Tarrow ((l2,_,_,s2), t2, u2, _))
+          when (l1 = l2 || not (is_optional l1 || is_optional l2)) && s1 = s2 ->
             mcomp type_pairs env t1 t2;
             mcomp type_pairs env u1 u2;
         | (Ttuple tl1, Ttuple tl2) ->
@@ -2627,6 +2627,12 @@ let unify_alloc_mode a b =
   | Ok () -> ()
   | Error () -> raise (Unify [])
 
+let unify_arrow_sort a b =
+  match a, b with
+  | Apoly, Apoly -> ()
+  | Amono, Amono -> ()
+  | Apoly, Amono | Amono, Apoly -> raise (Unify [])
+
 (* force unification in Reither when one side has a non-conjunctive type *)
 let rigid_variants = ref false
 
@@ -2773,12 +2779,13 @@ and unify3 env t1 t1' t2 t2' =
     end;
     try
       begin match (d1, d2) with
-        (Tarrow ((l1,a1,r1), t1, u1, c1),
-         Tarrow ((l2,a2,r2), t2, u2, c2))
+        (Tarrow ((l1,a1,r1,s1), t1, u1, c1),
+         Tarrow ((l2,a2,r2,s2), t2, u2, c2))
            when
-             (l1 = l2 ||
+             ((l1 = l2 ||
               (!Clflags.classic || !umode = Pattern) &&
-               not (is_optional l1 || is_optional l2)) ->
+               not (is_optional l1 || is_optional l2)))
+             && s1 = s2 ->
           unify_alloc_mode a1 a2;
           unify_alloc_mode r1 r2;
           unify  env t1 t2; unify env  u1 u2;
@@ -3258,20 +3265,27 @@ let expand_head_trace env t =
    (2) the original label is not optional
 *)
 
-let filter_arrow env t l =
+let filter_arrow env t l default_sort =
   let t = expand_head_trace env t in
   match t.desc with
     Tvar _ ->
       let lv = t.level in
-      let t1 = newvar2 lv and t2 = newvar2 lv in
+      let t1 =
+        if is_optional l then
+          newty2 lv (Tconstr(Predef.path_option,[newvar2 lv], ref Mnil))
+        else
+          newvar2 lv
+      in
+      let t2 = newvar2 lv in
       let marg = Btype.Alloc_mode.newvar () in
       let mret = Btype.Alloc_mode.newvar () in
-      let t' = newty2 lv (Tarrow ((l,marg,mret), t1, t2, Cok)) in
+      let sort = default_sort in
+      let t' = newty2 lv (Tarrow ((l,marg,mret,sort), t1, t2, Cok)) in
       link_type t t';
-      (marg, t1, mret, t2)
-  | Tarrow((l', arg, ret), t1, t2, _)
+      (marg, sort, t1, mret, t2)
+  | Tarrow((l', arg, ret, sort), t1, t2, _)
     when (l = l' || !Clflags.classic && l = Nolabel && not (is_optional l)) ->
-      (arg, t1, ret, t2)
+      (arg, sort, t1, ret, t2)
   | _ ->
       raise (Unify [])
 
@@ -3389,10 +3403,11 @@ let rec moregen inst_nongen type_pairs env t1 t2 =
               moregen_occur env t1'.level t2;
               update_scope t1'.scope t2;
               link_type t1' t2
-          | (Tarrow ((l1,a1,r1), t1, u1, _),
-             Tarrow ((l2,a2,r2), t2, u2, _)) when
-               (l1 = l2 
-                || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
+          | (Tarrow ((l1,a1,r1,s1), t1, u1, _),
+             Tarrow ((l2,a2,r2,s2), t2, u2, _)) when
+               (l1 = l2
+                || !Clflags.classic && not (is_optional l1 || is_optional l2))
+               && s1 = s2 ->
               moregen inst_nongen type_pairs env t1 t2;
               moregen inst_nongen type_pairs env u1 u2;
               (* FIXME *)
@@ -3664,10 +3679,11 @@ let rec eqtype rename type_pairs subst env t1 t2 =
                 then raise (Unify []);
                 subst := (t1', t2') :: !subst
               end
-          | (Tarrow ((l1,a1,r1), t1, u1, _),
-             Tarrow ((l2,a2,r2), t2, u2, _)) when
+          | (Tarrow ((l1,a1,r1,s1), t1, u1, _),
+             Tarrow ((l2,a2,r2,s2), t2, u2, _)) when
                (l1 = l2
-                || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
+                || !Clflags.classic && not (is_optional l1 || is_optional l2))
+               && s1 = s2 ->
               eqtype rename type_pairs subst env t1 t2;
               eqtype rename type_pairs subst env u1 u2;
               eqtype_alloc_mode a1 a2;
@@ -4348,10 +4364,16 @@ let rec subtype_rec env trace t1 t2 cstrs =
     match (t1.desc, t2.desc) with
       (Tvar _, _) | (_, Tvar _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
-    | (Tarrow((l1,a1,r1), t1, u1, _),
-       Tarrow((l2,a2,r2), t2, u2, _)) when
+    | (Tarrow((l1,a1,r1,s1), t1, u1, _),
+       Tarrow((l2,a2,r2,s2), t2, u2, _)) when
          (l1 = l2
           || !Clflags.classic && not (is_optional l1 || is_optional l2)) ->
+        let t1, t2 =
+          match s1, s2 with
+          | Amono, Amono | Apoly, Apoly -> t1, t2
+          | Amono, Apoly -> newty2 u1.level (Tpoly(t1, [])), t2
+          | Apoly, Amono -> t1, newty2 t2.level (Tpoly(t2, []))
+        in
         let cstrs = subtype_rec env (Trace.diff t2 t1::trace) t2 t1 cstrs in
         unify_alloc_mode a1 a2; (* FIXME *)
         unify_alloc_mode r1 r2;
@@ -4596,7 +4618,7 @@ let remove_mode_variables ty =
     if TypeSet.mem ty !visited then () else begin
       visited := TypeSet.add ty !visited;
       match ty.desc with
-      | Tarrow ((_,marg,mret),targ,tret,_) ->
+      | Tarrow ((_,marg,mret,_),targ,tret,_) ->
          let _ = Btype.Alloc_mode.constrain_lower marg in
          let _ = Btype.Alloc_mode.constrain_lower mret in
          go targ; go tret

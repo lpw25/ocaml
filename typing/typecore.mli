@@ -211,6 +211,8 @@ type error =
   | Param_mode_mismatch of type_expr
   | Uncurried_function_escapes
   | Local_return_annotation_mismatch of Location.t
+  | Optional_poly_param
+  | Abstract_not_poly of type_expr * type_forcing_context option
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error

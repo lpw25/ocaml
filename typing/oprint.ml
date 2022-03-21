@@ -270,6 +270,9 @@ let rec print_out_type_0 mode ppf =
   function
   | Otyp_alias (ty, s) ->
       fprintf ppf "@[%a@ as %a@]" (print_out_type_0 mode) ty pr_var s
+  | Otyp_poly ([], ty) ->
+    fprintf ppf "@[<hov 2>_.@ %a@]"
+      (print_out_type_0 mode) ty
   | Otyp_poly (sl, ty) ->
       fprintf ppf "@[<hov 2>%a.@ %a@]"
         pr_vars sl

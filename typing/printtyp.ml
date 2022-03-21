@@ -485,6 +485,10 @@ let string_of_label = function
   | Labelled s -> s
   | Optional s -> "?"^s
 
+let print_sort ppf = function
+  | Apoly -> fprintf ppf "Apoly"
+  | Amono -> fprintf ppf "Amono"
+
 let visited = ref []
 let rec raw_type ppf ty =
   let ty = safe_repr [] ty in
@@ -496,10 +500,10 @@ let rec raw_type ppf ty =
 and raw_type_list tl = raw_list raw_type tl
 and raw_type_desc ppf = function
     Tvar name -> fprintf ppf "Tvar %a" print_name name
-  | Tarrow((l,arg,ret),t1,t2,c) ->
-      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a),@,%a,@,%a,@,%s)@]"
+  | Tarrow((l,arg,ret,srt),t1,t2,c) ->
+      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a,%a),@,%a,@,%a,@,%s)@]"
         (string_of_label l) Alloc_mode.print arg Alloc_mode.print ret
-        raw_type t1 raw_type t2
+        print_sort srt raw_type t1 raw_type t2
         (safe_commu_repr [] c)
   | Ttuple tl ->
       fprintf ppf "@[<1>Ttuple@,%a@]" raw_type_list tl
@@ -962,7 +966,7 @@ let rec tree_of_typexp sch ty =
         let non_gen = is_non_gen sch ty in
         let name_gen = if non_gen then new_weak_name ty else new_name in
         Otyp_var (non_gen, name_of_type name_gen ty)
-    | Tarrow ((l, marg, mret), ty1, ty2, _) ->
+    | Tarrow ((l, marg, mret, srt), ty1, ty2, _) ->
         let lab =
           if !print_labels || is_optional l then string_of_label l else ""
         in
@@ -973,6 +977,10 @@ let rec tree_of_typexp sch ty =
               when Path.same path Predef.path_option ->
                 tree_of_typexp sch ty
             | _ -> Otyp_stuff "<hidden>"
+          else if srt = Apoly then
+            match (repr ty1).desc with
+            | Tpoly(ty1, []) -> Otyp_poly ([], tree_of_typexp sch ty1)
+            | _ -> tree_of_typexp sch ty1
           else tree_of_typexp sch ty1 in
         let am =
           match Alloc_mode.check_const marg with

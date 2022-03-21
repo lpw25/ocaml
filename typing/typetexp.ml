@@ -48,6 +48,7 @@ type error =
   | Opened_object of Path.t option
   | Not_an_object of type_expr
   | Local_not_enabled
+  | Polymorphic_optional_param
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -164,6 +165,11 @@ let get_alloc_mode styp =
   | Error () ->
      raise (Error(styp.ptyp_loc, Env.empty, Local_not_enabled))
 
+let get_param_sort styp =
+  match styp.ptyp_desc with
+  | Ptyp_poly _ -> Apoly
+  | _ -> Amono
+
 let rec extract_params styp =
   let final styp =
     [], styp, get_alloc_mode styp
@@ -171,11 +177,12 @@ let rec extract_params styp =
   match styp.ptyp_desc with
   | Ptyp_arrow (l, a, r) ->
       let arg_mode = get_alloc_mode a in
+      let sort = get_param_sort a in
       let params, ret, ret_mode =
         if Builtin_attributes.has_curry r.ptyp_attributes then final r
         else extract_params r
       in
-      (l, arg_mode, a) :: params, ret, ret_mode
+      (l, arg_mode, sort, a) :: params, ret, ret_mode
   | _ -> final styp
 
 let new_pre_univar ?name () =
@@ -223,7 +230,7 @@ and transl_type_aux env policy mode styp =
       let args, ret, ret_mode = extract_params styp in
       let rec loop acc_mode args =
         match args with
-        | (l, arg_mode, arg) :: rest ->
+        | (l, arg_mode, sort, arg) :: rest ->
           let arg_cty = transl_type env policy arg_mode arg in
           let acc_mode = Alloc_mode.join_const acc_mode arg_mode in
           let ret_mode =
@@ -233,6 +240,8 @@ and transl_type_aux env policy mode styp =
           in
           let ret_cty = loop acc_mode rest in
           let arg_ty = arg_cty.ctyp_type in
+          if Btype.is_optional l && sort = Apoly then
+            raise (Error (arg.ptyp_loc, env, Polymorphic_optional_param));
           let arg_ty =
             if Btype.is_optional l
             then newty (Tconstr(Predef.path_option,[arg_ty], ref Mnil))
@@ -240,9 +249,9 @@ and transl_type_aux env policy mode styp =
           in
           let arg_mode = Alloc_mode.of_const arg_mode in
           let ret_mode = Alloc_mode.of_const ret_mode in
+          let arrow_desc = (l, arg_mode, ret_mode, sort) in
           let ty =
-            newty
-              (Tarrow((l,arg_mode,ret_mode), arg_ty, ret_cty.ctyp_type, Cok))
+            newty (Tarrow(arrow_desc, arg_ty, ret_cty.ctyp_type, Cok))
           in
           ctyp (Ttyp_arrow (l, arg_cty, ret_cty)) ty
         | [] -> transl_type env policy ret_mode ret
@@ -845,6 +854,8 @@ let report_error env ppf = function
   | Local_not_enabled ->
       fprintf ppf "@[The local extension is disabled@ \
                      To enable it, pass the '-extension local' flag@]"
+  | Polymorphic_optional_param ->
+      fprintf ppf "@[Optional parameters cannot be polymorphic@]"
 
 let () =
   Location.register_error_of_exn

@@ -41,7 +41,7 @@ and type_desc =
   | Tpackage of Path.t * Longident.t list * type_expr list
 
 and arrow_desc =
-  arg_label * alloc_mode * alloc_mode
+  arg_label * alloc_mode * alloc_mode * arrow_sort
 
 and alloc_mode_const = Global | Local
 
@@ -56,6 +56,10 @@ and alloc_mode_var = {
 and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
+
+and arrow_sort =
+  | Apoly
+  | Amono
 
 and row_desc =
     { row_fields: (label * row_field) list;

@@ -130,7 +130,7 @@ and type_desc =
   (** Type of a first-class module (a.k.a package). *)
 
 and arrow_desc =
-  arg_label * alloc_mode * alloc_mode
+  arg_label * alloc_mode * alloc_mode * arrow_sort
 
 and alloc_mode_const = Global | Local
 
@@ -146,6 +146,9 @@ and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
 
+and arrow_sort =
+  | Apoly
+  | Amono
 
 (** [  `X | `Y ]       (row_closed = true)
     [< `X | `Y ]       (row_closed = true)
