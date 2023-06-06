@@ -214,8 +214,8 @@ type error =
   | Effect_type_clash_handler of Ctype.Unification_trace.t
   | Handler_name_clash of string * string
   | Operation_arity_mismatch of Longident.t * int * int
-  | Unmatched_effect_adjustment_binding
-  | Unused_effect_adjustment_binding
+  | Unmatched_effect_renaming_binding
+  | Unused_effect_renaming_binding
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error

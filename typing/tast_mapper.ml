@@ -413,8 +413,8 @@ let expr sub x =
     | Texp_probe_is_enabled _ as e -> e
     | Texp_perform(n, lid, od, args) ->
         Texp_perform(n, lid, od, List.map (sub.expr sub) args)
-    | Texp_effect_adjustment(adj, exp) ->
-        Texp_effect_adjustment(adj, sub.expr sub exp)
+    | Texp_rename_effects(adj, exp) ->
+        Texp_rename_effects(adj, sub.expr sub exp)
   in
   {x with exp_extra; exp_desc; exp_env}
 

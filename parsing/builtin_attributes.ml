@@ -507,7 +507,7 @@ let has_operation attrs =
   else
     Ok false
 
-let outer_adjustment_item_of_expression pexp =
+let outer_renaming_item_of_expression pexp =
   match pexp.pexp_desc with
   | Pexp_extension({txt=name}, PPat(pat, None)) -> begin
       match pat.ppat_desc with
@@ -517,14 +517,14 @@ let outer_adjustment_item_of_expression pexp =
     end
   | _ -> None
 
-let outer_adjustment_list_of_payload = function
+let outer_renaming_list_of_payload = function
   | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] ->
-      List.filter_map outer_adjustment_item_of_expression pexps
+      List.filter_map outer_renaming_item_of_expression pexps
   | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] ->
-      List.filter_map outer_adjustment_item_of_expression [pexp]
+      List.filter_map outer_renaming_item_of_expression [pexp]
   | _ -> []  
 
-let inner_adjustment_item_of_expression pexp =
+let inner_renaming_item_of_expression pexp =
   match pexp.pexp_desc with
   | Pexp_extension({txt=name}, PPat(pat, None)) -> begin
       match pat.ppat_desc with
@@ -533,14 +533,14 @@ let inner_adjustment_item_of_expression pexp =
     end
   | _ -> None
 
-let inner_adjustment_list_of_payload = function
+let inner_renaming_list_of_payload = function
   | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] ->
-      List.filter_map inner_adjustment_item_of_expression pexps
+      List.filter_map inner_renaming_item_of_expression pexps
   | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] ->
-      List.filter_map inner_adjustment_item_of_expression [pexp]
+      List.filter_map inner_renaming_item_of_expression [pexp]
   | _ -> []  
 
-let effect_adjustment_of_payload payload =
+let effect_renaming_of_payload payload =
     match payload with
   | PStr [{pstr_desc=Pstr_eval({pexp_desc=
       Pexp_tuple([{pexp_desc=Pexp_extension({txt="outer"}, outer)};
@@ -548,6 +548,6 @@ let effect_adjustment_of_payload payload =
       if not (Clflags.Extension.is_enabled Effects) then
         Error `Disabled
       else
-        Ok (outer_adjustment_list_of_payload outer,
-            inner_adjustment_list_of_payload inner)
+        Ok (outer_renaming_list_of_payload outer,
+            inner_renaming_list_of_payload inner)
   | _ -> Error `Payload

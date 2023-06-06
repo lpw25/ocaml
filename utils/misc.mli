@@ -194,6 +194,14 @@ module Stdlib : sig
     val split_last_exn : string -> split_on:char -> string * string
   end
 
+  module Int : sig
+    include module type of struct include Int end
+    module Set : Set.S with type elt = int
+    module Map : Map.S with type key = int
+    module Tbl : Hashtbl.S with type key = int
+
+  end    
+
   external compare : 'a -> 'a -> int = "%compare"
 end
 

@@ -16,6 +16,7 @@
 (* Representation of types and declarations *)
 
 open Asttypes
+open Misc.Stdlib
 
 (* Type expressions for the core language *)
 
@@ -56,13 +57,6 @@ and alloc_mode_var = {
 and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
-
-and effect_context =
-  { effects : (string * type_expr option) list }
-
-and effect_adjustment =
-  { outer : string list;
-    inner : (string * int) list; }
 
 and row_desc =
     { row_fields: (label * row_field) list;

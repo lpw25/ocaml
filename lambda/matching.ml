@@ -3616,7 +3616,7 @@ let for_trywith_effs ~scopes value_kind loc param eff_pat_acts =
            (Lprim (Pintcomp Ceq, [ depth_lam; zero_lam ], sloc),
             act, reperform, value_kind)
        in
-       let tag = Btype.hash_variant name in
+       let tag = Effect_context.hash_name name in
        (tag, lam) :: acc)
       eff_pat_acts []
   in
@@ -3685,66 +3685,15 @@ let compile_adjustment_actions sloc actions count depth_lam param =
       call_switcher Pintval sloc (Some shift_depth) depth_lam
         min_int max_int int_lambda_list      
 
-module Int_tbl = Hashtbl.Make(struct
-                   type t = int
-                   let equal = Int.equal
-                   let hash = Hashtbl.hash
-                   end)
-module Int_map = Map.Make(Int)
-
-let match_adjustment sloc outer inner param =
+let match_adjustment sloc actions param =
   let name_id = Ident.create_local "name" in
   let name_def = Lprim (Pfield (0, Reads_vary), [param], sloc) in
   let name_lam = Lvar name_id in
   let depth_id = Ident.create_local "depth" in
   let depth_def = Lprim (Pfield (1, Reads_vary), [param], sloc) in
   let depth_lam = Lvar depth_id in
-  let outer_counts = Int_tbl.create 3 in
-  let outer_mapping =
-    List.map
-      (fun item ->
-         let name = item.outer_label in
-         let tag = Btype.hash_variant name in
-         let prev =
-           match Int_tbl.find_opt outer_counts tag with
-           | None -> 0
-           | Some i -> i
-         in
-         Int_tbl.replace outer_counts tag (prev + 1);
-         tag, prev)
-      outer
-  in
-  let outer_mapping = Array.of_list outer_mapping in
-  let actions =
-    List.fold_left
-      (fun actions item ->
-        let name = item.inner_label in
-        let idx = item.inner_index in
-        let tag = Btype.hash_variant name in
-        let action = outer_mapping.(idx) in
-        Int_map.update tag
-          (function
-           | None ->
-               let count =
-                 match Int_tbl.find_opt outer_counts tag with
-                 | Some count ->
-                     Int_tbl.remove outer_counts tag;
-                     count
-                 | None ->
-                     0
-               in
-               Some ([action], count)
-           | Some (actions, count) -> Some (action :: actions, count))
-          actions)
-      Int_map.empty inner
-  in
-  let actions =
-    Int_tbl.fold
-      (fun tag count actions -> Int_map.add tag ([], count) actions)
-      outer_counts actions
-  in
   let int_lambda_list =
-    Int_map.fold
+    Int.Map.fold
       (fun tag (rev_actions, count) int_lambda_list ->
         let lambda =
           compile_adjustment_actions
@@ -3763,7 +3712,7 @@ let match_adjustment sloc outer inner param =
 let for_adjustment ~scopes value_kind loc adj param =
   let sloc = Scoped_location.of_location ~scopes loc in
   if_tag sloc param 1 value_kind
-    (match_adjustment sloc adj.ea_outer adj.ea_inner param)
+    (match_adjustment sloc adj.ea_actions param)
     (Lprim (Praise Raise_reraise, [ param ], Scoped_location.Loc_unknown))
 
 let simple_for_let ~scopes value_kind loc param pat body =

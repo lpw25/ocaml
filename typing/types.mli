@@ -23,6 +23,7 @@
 
 (** Asttypes exposes basic definitions shared both by Parsetree and Types. *)
 open Asttypes
+open Misc.Stdlib
 
 (** Type expressions for the core language.
 
@@ -147,12 +148,9 @@ and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
 
-and effect_context =
-  { effects : (string * type_expr option) list }
+and effect_context = type_expr Effect_context.t
 
-and effect_adjustment =
-  { outer : string list;
-    inner : (string * int) list; }
+and effect_renaming = Effect_context.Renaming.t
 
 (** [  `X | `Y ]       (row_closed = true)
     [< `X | `Y ]       (row_closed = true)

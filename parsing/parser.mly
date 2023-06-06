@@ -297,29 +297,29 @@ let mkcds_effect_type cds =
   | [] -> assert false
   | cd :: rest -> mkcd_effect_type cd :: rest
 
-let adjust_loc = mknoloc "extension.adjust"
+let renaming_loc = mknoloc "extension.renaming"
 let inner_loc = mknoloc "inner"
 let outer_loc = mknoloc "outer"
 
-let adjust_expr (name, pat) = Exp.extension (mknoloc name, PPat(pat, None))
+let renaming_expr (name, pat) = Exp.extension (mknoloc name, PPat(pat, None))
 
-let adjust_list_expr kind_loc adjs =
+let renaming_list_expr kind_loc adjs =
   let payload =
     match adjs with
     | [] -> PStr []
-    | [adj] -> PStr[Str.eval (adjust_expr adj)]
-    | adjs -> PStr[Str.eval (Exp.tuple (List.map adjust_expr adjs))]
+    | [adj] -> PStr[Str.eval (renaming_expr adj)]
+    | adjs -> PStr[Str.eval (Exp.tuple (List.map renaming_expr adjs))]
   in
   Exp.extension ~loc:Location.none (kind_loc, payload)
 
-let adjust_extension ~outer ~inner =
-  let inner = adjust_list_expr inner_loc inner in
-  let outer = adjust_list_expr outer_loc outer in
+let renaming_extension ~outer ~inner =
+  let inner = renaming_list_expr inner_loc inner in
+  let outer = renaming_list_expr outer_loc outer in
   let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
-  Exp.extension ~loc:Location.none (adjust_loc, payload)
+  Exp.extension ~loc:Location.none (renaming_loc, payload)
 
-let mkexp_adjust ~loc ~outer ~inner exp =
-  ghexp ~loc (Pexp_apply(adjust_extension ~outer ~inner, [Nolabel, exp]))
+let mkexp_renaming ~loc ~outer ~inner exp =
+  ghexp ~loc (Pexp_apply(renaming_extension ~outer ~inner, [Nolabel, exp]))
 
 (* TODO define an abstraction boundary between locations-as-pairs
    and locations-as-Location.t; it should be clear when we move from
@@ -2405,7 +2405,7 @@ expr:
          (mkexp ~loc:$sloc (Pexp_construct($3, Some $4))) }
   | EFFECT LBRACKET outer = effect_bindings DIV inner = effect_vars RBRACKET
       exp = simple_expr %prec below_HASH
-      { mkexp_adjust ~loc:$sloc ~outer ~inner exp }
+      { mkexp_renaming ~loc:$sloc ~outer ~inner exp }
 ;
 %inline expr_attrs:
   | LET MODULE ext_attributes mkrhs(module_name) module_binding_body IN seq_expr

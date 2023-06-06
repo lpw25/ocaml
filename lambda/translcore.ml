@@ -878,7 +878,7 @@ and transl_exp0 ~in_new_scope ~scopes e =
     else
       lambda_unit
   | Texp_perform(name, _, op, args) ->
-      let hash = Btype.hash_variant name in
+      let hash = Effect_context.hash_name name in
       let loc = of_location ~scopes e.exp_loc in
       let args = transl_list ~scopes args in
       let block =

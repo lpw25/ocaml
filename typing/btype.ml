@@ -795,7 +795,6 @@ let current_eff eff =
   { delayed = Single empty_effect_context;
     current = eff; }
 
-
                   (********************************)
                   (*  Utilities for poly types    *)
                   (********************************)

@@ -151,8 +151,8 @@ type error =
   | Effect_type_clash_handler of Ctype.Unification_trace.t
   | Handler_name_clash of string * string
   | Operation_arity_mismatch of Longident.t * int * int
-  | Unmatched_effect_adjustment_binding
-  | Unused_effect_adjustment_binding
+  | Unmatched_effect_renaming_binding
+  | Unused_effect_renaming_binding
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -602,9 +602,9 @@ let subeffect_expr_effs loc env exp_eff eff =
 let subeffect env exp eff =
   subeffect_expr_effs exp.exp_loc env exp.exp_eff eff
 
-let adjust_effect env exp adj =
+let rename_effect env exp adj =
   let eff = exp.exp_eff in
-  match Ctype.adjust_effect_context env eff.current adj with
+  match Ctype.rename_effect_context env eff.current adj with
   | current -> { eff with current }
   | exception Unify trace ->
       raise (Error(exp.exp_loc, env, Effect_type_clash(trace, true)))
@@ -622,7 +622,7 @@ let poly_eff env exp eff =
 let match_eff eff =
   eff.delayed, global_eff eff
 
-let type_adjustment env outer inner =
+let type_renaming env outer inner =
   let vars = String.Tbl.create 3 in
   let vars_unused = String.Tbl.create 3 in
   let _, rev_outer, rev_touter =
@@ -653,7 +653,7 @@ let type_adjustment env outer inner =
         let idx =
           match String.Tbl.find vars var.txt with
           | exception Not_found ->
-              raise (Error (var.loc, env, Unmatched_effect_adjustment_binding))
+              raise (Error (var.loc, env, Unmatched_effect_renaming_binding))
           | idx -> idx
         in
         String.Tbl.remove vars_unused var.txt;
@@ -667,12 +667,56 @@ let type_adjustment env outer inner =
   let inner = List.rev rev_inner in
   let tinner = List.rev rev_tinner in
   String.Tbl.iter
-    (fun _ loc -> raise (Error (loc, env, Unused_effect_adjustment_binding)))
+    (fun _ loc -> raise (Error (loc, env, Unused_effect_renaming_binding)))
     vars_unused;
-  let adjustment = { inner; outer } in
+  let outer_counts = Int.Tbl.create 3 in
+  let outer_mapping =
+    List.map
+      (fun item ->
+         let name = item.outer_label in
+         let tag = Btype.hash_variant name in
+         let prev =
+           match Int.Tbl.find_opt outer_counts tag with
+           | None -> 0
+           | Some i -> i
+         in
+         Int.Tbl.replace outer_counts tag (prev + 1);
+         tag, prev)
+      outer
+  in
+  let outer_mapping = Array.of_list outer_mapping in
+  let actions =
+    List.fold_left
+      (fun actions item ->
+        let name = item.inner_label in
+        let idx = item.inner_index in
+        let tag = Btype.hash_variant name in
+        let action = outer_mapping.(idx) in
+        Int.Map.update tag
+          (function
+           | None ->
+               let count =
+                 match Int.Tbl.find_opt outer_counts tag with
+                 | Some count ->
+                     Int.Tbl.remove outer_counts tag;
+                     count
+                 | None ->
+                     0
+               in
+               Some ([action], count)
+           | Some (actions, count) -> Some (action :: actions, count))
+          actions)
+      Int.Map.empty inner
+  in
+  let actions =
+    Int.Tbl.fold
+      (fun tag count actions -> Int.Map.add tag ([], count) actions)
+      outer_counts actions
+  in
   { ea_inner = tinner;
     ea_outer = touter;
-    ea_type = adjustment; }
+    ea_actions = actions;
+    ea_type = renaming; }
 
 (* Specific version of type_option, using newty rather than newgenty *)
 
@@ -3352,7 +3396,7 @@ let rec is_nonexpansive exp =
   | Texp_perform(_, _, _, el) ->
       (* TODO: Is this really safe? *)
       List.for_all is_nonexpansive el
-  | Texp_effect_adjustment(_, e) -> is_nonexpansive e
+  | Texp_rename_effects(_, e) -> is_nonexpansive e
   | Texp_array (_ :: _)
   | Texp_apply _
   | Texp_try _
@@ -3737,7 +3781,7 @@ let check_partial_application statement exp =
                 check e1; check e2
             | Texp_let (_, _, e) | Texp_sequence (_, e) | Texp_open (_, e)
             | Texp_letexception (_, e) | Texp_letmodule (_, _, _, _, e)
-            | Texp_effect_adjustment(_, e) ->
+            | Texp_rename_effects(_, e) ->
                 check e
             | Texp_apply _ | Texp_send _ | Texp_new _ | Texp_letop _ ->
                 Location.prerr_warning exp_loc
@@ -4241,21 +4285,21 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           exp_env = env }
 
   | Pexp_apply
-      ({ pexp_desc = Pexp_extension({txt = "extension.adjust"}, payload) },
+      ({ pexp_desc = Pexp_extension({txt = "extension.renaming"}, payload) },
        [Nolabel, arg]) ->
       let outer, inner =
-        match Builtin_attributes.effect_adjustment_of_payload payload with
+        match Builtin_attributes.effect_renaming_of_payload payload with
         | Ok (outer, inner) -> outer, inner
         | Error `Disabled ->
             raise (Typetexp.Error (loc, Env.empty, Effects_not_enabled))
         | Error `Payload -> raise(Error(loc, env, Bad_effect_payload))
       in
-      let adjustment = type_adjustment env outer inner in
+      let renaming = type_renaming env outer inner in
       let newenv = Env.add_lock Value_mode.global env in
       let arg = type_expect newenv mode_global arg ty_expected_explained in
-      let eff = adjust_effect env arg adjustment.ea_type in
+      let eff = rename_effect env arg renaming.ea_type in
       rue {
-          exp_desc = Texp_effect_adjustment(adjustment, arg);
+          exp_desc = Texp_rename_effects(renaming, arg);
           exp_loc = loc; exp_extra = [];
           exp_type = arg.exp_type;
           exp_eff = eff;
@@ -8085,10 +8129,10 @@ let report_error ~loc env = function
        "@[The operation %a@ expects %i argument(s),@ \
         but is applied here to %i argument(s)@]"
        longident lid expected provided
-  | Unmatched_effect_adjustment_binding ->
+  | Unmatched_effect_renaming_binding ->
       Location.errorf ~loc
         "@[This effect does not appear in the output effect context.@]"
-  | Unused_effect_adjustment_binding ->
+  | Unused_effect_renaming_binding ->
       Location.errorf ~loc
         "@[This effect binding is unused: it should be replaced with \".\".@]"
 

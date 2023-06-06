@@ -303,6 +303,17 @@ module Stdlib = struct
       String.sub str 0 ridx, String.sub str (ridx + 1) (n - ridx - 1)
   end
 
+  module Int = struct
+    include Int
+    module Set = Set.Make(Int)
+    module Map = Map.Make(Int)
+    module Tbl = Hashtbl.Make(struct
+      type t = int
+      let equal = Int.equal
+      let hash = Hashtbl.hash
+    end)
+  end
+
   external compare : 'a -> 'a -> int = "%compare"
 end
 
