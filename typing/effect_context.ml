@@ -183,33 +183,45 @@ let filter name effs : (_, join_error) Result.t =
       Error (Different_effect_names(name, name'))
   | _ -> Ok (tyo, effs)
 
-module Renaming : sig
+module General_adjustment : sig
 
-  type rename =
-    { hash : int;
-      rev_index : int; }     
+  type 'a adjust =
+    | Rename of
+        { to_hash : int;
+          to_index : int; }
+    | Consume of 'a
 
-  type t =
-    { backwards : (string * rename list) list Int.Map.t;
-      forwards : (string * rename) list Int.Map.t }
+  type 'a t =
+    { image : string array Int.Map.t;
+      adjustments : (string * 'a adjust) array Int.Map.t }
 
-  let expected_context newvar t =
-    let rev_vars_tbl = Int.Tbl.create 3 in
+  let identity =
+    let image = Int.Map.empty in
+    let adjustments = Int.Map.empty in
+    { image; adjustments }
+
+  let expected_context consumed newvar t =
+    let vars_tbl = Int.Tbl.create 3 in
     Int.Map.iter
-      (fun hash rev_names ->
-        let rev_vars = List.map (fun _ -> newvar ()) rev_names in
-        Int.Tbl.add rev_vars_tbl hash rev_vars)
-      t.backwards;
+      (fun hash names ->
+        let vars = Array.map (fun _ -> newvar ()) names in
+        Int.Tbl.add vars_tbl hash vars)
+      t.image;
     let effects =
       Int.Map.fold
         (fun eff _ renames ->
-          List.fold_left
-            (fun eff (name, { hash; rev_index }) ->
-              let rev_vars = Int.Tbl.find rev_vars_tbl hash in
-              let var = List.nth rev_vars rev_index in
-              (name, Some var))
+          Array.fold_left
+            (fun eff (name, adjustment) ->
+              match adjustment with
+              | Rename { to_hash; to_index } ->
+                  let vars = Int.Tbl.find vars_tbl to_hash in
+                  let var = vars.(to_index) in
+                  (name, Some var)
+              | Consume a ->
+                  let tyo = consumed a in
+                  (name, tyo))
            eff renames)
-        [] t.forwards
+        [] t.renames
     in
     { effects }
 
@@ -218,77 +230,227 @@ module Renaming : sig
 
   exception Apply_error of apply_error
 
-  let apply join eff t =
-    let rev_outer = Int.Tbl.create 3 in
+  let apply consume contract eff t =
+    let outer = Int.Tbl.create 3 in
     Int.Map.iter
-      (fun hash rev_names ->
-        let rev_initial = List.map (fun name -> name, ref None) rev_names in
-        Int.Tbl.add rev_outer hash rev_initial)
+      (fun hash names ->
+        let initial = Array.map (fun name -> name, None) names in
+        Int.Tbl.add outer hash initial)
       t.image;
     let eff =
       Int.Map.fold
         (fun eff hash renames ->
-          List.fold_left
-            (fun eff { from_name; to_hash; to_rev_index } ->
+          Array.fold_left
+            (fun eff (name, adjustment) ->
               let name', tyo, eff = split_effects hash eff in
               Option.iter
                  (fun ty ->
-                   if not (String.equal from_name name') then begin
-                     let err = Different_effect_names(from_name, name') in
+                   if not (String.equal name name') then begin
+                     let err = Different_effect_names(from_name, name) in
                      raise (Apply_errror err)
                    end;
-                   let _, tyo_ref =
-                     List.nth to_rev_index (Hashtbl.find rev_outer hash)
-                   in
-                   let ty =
-                     match !tyo_ref with
-                     | None -> ty
-                     | Some old_ty -> join name' ty old_ty
-                   in
-                   tyo_ref := Some ty)
+                   match adjustment with
+                   | Rename { to_hash; to_index } ->
+                       let outer = Hashtbl.find outer to_hash in
+                       let outer_name, outer_tyo = outer.(to_index) in
+                       let outer_ty =
+                         match outer_tyo with
+                         | None -> ty
+                         | Some outer_ty -> contract name ty old_ty
+                       in
+                       outer.(to_index) <- (outer_name, Some outer_ty)
+                   | Consume a ->
+                       consume name ty a)
                  tyo;
-               eff)
+              eff)
             eff renames)
         eff t.renames
     in
     let effects =
       Int.Tbl.fold
-        (fun effects _ renames ->
-          List.fold_left
-            (fun effects (name, tyo_ref) -> (name, !tyo_ref) :: effects)
-            effects renames)
-        rev_outer
+        (fun effects _ outer ->
+          Array.fold_left
+            (fun effects outer -> outer :: effects)
+            effects outer)
+        outer
     in
     { effects }
 
-  let rec extra l1 l2 =
-    match l1, l2 with
-    | [], l -> [], l
-    | l, [] -> l, []
-    | _ :: l1, _ :: l2 -> extra l1 l2
+  let shift to_hash to_index t =
+    match Int.Map.find_opt to_hash t.image with
+    | None -> to_index
+    | Some image -> to_index + Array.length image
+
+  let apply_adjust convert mismatch t (name, adjust) image =
+    let adjust =
+      match adjust with
+      | Consume _ -> convert adjust
+      | Rename { to_hash; to_index } -> begin
+          match Int.Map.find_opt to_hash t.adjustments  with
+          | None ->
+              let to_index = shift to_hash to_index t in
+              Rename { to_hash; to_index }
+          | Some adjusts ->
+              let matched = Array.length adjusts in
+              if to_index < matched then begin
+                let image = Int.Map.find to_hash image in
+                let to_name = image.(to_index) in
+                let match_name, match_adjust = adjusts.(to_index) in
+                if not (String.equal to_name match_name) then
+                  mismatch to_name match_name
+                else
+                  match_adjust
+              end else begin
+                let to_index = shift to_hash to_index t in
+                Rename { to_hash; to_index }
+              end
+        end
+    in
+    (name, adjust)
+
+  let compose convert mismatch t1 t2 =
+    let adjustments =
+      Int.Map.map
+        (fun _ adjusts2 -> Array.map (apply_adjust convert t1) adjusts2)
+        t2.adjustments
+    in
+    let image = t1.image in
+    let diff =
+      Int.Map.merge
+        (fun hash adjusts1 image2 ->
+          match adjusts1, image2 with
+          | None, None -> None
+          | Some adjusts1, None -> Some (adjusts1, [||])
+          | None, Some image2 -> Some ([||], image2)
+          | Some adjusts1, Some image2 ->
+              let length1 = Array.length adjusts1 in
+              let length2 = Array.length image2 in
+              let shared = min length1 length2 in
+              let extra1 = length1 - shared in
+              let extra2 = length2 - shared in
+              let adjusts = Array.sub adjusts1 shared extra1 in
+              let image = Array.sub image2 shared extra2 in
+              adjusts, image)
+        t1.adjustments t2.image
+    in
+    let t = { adjustments; image } in
+    Int.Map.fold
+      (fun hash (adjusts1, image2) t ->
+        let adjusts =
+          if Array.length adjusts1 = 0 then t.adjustments
+          else begin
+              Int.Map.update hash
+                (function
+                 | None -> Some adjusts1
+                 | Some adjusts2 ->
+                     Some (Array.append adjusts2 adjusts1))
+                t.adjustments
+          end
+        in
+        let image =
+          if Array.length image2 = 0 then t.image
+          else begin
+              Int.Map.update hash
+                (function
+                 | None -> Some image2
+                 | Some image1 ->
+                     Some (Array.append image1 image2))
+                t.image
+          end
+        in
+        { image; adjustments })
+      diff t
+
+  let count_identities hash adjusts counts images =
+    let rec loop rev_index =
+      let from_index = (Array.length adjusts) - rev_index in
+      let name, adjust = adjusts.(from_index) in
+      match adjust with
+      | Consume _ -> 0
+      | Rename { to_hash; to_index } ->
+          if not (Int.equal hash to_hash) then rev_index - 1
+          else begin
+            let to_rev_index = (Array.length images) - to_index in
+            if not (Int.equal rev_index to_rev_index) then rev_index - 1
+            else begin
+              if not (Int.equal counts.(to_index) 1) then rev_index - 1
+              else loop (rev_index + 1)
+            end
+          end
+    in
+    loop 0
+
+  let normalize t =
+    let counts = Int.Map.map (fun _ names -> Array.map (fun _ -> 0)) t.image in
+    Int.Map.iter
+      (fun from_hash adjusts ->
+        Array.iter
+          (fun (name, adjust) ->
+            match adjust with
+            | Consume _ -> ()
+            | Rename { to_hash; to_index } ->
+                let count = Int.Map.find to_hash counts in
+                count.(to_index) <- count.(to_index) + 1)
+          adjusts)
+      t.adjustments;
+    let image_ref = ref t.image in
+    let adjustments =
+      Int.Map.map
+        (fun hash adjusts ->
+          match Int.Map.find hash counts with
+          | None -> adjusts
+          | Some counts ->
+              match Int.Map.find hash image with
+              | None -> adjusts
+              | Some images ->
+                  let identities =
+                    count_identities hash adjusts counts images
+                  in
+                  if Int.equal identities 0 then adjusts
+                  else begin
+                    let adjusts =
+                      Array.sub adjusts 0 (Array.length adjusts - identities)
+                    in
+                    let images =
+                      Array.sub images 0 (Array.length images - identities)
+                    in
+                    image_ref := Int.Map.add hash images !image_ref;
+                    adjusts
+                  end)
+        t.adjustments
+    in
+    let image = !image_ref in
+    { adjustments; image }
+
+  let equal = failwith "TODO"
+
+end
+
+module Renaming = struct
+
+  type empty = |
+
+  type t = empty General_adjustment.t
+
+  let identity = General_adjustment.identity
+
+  let consume = function (_ : empty) -> .
+
+  let apply contract ctx t =
+    General_adjustment.apply contract consume
+
+  type compose_error =
+    | Different_effect_names of string * string
+
+  exception Compose_error of compose_error
+
+  let mismatch name1 name2 =
+    raise (Compose_error(Different_effect_names(name1, name2)))
 
   let compose t1 t2 =
-    let extras =
-      Int.Map.merge
-        (fun hash renames1 names2 ->
-          match renames1, names2 with
-          | None, None -> None
-          | Some renames1, None -> Some (renames, [])
-          | None, Some names2 -> Some ([], names2)
-          | Some renames1, Some names2 -> Some (extra renames1 names2))
-        t1.renames t2.image
-    in
-    let extra_images = Int.Map.map snd extras in
-    let image =
-      Int.Map.union
-        (fun names1 names2 -> names2 @ names1)
-        t1.image extra_images
-    in
-    
-    
-    
-    
+    General_adjustment.compose consume mismatch t1 t2
 
+  let normalize t = General_adjustment.normalize t
 
   type parse_error =
     | Multiply_bound_variable of string loc
@@ -300,6 +462,67 @@ module Renaming : sig
     -> inner:string loc list
     -> (t, parse_error) Result.t
 
+end
+
+module Adjustment = struct
+
+  type 'a ctx = 'a t
+
+  type 'a t = 'a option General_adjustment.t
+
+  let identity = General_adjustment.identity
+
+  type apply_error = General_adjustment.apply_error
+
+  exception Apply_error = General_adjustment.Apply_error
+
+  let apply join equal ctx t =
+    General_adjustment.apply join equal ctx t
+
+  let compose t1 t2 =
+    General_adjustment.compose
+      (fun x -> x) (fun _ _ -> None)
+      t1 t2
+
+  let normalize t = General_adjustment.normalize t
+
+  let expected_context newvar t =
+    expected_context (fun x -> x) newvar t
+
+  let compose_renaming t r =
+    General_adjustment.compose
+      (function (_ : empty) -> .) (fun _ _ -> None)
+      t1 t2
+
+  let of_extension ctx =
+    let image = Int.Map.empty in
+    let rev_adjustments =
+      List.fold_left
+        (fun rev_adjustments (name, tyo) ->
+          let hash = hash_name name in
+          Int.Map.update hash
+            (fun prev ->
+               let prev = Option.value prev ~default:[] in
+               (name, Consume tyo) :: prev)
+            rev_adjustments)
+        Int.Map.empty ctx
+    in
+    let rev_adjustments =
+      Int.Map.map
+        (fun rev_adjusts -> Array.of_list (List.rev rev_adjusts))
+        rev_adjustments
+    in
+    { image; adjustments }
+
+  let compose_extension t ctx =
+    compose t (of_extension ctx)
+
+  type equal_error =
+    | Different_effect_names of string * string
+    | Missing_effect of position * string
+
+  let equal = failwith "Not implemented"
+
   module Desc : sig
 
     type t =
@@ -309,36 +532,5 @@ module Renaming : sig
   end
 
   val desc : t -> Desc.t
-
-end
-
-module Adjustment = struct
-
-  type 'a ctx = 'a t
-
-  type 'a t =
-    | Bottom
-    | Update of
-        { renaming : Renaming.t;
-          extension : 'a ctx; }
-
-  type equal_error =
-    | Different_effect_names of string * string
-    | Missing_effect of position * string
-
-  let equal equal =
-    
-
-    ('b -> string -> 'a -> 'a -> 'b)
-    -> 'b
-    -> 'a t
-    -> 'a t
-    -> ('b, equal_error) Result.t
-
-  val is_identity : 'a t -> bool
-
-  val add_extension : 'a t -> 'a ctx -> 'a t
-
-  val add_renaming : 'a t -> Renaming.t -> 'a t
 
 end

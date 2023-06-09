@@ -65,8 +65,6 @@ module Renaming : sig
 
   val normalize : t -> t
 
-  val expected_context : (unit -> 'a) -> t -> 'a ctx
-
   type parse_error =
     | Multiply_bound_variable of string loc
     | Unmatched_effect_renaming_binding of string loc
@@ -76,16 +74,6 @@ module Renaming : sig
     outer:string loc option list
     -> inner:string loc list
     -> (t, parse_error) Result.t
-
-  module Desc : sig
-
-    type t =
-      { outer : string option list;
-        inner : string list; }
-
-  end
-
-  val desc : t -> Desc.t
 
 end
 
@@ -104,6 +92,22 @@ module Adjustment : sig
     | Missing_effect of position * string
     | Missing_input_effect 
 
+  val identity : 'a t
+
+  type apply_error =
+    | Different_effect_names of string * string
+
+  val apply :
+    (string -> 'a -> 'a -> 'a)
+    -> (string -> 'a -> 'a option -> unit)
+    -> 'a ctx -> t -> 'a ctx
+
+  val compose_extension : 'a t -> (string * 'a) list -> 'a t
+
+  val compose_renaming : 'a t -> Renaming.t -> 'a t
+
+  val compose : t -> t -> t
+
   val equal :
     ('b -> string -> 'a -> 'a -> 'b)
     -> 'b
@@ -111,10 +115,6 @@ module Adjustment : sig
     -> 'a t
     -> ('b, equal_error) Result.t
 
-  val is_identity : 'a t -> bool
-
-  val add_extension : 'a t -> (string * 'a) list -> 'a t
-
-  val add_renaming : 'a t -> Renaming.t -> 'a t
+  val apply : (string -> 'a -> 'a -> 'a) -> 'a ctx -> 'a t -> 'a ctx
 
 end
