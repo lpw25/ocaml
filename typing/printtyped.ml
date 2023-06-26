@@ -329,11 +329,11 @@ and comprehension i ppf comp_types=
     Option.iter (expression i ppf) guard
   ) comp_types
 
-and effect_renaming i ppf {ea_outer;ea_inner} =
+and effect_renaming i ppf {er_outer;er_inner} =
   line i ppf "outer:\n";
-  list (i+1) (fun i -> option i string_loc) ppf ea_outer;
+  list (i+1) (fun i -> option i string_loc) ppf er_outer;
   line i ppf "inner:\n";
-  list (i+1) string_loc ppf ea_inner
+  list (i+1) string_loc ppf er_inner
 
 and expression i ppf x =
   line i ppf "expression %a\n" fmt_location x.exp_loc;

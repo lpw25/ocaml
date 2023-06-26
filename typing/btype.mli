@@ -98,15 +98,10 @@ val proxy: type_expr -> type_expr
 
 (* Effect contexts *)
 
-val empty_effect_context : effect_context
-val is_empty_effect_context : effect_context -> bool
-
 val effect_context_of_delayed_effect_context :
   delayed_effect_context -> effect_context
 
 val no_effect : expr_effect_context
-
-val single_effect : string -> type_expr -> expr_effect_context
 
 val delayed_eff : effect_context -> expr_effect_context
 
@@ -117,7 +112,12 @@ val current_eff : effect_context -> expr_effect_context
 (* These three functions can only be called on [Tpoly] nodes. *)
 val is_mono : type_expr -> bool
 val get_mono : type_expr -> type_expr
-val get_poly : type_expr -> type_expr * type_expr list * effect_context option
+val get_poly :
+  type_expr
+  -> type_expr
+     * type_expr list
+     * effect_adjustment option
+     * effect_context option
 
 (**** Utilities for private abbreviations with fixed rows ****)
 val row_of_type: type_expr -> type_expr
@@ -141,6 +141,12 @@ val iter_effect_context_option:
   (type_expr -> unit) -> effect_context option -> unit
 val fold_effect_context_option:
   ('a -> type_expr -> 'a) -> 'a -> effect_context option -> 'a
+val iter_effect_adjustment: (type_expr -> unit) -> effect_adjustment -> unit
+val fold_effect_adjustment: ('a -> type_expr -> 'a) -> 'a -> effect_adjustment -> 'a
+val iter_effect_adjustment_option:
+  (type_expr -> unit) -> effect_adjustment option -> unit
+val fold_effect_adjustment_option:
+  ('a -> type_expr -> 'a) -> 'a -> effect_adjustment option -> 'a
 
 
 type type_iterators =
@@ -177,6 +183,12 @@ val copy_effect_context:
   (type_expr -> type_expr) -> effect_context -> effect_context
 val copy_effect_context_option:
   (type_expr -> type_expr) -> effect_context option -> effect_context option
+val copy_effect_adjustment:
+  (type_expr -> type_expr) -> effect_adjustment -> effect_adjustment
+val copy_effect_adjustment_option:
+  (type_expr -> type_expr)
+  -> effect_adjustment option -> effect_adjustment option
+
 
 module For_copy : sig
 
@@ -314,8 +326,6 @@ module Alloc_mode : sig
 
   val equate : t -> t -> (unit, unit) result
 
-  val submode_effs : effect_context -> t -> (unit, unit) result
-
   val make_global_exn : t -> unit
 
   val make_local_exn : t -> unit
@@ -323,8 +333,6 @@ module Alloc_mode : sig
   val join_const : const -> const -> const
 
   val join : t list -> t
-
-  val join_effs : t -> effect_context -> t
 
   (* Force a mode variable to its upper bound *)
   val constrain_upper : t -> const
@@ -424,8 +432,6 @@ module Value_mode : sig
   val submode_meet : t -> t list -> (unit, error) result
 
   val join : t list -> t
-
-  val join_effs : t -> effect_context -> t
 
   val constrain_upper : t -> const
 

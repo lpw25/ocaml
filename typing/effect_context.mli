@@ -12,19 +12,18 @@
 (*                                                                        *)
 (**************************************************************************)
 
-type 'a t =
-  { effects : (string * 'a option) list }
-
 val hash_name : string -> int
+
+type 'ty t
+
+val create : (string * 'ty) list -> 'ty t
+
+val append : (string * 'ty) list -> 'ty t -> 'ty t
+
+val empty : 'ty t
 
 type join_error =
   | Different_effect_names of string * string
-
-val join :
-  (string -> 'a -> 'a -> 'a)
-  -> 'a t
-  -> 'a t
-  -> ('a, join_error) Result.t
 
 type position =
   | First
@@ -35,86 +34,43 @@ type equal_error =
   | Missing_effect of position * string
 
 val equal :
-  ('b -> string -> 'a -> 'a -> 'b)
-  -> 'b
-  -> 'a t
-  -> 'a t
-  -> ('b, equal_error) Result.t
+  ('a -> string -> 'ty -> 'ty -> 'a)
+  -> 'a
+  -> 'ty t
+  -> 'ty t
+  -> ('a, equal_error) Result.t
 
 type subeffect_error =
   | Different_effect_names of string * string
   | Missing_effect of string
 
 val subeffect :
-  (string -> 'a -> 'a -> unit)
-  -> 'a t
-  -> 'a t
+  (string -> 'ty -> 'ty -> unit)
+  -> 'ty t
+  -> 'ty t
   -> (unit, subeffect_error) Result.t
 
-val filter : string -> 'a t -> ('a * 'a t, join_error) Result.t
+type handle_error =
+  | Different_effect_names of string * string
 
-module Renaming : sig
+val handle : 
+  string
+  -> 'ty t
+  -> ('ty * 'ty t, handle_error) Result.t
 
-  type 'a ctx := 'a t
+val iter : ('ty -> unit) -> 'ty t -> unit
 
-  type t
+val fold : ('a -> 'ty -> 'a) -> 'a -> 'ty t -> 'a
 
-  val apply : (string -> 'a -> 'a -> 'a) -> 'a ctx -> t -> 'a ctx
+val copy : ('ty -> 'ty) -> 'ty t -> 'ty t
 
-  val compose : t -> t -> t
+val copy_fold :
+  ('a -> 'ty -> 'a * 'ty) -> 'a -> 'ty t -> 'a * 'ty t
 
-  val normalize : t -> t
+module Desc : sig
 
-  type parse_error =
-    | Multiply_bound_variable of string loc
-    | Unmatched_effect_renaming_binding of string loc
-    | Unused_effect_renaming_binding of string loc
-
-  val parse :
-    outer:string loc option list
-    -> inner:string loc list
-    -> (t, parse_error) Result.t
+  type 'ty t = (string * 'ty option) list
 
 end
 
-module Adjustment : sig
-
-  type 'a ctx := 'a t
-
-  type 'a t =
-    | Bottom
-    | Update of
-        { adjustment : Adjustment.t;
-          addition : (string * 'a) list; }
-
-  type equal_error =
-    | Different_effect_names of string * string
-    | Missing_effect of position * string
-    | Missing_input_effect 
-
-  val identity : 'a t
-
-  type apply_error =
-    | Different_effect_names of string * string
-
-  val apply :
-    (string -> 'a -> 'a -> 'a)
-    -> (string -> 'a -> 'a option -> unit)
-    -> 'a ctx -> t -> 'a ctx
-
-  val compose_extension : 'a t -> (string * 'a) list -> 'a t
-
-  val compose_renaming : 'a t -> Renaming.t -> 'a t
-
-  val compose : t -> t -> t
-
-  val equal :
-    ('b -> string -> 'a -> 'a -> 'b)
-    -> 'b
-    -> 'a t
-    -> 'a t
-    -> ('b, equal_error) Result.t
-
-  val apply : (string -> 'a -> 'a -> 'a) -> 'a ctx -> 'a t -> 'a ctx
-
-end
+val desc : 'ty t -> 'ty Desc.t

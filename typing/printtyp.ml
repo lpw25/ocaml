@@ -555,10 +555,52 @@ and raw_effect_type ppf tyo =
   | None -> fprintf ppf "."
   | Some ty -> raw_type ppf ty
 
-and raw_effect_context ppf eff =
+and raw_effect_extension_desc ppf desc =
   pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ";@ ")
-    (fun ppf (s, ty) -> fprintf ppf "@[%s, %a@]" s raw_effect_type ty)
-    ppf eff.effects
+    (fun ppf (s, ty) -> fprintf ppf "@[%s: %a@]" s raw_effect_type ty)
+    ppf desc
+
+and raw_effect_extension ppf eff =
+  raw_effect_extension_desc ppf (Effect_context.Extension.desc eff)
+
+and raw_effect_mode_desc ppf desc =
+  let open Effect_context.Mode.Desc in
+  let raw_effect_outer ppf = function
+    | None -> fprintf ppf ": ."
+    | Some var -> fprintf ppf "as %s" var
+  in
+  let raw_effect_inner ppf = function
+    | Bind ty ->
+        fprintf ppf ":@ %a" raw_type ty
+    | Rename var ->
+        fprintf ppf "as %s" var
+  in
+  let raw_effect_adjustment ppf desc =
+    fprintf ppf
+      "@[<2>[%a@ /@ %a]@]"
+    (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ";@ ")
+       (fun ppf (s, outer) -> fprintf ppf "@[%s %a@]" s raw_effect_outer outer))
+    desc.outer
+    (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ";@ ")
+       (fun ppf (s, inner) -> fprintf ppf "@[%s %a@]" s raw_effect_inner inner))
+    desc.inner
+  in
+  let raw_effect_mode_origin ppf = function
+    | Default m ->
+        fprintf ppf "Default of %a" Alloc_mode.print m
+    | Expected adj ->
+        fprintf ppf "Expected of %a" raw_effect_adjustment adj
+  in
+  fprintf ppf "@[[%a|%a]@]"
+    raw_effect_mode_origin desc.origin raw_effect_adjustment desc.offset
+
+and raw_effect_context ppf eff =
+  let open Effect_context.Desc in
+  let {modes; extension} = Effect_context.desc eff in
+  fprintf ppf "@[<2>{@ modes:@ %a;@ extension:@ %a@ }@]"
+     (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf "or@ ")
+        raw_effect_mode_desc) modes
+     raw_effect_extension_desc extension
 
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
@@ -945,10 +987,7 @@ let rec mark_loops_rec visited ty =
         List.iter (fun t -> add_alias t) tyl;
         mark_loops_rec visited ty;
         Option.iter
-          (fun eff ->
-            List.iter (fun (_, tyo) ->
-                Option.iter (mark_loops_rec visited) tyo)
-              eff.effects)
+          (fun eff -> Effect_context.iter (mark_loops_rec visited) eff)
           eff
     | Tunivar _ -> add_named_var ty
 
@@ -957,7 +996,7 @@ let mark_loops ty =
   mark_loops_rec [] ty;;
 
 let mark_effect_context eff =
-  List.iter (fun (_, tyo) -> Option.iter mark_loops tyo) eff.effects
+  Effect_context.iter mark_loops eff
 
 let reset_loop_marks () =
   visited_objects := []; aliased := []; delayed := []

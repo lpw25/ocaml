@@ -23,7 +23,6 @@
 
 (** Asttypes exposes basic definitions shared both by Parsetree and Types. *)
 open Asttypes
-open Misc.Stdlib
 
 (** Type expressions for the core language.
 
@@ -123,8 +122,12 @@ and type_desc =
   (** Occurrence of a type variable introduced by a
       forall quantifier / [Tpoly]. *)
 
-  | Tpoly of type_expr * type_expr list * effect_context option
-  (** [Tpoly (ty,tyl)] ==> ['a1... 'an. ty],
+  | Tpoly of
+      type_expr
+      * type_expr list
+      * effect_adjustment option
+      * effect_context option
+  (** [Tpoly (ty,tyl,adj,ctx)] ==> ['a1... 'an. ty [+adj][ctx]],
       where 'a1 ... 'an are names given to types in tyl
       and occurrences of those types in ty. *)
 
@@ -150,7 +153,7 @@ and alloc_mode =
 
 and effect_context = type_expr Effect_context.t
 
-and effect_renaming = Effect_context.Renaming.t
+and effect_adjustment = type_expr Effect_mode.Adjustment.t
 
 (** [  `X | `Y ]       (row_closed = true)
     [< `X | `Y ]       (row_closed = true)

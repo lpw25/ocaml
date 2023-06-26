@@ -235,9 +235,9 @@ and apply_position =
   | Default
 
 and effect_renaming =
-  { ea_outer : string loc option list;
-    ea_inner : string loc list;
-    ea_type : Types.effect_renaming; }
+  { er_outer : string Location.loc option list;
+    er_inner : string Location.loc list;
+    er_renaming : Effect_mode.Renaming.t }
 
 (* Value expressions for the class language *)
 

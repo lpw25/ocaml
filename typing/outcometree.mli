@@ -90,7 +90,29 @@ and out_variant =
   | Ovar_fields of (string * bool * out_type list) list
   | Ovar_typ of out_type
 
-and out_effect_context = (string * out_type option) list
+and out_effect_extension = (string * out_type option) list
+
+and out_effect_adjustment_outer = string option
+
+and out_effect_adjustment_inner =
+  | Oeai_rename of string
+  | Oeai_bind of out_type option
+
+and out_effect_adjustment =
+  { oea_outer : (string * out_effect_adjustment_outer) list;
+    oea_inner : (string * out_effect_adjustment_inner) list; }
+
+and out_effect_mode_origin =
+  | Oemo_default of out_alloc_mode
+  | Oemo_expected of out_effect_adjustment
+
+and out_effect_mode =
+  { oem_origin : out_effect_mode_origin;
+    oem_offset : out_effect_adjustment }
+
+and out_effect_context =
+  { oeff_mode : out_effect_mode;
+    oeff_extension : out_effect_extension }
 
 and out_alloc_mode =
   | Oam_local

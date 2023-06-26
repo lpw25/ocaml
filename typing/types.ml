@@ -38,7 +38,11 @@ and type_desc =
   | Tsubst of type_expr         (* for copying *)
   | Tvariant of row_desc
   | Tunivar of string option
-  | Tpoly of type_expr * type_expr list * effect_context option
+  | Tpoly of
+      type_expr
+      * type_expr list
+      * effect_adjustment option
+      * effect_context option
   | Tpackage of Path.t * Longident.t list * type_expr list
 
 and arrow_desc =
@@ -57,6 +61,10 @@ and alloc_mode_var = {
 and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
+
+and effect_context = type_expr Effect_context.t
+
+and effect_adjustment = type_expr Effect_mode.Adjustment.t
 
 and row_desc =
     { row_fields: (label * row_field) list;

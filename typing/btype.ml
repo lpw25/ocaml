@@ -304,22 +304,30 @@ let iter_row f row =
   fold_row (fun () v -> f v) () row
 
 let fold_effect_context f init eff =
-  List.fold_left
-    (fun init (_, tyo) ->
-      match tyo with
-      | None -> init
-      | Some ty -> f init ty)
-    init eff.effects
+  Effect_context.fold f init eff
 
 let fold_effect_context_option f init = function
   | None -> init
   | Some eff -> fold_effect_context f init eff
 
 let iter_effect_context f eff =
-  fold_effect_context (fun () ty -> f ty) () eff
+  Effect_context.iter f eff
 
 let iter_effect_context_option f eff =
   fold_effect_context_option (fun () ty -> f ty) () eff
+
+let fold_effect_adjustment f init eff =
+  Effect_mode.Adjustment.fold f init eff
+
+let fold_effect_adjustment_option f init = function
+  | None -> init
+  | Some eff -> fold_effect_adjustment f init eff
+
+let iter_effect_adjustment f eff =
+  Effect_mode.Adjustment.iter f eff
+
+let iter_effect_adjustment_option f eff =
+  fold_effect_adjustment_option (fun () ty -> f ty) () eff
 
 let fold_type_expr f init ty =
   match ty.desc with
@@ -344,9 +352,10 @@ let fold_type_expr f init ty =
   | Tlink ty            -> f init ty
   | Tsubst ty           -> f init ty
   | Tunivar _           -> init
-  | Tpoly (ty, tyl, eff)     ->
+  | Tpoly (ty, tyl, adj, eff)     ->
     let result = f init ty in
     let result = List.fold_left f result tyl in
+    let result = fold_effect_adjustment_option f result adj in
     fold_effect_context_option f result eff
   | Tpackage (_, _, l)  -> List.fold_left f init l
 
@@ -524,19 +533,18 @@ let rec norm_univar ty =
   | _                  -> assert false
 
 let copy_effect_context f eff =
-  let effects =
-    List.map
-      (fun ((s, tyo) as eff) ->
-        match tyo with
-        | None -> eff
-        | Some ty -> s, Some (f ty))
-      eff.effects
-  in
-  { effects }
+  Effect_context.copy f eff
 
 let copy_effect_context_option f = function
   | None -> None
   | Some eff -> Some (copy_effect_context f eff)
+
+let copy_effect_adjustment f eff =
+  Effect_mode.Adjustment.copy f eff
+
+let copy_effect_adjustment_option f = function
+  | None -> None
+  | Some eff -> Some (copy_effect_adjustment f eff)
 
 let rec copy_type_desc ?(keep_names=false) f = function
     Tvar _ as ty        -> if keep_names then ty else Tvar None
@@ -553,10 +561,11 @@ let rec copy_type_desc ?(keep_names=false) f = function
   | Tlink ty            -> copy_type_desc f ty.desc
   | Tsubst _            -> assert false
   | Tunivar _ as ty     -> ty (* always keep the name *)
-  | Tpoly (ty, tyl, eff)     ->
+  | Tpoly (ty, tyl, adj, eff)     ->
       let tyl = List.map (fun x -> norm_univar (f x)) tyl in
+      let adj = copy_effect_adjustment_option f adj in
       let eff = copy_effect_context_option f eff in
-      Tpoly (f ty, tyl, eff)
+      Tpoly (f ty, tyl, adj, eff)
   | Tpackage (p, n, l)  -> Tpackage (p, n, List.map f l)
 
 (* Utilities for copying *)
@@ -760,39 +769,24 @@ let rec extract_label_aux hd l = function
 let extract_label l ls = extract_label_aux [] l ls
 
 
-                  (***********************************)
-                  (*  Utilities for effect contexts  *)
-                  (***********************************)
-
-let empty_effect_context =
-  { effects = [] }
-
-let singleton_effect_context name ty =
-  { effects = [name, ty] }
-
-let is_empty_effect_context eff =
-  match eff.effects with
-  | [] -> true
-  | _ :: _ -> false
+                  (********************************************)
+                  (*  Utilities for expression effect bounds  *)
+                  (********************************************)
 
 let effect_context_of_delayed_effect_context = function
   | Tuple(_, eff) -> eff
   | Single eff -> eff
 
 let no_effect =
-  { delayed = Single empty_effect_context;
-    current = empty_effect_context; }
-
-let single_effect name ty =
-  { delayed = Single empty_effect_context;
-    current = singleton_effect_context name (Some ty); }
+  { delayed = Single Effect_context.empty;
+    current = Effect_context.empty; }
 
 let delayed_eff eff =
   { delayed = Single eff;
-    current = empty_effect_context; }
+    current = Effect_context.empty; }
 
 let current_eff eff =
-  { delayed = Single empty_effect_context;
+  { delayed = Single Effect_context.empty;
     current = eff; }
 
                   (********************************)
@@ -801,18 +795,20 @@ let current_eff eff =
 
 let is_mono ty =
   match (repr ty).desc with
-  | Tpoly(_, [], None) -> true
-  | Tpoly(_, _ :: _, _) | Tpoly(_, _, Some _) -> false
+  | Tpoly(_, [], None, None) -> true
+  | Tpoly(_, _ :: _, _, _)
+  | Tpoly(_, _, Some _, _)
+  | Tpoly(_, _, _, Some _) -> false
   | _ -> assert false
 
 let get_poly ty =
   match (repr ty).desc with
-  | Tpoly(ty, vars, eff) -> (ty, vars, eff)
+  | Tpoly(ty, vars, adj, eff) -> (ty, vars, adj, eff)
   | _ -> assert false
 
 let get_mono ty =
   match (repr ty).desc with
-  | Tpoly(ty, [], _) -> ty
+  | Tpoly(ty, [], None, None) -> ty
   | _ -> assert false
 
                   (**********************************)
@@ -1062,14 +1058,6 @@ module Alloc_mode = struct
     | Ok (), Ok () -> Ok ()
     | Error (), _ | _, Error () -> Error ()
 
-  let submode_effs eff t =
-    match eff.effects with
-    | [] -> Ok ()
-    | _ :: _ ->
-        match submode local t with
-        | Ok () as ok -> ok
-        | Error _ -> Error ()
-
   let make_global_exn t =
     submode_exn t global
 
@@ -1112,11 +1100,6 @@ module Alloc_mode = struct
       | Amode Local :: _ -> local
       | Amodevar v :: ms -> aux (v :: vars) ms
     in aux [] ms
-
-  let join_effs m eff =
-    match eff.effects with
-    | [] -> m
-    | _ :: _ -> local
 
   let constrain_upper = function
     | Amode m -> m
@@ -1343,11 +1326,6 @@ module Value_mode = struct
     let r_as_l = Alloc_mode.join (List.map (fun t -> t.r_as_l) ts) in
     let r_as_g = Alloc_mode.join (List.map (fun t -> t.r_as_g) ts) in
     { r_as_l; r_as_g }
-
-  let join_effs m eff =
-    match eff.effects with
-    | [] -> m
-    | _ :: _ -> local
 
   let constrain_upper t =
     let r_as_l = Alloc_mode.constrain_upper t.r_as_l in

@@ -451,10 +451,54 @@ and print_out_effect ppf (s, tyo) =
   | None -> fprintf ppf "%s: ." s
   | Some ty -> fprintf ppf "%s:@ %a" s print_out_type ty 
 
-and print_out_effect_context ppf eff =
+and print_out_effect_extension ppf eff =
   fprintf ppf "[%a]"
     (print_list print_out_effect (fun ppf -> fprintf ppf ";@ "))
     eff
+
+and print_out_effect_adjustment_outer ppf (s, outer) =
+  match outer with
+  | None -> fprintf ppf "%s: ." s
+  | Some var -> fprintf ppf "%s as %s" s var
+
+and print_out_effect_adjustment_inner ppf (s, inner) =
+  match inner with
+  | Oeai_rename var -> fprintf ppf "%s as %s" s var
+  | Oeai_bind None -> fprintf ppf "%s: ." s
+  | Oeai_bind (Some ty) -> fprintf ppf "%s:@ %a" s print_out_type ty
+
+and print_out_effect_adjustment ppf { oea_outer; oea_inner } =
+  fprintf ppf "@[<2>%a@ /@ %a@]"
+    (print_list print_out_effect_adjustment_outer (fun ppf -> fprintf ppf ";@ "))
+    oea_outer
+    (print_list print_out_effect_adjustment_inner (fun ppf -> fprintf ppf ";@ "))
+    oea_inner
+
+and print_out_effect_mode ppf { oem_origin; oem_offset } =
+  match oem_origin with
+  | Oemo_default (Oam_global | Oam_unknown) -> ()
+  | Oemo_default Oam_local -> begin
+      match oem_offset with
+      | { oea_outer = []; oea_inner = [] } -> ()
+      | _ ->
+          fprintf ppf "@[<2>[- %a]]@"
+            print_out_effect_adjustment oem_offset
+    end
+  | Oemo_expected adj -> begin
+      match oem_offset with
+      | { oea_outer = []; oea_inner = [] } ->
+          fprintf ppf "@[<2>[+ %a]]@"
+            print_out_effect_adjustment adj
+      | _ ->
+          fprintf ppf "@[<2>[+ %a@ - %a]]@"
+            print_out_effect_adjustment adj
+            print_out_effect_adjustment oem_offset
+    end
+
+and print_out_effect_context ppf { oeff_mode; oeff_extension } =
+  fprintf ppf "%a%a"
+    print_out_effect_mode oeff_mode
+    print_out_effect_extension oeff_extension
 
 let out_effect_context = ref print_out_effect_context
 

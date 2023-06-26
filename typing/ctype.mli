@@ -318,10 +318,6 @@ val unify_effect_context:
 val unify_effect_context_option:
         Env.t -> effect_context option -> effect_context option -> unit
 val subeffect : Env.t -> effect_context -> effect_context -> unit
-val filter_effect_context:
-        string -> effect_context -> type_expr * effect_context
-val rename_effect_context :
-        Env.t -> effect_context -> effect_renaming -> effect_context
 val filter_arrow: Env.t -> type_expr -> arg_label -> bool ->
                   alloc_mode * type_expr * alloc_mode * type_expr
         (* A special case of unification (with l:'a -> 'b). *)
