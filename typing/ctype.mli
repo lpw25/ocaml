@@ -31,7 +31,7 @@ module Unification_trace: sig
   (** Unification traces are used to explain unification errors
       when printing error messages *)
 
-  type position = First | Second
+  type position = Misc.position = First | Second
   type desc = { t: type_expr; expanded: type_expr option }
   type 'a diff = { got: 'a; expected: 'a}
 
@@ -64,19 +64,28 @@ module Unification_trace: sig
     | Self_cannot_be_closed
 
   type eff =
-    | Missing_effect of position * string
-    | Different_effect_names of string * string
     | No_effect of position
+    | Not_equal of Effect_context.Equal_error.t
+    | Not_subeffects of Effect_context.Subeffect_error.t
+    | Cannot_join of Effect_context.Join_error.t
+
+  type adj =
+    | No_adjustment of position
+    | Not_equal of Effect_mode.Adjustment.Equal_error.t
 
   type 'a elt =
     | Diff of 'a diff
     | Variant of variant
     | Obj of obj
-    | Escape of {context: type_expr option; kind:'a escape}
-    | Incompatible_fields of {name:string; diff: type_expr diff }
+    | Escape of {context:type_expr option; kind: 'a escape}
+    | Incompatible_fields of {name:string; diff:type_expr diff }
     | Rec_occur of type_expr * type_expr
-    | Incompatible_effects of {name:string; diff:type_expr diff }
+    | Incompatible_effects of
+        {name:string; diff:type_expr diff }
+    | Incompatible_adjustments of
+        {name:string; index:int; diff:type_expr diff }
     | Eff of eff
+    | Adj of adj
     | Effect_diff of effect_context diff
 
   type t = desc elt list
@@ -261,15 +270,19 @@ val generic_instance_declaration: type_declaration -> type_declaration
 val instance_class:
         type_expr list -> class_type -> type_expr list * class_type
 val instance_poly:
-        ?keep_names:bool ->
-        bool -> type_expr list -> type_expr -> effect_context option ->
-        type_expr list * type_expr * effect_context option
+        ?keep_names:bool
+        -> bool -> type_expr list -> type_expr
+        -> effect_adjustment option -> effect_context option
+        -> type_expr list * type_expr
+           * effect_adjustment option * effect_context option
         (* Take an instance of a type scheme containing free univars *)
-val polyfy: Env.t -> type_expr -> type_expr list -> effect_context option ->
-            type_expr * bool
+val polyfy: Env.t -> type_expr -> type_expr list
+            -> effect_adjustment option -> effect_context option
+            -> type_expr * bool
 val instance_label:
         bool -> label_description ->
-        type_expr list * type_expr * type_expr * effect_context option
+        type_expr list * type_expr * type_expr
+        * effect_adjustment option * effect_context option
         (* Same, for a label *)
 val prim_mode :
         alloc_mode option -> (Primitive.mode * Primitive.native_repr)

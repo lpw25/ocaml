@@ -1,6 +1,4 @@
 
-type position = First | Second
-
 module Renaming : sig
 
   type t
@@ -25,6 +23,20 @@ module Renaming : sig
 
   val compose : t -> t -> t
 
+  module Desc : sig
+
+    type outer = string option
+
+    type inner = string
+
+    type t =
+      { outer : (string * outer) list;
+        inner : (string * inner) list; }
+
+  end
+
+  val desc : t -> Desc.t
+
 end
 
 module Adjustment : sig
@@ -41,7 +53,7 @@ module Adjustment : sig
 
   type 'ty inner =
     | Rename of string Location.loc
-    | Bind of 'ty
+    | Bind of 'ty option
 
   val parse :
     outer:(string * outer) list
@@ -60,43 +72,50 @@ module Adjustment : sig
       { outer : (string * outer) list;
         inner : (string * 'ty inner) list; }
 
+    val map : ('a -> 'b) -> 'a t -> 'b t
+
   end
 
   val desc : 'ty t -> 'ty Desc.t
 
-  type apply_error =
-    | Different_effect_names of string * string
+  module Apply_error : sig
+
+    type t =
+      | Different_effect_names of string * string
+
+  end
 
   val apply :
-    ('ty -> 'ty -> unit)
+    (string -> int -> 'ty -> 'ty -> unit)
     -> 'ty t
     -> 'ty Effect_context.t
-    -> ('ty Effect_context.t, apply_error) Result.t
+    -> ('ty Effect_context.t, Apply_error.t) Result.t
 
-  type equal_error =
-    | Different_input_names of string * string * int
-    | Different_output_names of
-        { origin : string;
-          index : int;
-          first_destination : string;
-          second_destination : string;
-          destination_index : int; }
-    | Missing_bind of string * int * position
-    | Missing_rename of string * int * position
-    | Different_renames of
-        { origin : string;
-          origin_index : int;
-          first_destination : string;
-          first_destination_index : int;
-          second_destination : string;
-          second_destination_index : int; }
 
-    val equal :
-      ('a -> string -> 'ty -> 'ty -> 'a)
-      -> 'a
-      -> 'ty t
-      -> 'ty t
-      -> ('a, equal_error) Result.t
+  module Equal_error : sig
+
+    type t =
+      | Different_input_names of string * string * int
+      | Missing_bind of string * int * Misc.position
+      | Missing_rename of string * int * Misc.position
+      | Different_renames of
+          { origin : string;
+            origin_index : int;
+            first_destination : string;
+            first_destination_index : int;
+            second_destination : string;
+            second_destination_index : int; }
+
+    val swap_position : t -> t
+
+  end
+
+  val equal :
+    ('a -> string -> int -> 'ty -> 'ty -> 'a)
+    -> 'a
+    -> 'ty t
+    -> 'ty t
+    -> ('a, Equal_error.t) Result.t
 
   val iter : ('ty -> unit) -> 'ty t -> unit
 
@@ -113,22 +132,26 @@ module Adjustment : sig
     (** Simplified adjustments ignore names and whether a transparent
         renaming is explicit or not. *)
 
-    type equal_error =
-      | Missing_bind of string * int * position
-      | Different_renames of
-          { origin : string;
-            origin_index : int;
-            first_destination : string;
-            first_destination_index : int;
-            second_destination : string;
-            second_destination_index : int; }
+    module Equal_error : sig
+
+      type t =
+        | Missing_bind of string * int * Misc.position
+        | Different_renames of
+            { origin : string;
+              origin_index : int;
+              first_destination : string;
+              first_destination_index : int;
+              second_destination : string;
+              second_destination_index : int; }
+
+    end
 
     val equal :
-      ('a -> string -> 'ty -> 'ty -> 'a)
+      ('a -> string -> int -> 'ty -> 'ty -> 'a)
       -> 'a
       -> 'ty t
       -> 'ty t
-      -> ('a, equal_error) Result.t
+      -> ('a, Equal_error.t) Result.t
 
   end
 

@@ -157,6 +157,75 @@ let mkuplus ~oploc name arg =
   | _ ->
       Pexp_apply(mkoperator ~loc:oploc ("~" ^ name), [Nolabel, arg])
 
+(* TODO define an abstraction boundary between locations-as-pairs
+   and locations-as-Location.t; it should be clear when we move from
+   one world to the other *)
+
+let mkexp_cons_desc consloc args =
+  Pexp_construct(mkrhs (Lident "::") consloc, Some args)
+let mkexp_cons ~loc consloc args =
+  mkexp ~loc (mkexp_cons_desc consloc args)
+
+let mkpat_cons_desc consloc args =
+  Ppat_construct(mkrhs (Lident "::") consloc, Some args)
+let mkpat_cons ~loc consloc args =
+  mkpat ~loc (mkpat_cons_desc consloc args)
+
+let ghexp_cons_desc consloc args =
+  Pexp_construct(ghrhs (Lident "::") consloc, Some args)
+let ghpat_cons_desc consloc args =
+  Ppat_construct(ghrhs (Lident "::") consloc, Some args)
+
+let rec mktailexp nilloc = let open Location in function
+    [] ->
+      let nil = ghloc ~loc:nilloc (Lident "[]") in
+      Pexp_construct (nil, None), nilloc
+  | e1 :: el ->
+      let exp_el, el_loc = mktailexp nilloc el in
+      let loc = (e1.pexp_loc.loc_start, snd el_loc) in
+      let arg = ghexp ~loc (Pexp_tuple [e1; ghexp ~loc:el_loc exp_el]) in
+      ghexp_cons_desc loc arg, loc
+
+let rec mktailpat nilloc = let open Location in function
+    [] ->
+      let nil = ghloc ~loc:nilloc (Lident "[]") in
+      Ppat_construct (nil, None), nilloc
+  | p1 :: pl ->
+      let pat_pl, el_loc = mktailpat nilloc pl in
+      let loc = (p1.ppat_loc.loc_start, snd el_loc) in
+      let arg = ghpat ~loc (Ppat_tuple [p1; ghpat ~loc:el_loc pat_pl]) in
+      ghpat_cons_desc loc arg, loc
+
+let mkstrexp e attrs =
+  { pstr_desc = Pstr_eval (e, attrs); pstr_loc = e.pexp_loc }
+
+let mkexp_constraint ~loc e (t1, t2) =
+  match t1, t2 with
+  | Some t, None -> ghexp ~loc (Pexp_constraint(e, t))
+  | _, Some t -> ghexp ~loc (Pexp_coerce(e, t1, t))
+  | None, None -> assert false
+
+let mkexp_opt_constraint ~loc e = function
+  | None -> e
+  | Some constraint_ -> mkexp_constraint ~loc e constraint_
+
+let mkpat_opt_constraint ~loc p = function
+  | None -> p
+  | Some typ -> ghpat ~loc (Ppat_constraint(p, typ))
+
+let syntax_error () =
+  raise Syntaxerr.Escape_error
+
+let unclosed opening_name opening_loc closing_name closing_loc =
+  raise(Syntaxerr.Error(Syntaxerr.Unclosed(make_loc opening_loc, opening_name,
+                                           make_loc closing_loc, closing_name)))
+
+let expecting loc nonterm =
+    raise Syntaxerr.(Error(Expecting(make_loc loc, nonterm)))
+
+let not_expecting loc nonterm =
+    raise Syntaxerr.(Error(Not_expecting(make_loc loc, nonterm)))
+
 let local_ext_loc = mknoloc "extension.local"
 
 let local_attr =
@@ -281,8 +350,69 @@ let effects_attr effs =
   in
   Attr.mk ~loc:Location.none effects_loc payload
 
-let mktyp_effects typ effs =
+let mktyp_effect_context typ effs =
   {typ with ptyp_attributes = effects_attr effs :: typ.ptyp_attributes}
+
+let adjustment_loc = mknoloc "extension.adjustment"
+let inner_loc = mknoloc "inner"
+let outer_loc = mknoloc "outer"
+
+type adjustment_binding =
+  | Adj_type of core_type
+  | Adj_var of string Location.loc
+  | Adj_dot
+
+let adjustment_outer_of_binding (name, inner, loc) =
+  let outer =
+    match inner with
+    | Adj_dot -> None
+    | Adj_var s -> Some s
+    | Adj_type _ -> not_expecting loc "typed effect binding"
+  in
+  (name, outer)
+
+let adjustment_inner_of_binding (name, inner, _) =
+  (name, inner)
+
+let adjustment_inner_expr (name, bind) =
+  match bind with
+  | Adj_dot -> Exp.extension (mknoloc name, PStr [])
+  | Adj_var s -> Exp.extension (mknoloc name, PPat (Pat.var s, None))
+  | Adj_type typ -> Exp.extension (mknoloc name, PTyp typ)
+
+let outer_expr (name, so) =
+  match so with
+  | None -> Exp.extension (mknoloc name, PStr [])
+  | Some s -> Exp.extension (mknoloc name, PPat(Pat.var s, None))
+
+let extension_list_expr name expr rens =
+  let payload =
+    match rens with
+    | [] -> PStr []
+    | [ren] -> PStr[Str.eval (expr ren)]
+    | rens -> PStr[Str.eval (Exp.tuple (List.map expr rens))]
+  in
+  Exp.extension ~loc:Location.none (name, payload)
+
+let adjustment_attr ~outer ~inner =
+  let outer = extension_list_expr outer_loc outer_expr outer in
+  let inner = extension_list_expr inner_loc adjustment_inner_expr inner in
+  let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
+  Attr.mk ~loc:Location.none adjustment_loc payload
+
+let mktyp_effects typ (adj, eff) =
+  let attrs = typ.ptyp_attributes in
+  let attrs =
+    match adj with
+    | None -> attrs
+    | Some (outer, inner) -> adjustment_attr ~outer ~inner :: attrs
+  in
+  let attrs =
+    match eff with
+    | None -> attrs
+    | Some eff -> effects_attr eff :: attrs
+  in
+  {typ with ptyp_attributes = attrs}
 
 let effect_type_loc = mknoloc "extension.effect_type"
 
@@ -298,97 +428,18 @@ let mkcds_effect_type cds =
   | cd :: rest -> mkcd_effect_type cd :: rest
 
 let renaming_loc = mknoloc "extension.renaming"
-let inner_loc = mknoloc "inner"
-let outer_loc = mknoloc "outer"
 
-let renaming_expr (name, pat) = Exp.extension (mknoloc name, PPat(pat, None))
-
-let renaming_list_expr kind_loc adjs =
-  let payload =
-    match adjs with
-    | [] -> PStr []
-    | [adj] -> PStr[Str.eval (renaming_expr adj)]
-    | adjs -> PStr[Str.eval (Exp.tuple (List.map renaming_expr adjs))]
-  in
-  Exp.extension ~loc:Location.none (kind_loc, payload)
+let renaming_inner_expr (name, s) =
+  Exp.extension (mknoloc name, PPat(Pat.var s, None))
 
 let renaming_extension ~outer ~inner =
-  let inner = renaming_list_expr inner_loc inner in
-  let outer = renaming_list_expr outer_loc outer in
+  let outer = extension_list_expr outer_loc outer_expr outer in
+  let inner = extension_list_expr inner_loc renaming_inner_expr inner in
   let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
   Exp.extension ~loc:Location.none (renaming_loc, payload)
 
 let mkexp_renaming ~loc ~outer ~inner exp =
   ghexp ~loc (Pexp_apply(renaming_extension ~outer ~inner, [Nolabel, exp]))
-
-(* TODO define an abstraction boundary between locations-as-pairs
-   and locations-as-Location.t; it should be clear when we move from
-   one world to the other *)
-
-let mkexp_cons_desc consloc args =
-  Pexp_construct(mkrhs (Lident "::") consloc, Some args)
-let mkexp_cons ~loc consloc args =
-  mkexp ~loc (mkexp_cons_desc consloc args)
-
-let mkpat_cons_desc consloc args =
-  Ppat_construct(mkrhs (Lident "::") consloc, Some args)
-let mkpat_cons ~loc consloc args =
-  mkpat ~loc (mkpat_cons_desc consloc args)
-
-let ghexp_cons_desc consloc args =
-  Pexp_construct(ghrhs (Lident "::") consloc, Some args)
-let ghpat_cons_desc consloc args =
-  Ppat_construct(ghrhs (Lident "::") consloc, Some args)
-
-let rec mktailexp nilloc = let open Location in function
-    [] ->
-      let nil = ghloc ~loc:nilloc (Lident "[]") in
-      Pexp_construct (nil, None), nilloc
-  | e1 :: el ->
-      let exp_el, el_loc = mktailexp nilloc el in
-      let loc = (e1.pexp_loc.loc_start, snd el_loc) in
-      let arg = ghexp ~loc (Pexp_tuple [e1; ghexp ~loc:el_loc exp_el]) in
-      ghexp_cons_desc loc arg, loc
-
-let rec mktailpat nilloc = let open Location in function
-    [] ->
-      let nil = ghloc ~loc:nilloc (Lident "[]") in
-      Ppat_construct (nil, None), nilloc
-  | p1 :: pl ->
-      let pat_pl, el_loc = mktailpat nilloc pl in
-      let loc = (p1.ppat_loc.loc_start, snd el_loc) in
-      let arg = ghpat ~loc (Ppat_tuple [p1; ghpat ~loc:el_loc pat_pl]) in
-      ghpat_cons_desc loc arg, loc
-
-let mkstrexp e attrs =
-  { pstr_desc = Pstr_eval (e, attrs); pstr_loc = e.pexp_loc }
-
-let mkexp_constraint ~loc e (t1, t2) =
-  match t1, t2 with
-  | Some t, None -> ghexp ~loc (Pexp_constraint(e, t))
-  | _, Some t -> ghexp ~loc (Pexp_coerce(e, t1, t))
-  | None, None -> assert false
-
-let mkexp_opt_constraint ~loc e = function
-  | None -> e
-  | Some constraint_ -> mkexp_constraint ~loc e constraint_
-
-let mkpat_opt_constraint ~loc p = function
-  | None -> p
-  | Some typ -> ghpat ~loc (Ppat_constraint(p, typ))
-
-let syntax_error () =
-  raise Syntaxerr.Escape_error
-
-let unclosed opening_name opening_loc closing_name closing_loc =
-  raise(Syntaxerr.Error(Syntaxerr.Unclosed(make_loc opening_loc, opening_name,
-                                           make_loc closing_loc, closing_name)))
-
-let expecting loc nonterm =
-    raise Syntaxerr.(Error(Expecting(make_loc loc, nonterm)))
-
-let not_expecting loc nonterm =
-    raise Syntaxerr.(Error(Not_expecting(make_loc loc, nonterm)))
 
 let dotop ~left ~right ~assign ~ext ~multi =
   let assign = if assign then "<-" else "" in
@@ -2342,7 +2393,7 @@ let_pattern:
   | mkpat(
       pat = pattern
       COLON
-      cty = mktyp(ty = core_type LBRACKET eff = effects RBRACKET
+      cty = mktyp(ty = core_type eff = effects
               { let ty = mktyp_effects ty eff in
                 Ptyp_poly([], ty) })
         { Ppat_constraint(pat, cty) })
@@ -2403,9 +2454,10 @@ expr:
   | PERFORM LIDENT mkrhs(constr_longident) simple_expr
      { mkexp_perform ~loc:$sloc $2
          (mkexp ~loc:$sloc (Pexp_construct($3, Some $4))) }
-  | EFFECT LBRACKET outer = effect_bindings DIV inner = effect_vars RBRACKET
+  | EFFECT ren = effect_renaming
       exp = simple_expr %prec below_HASH
-      { mkexp_renaming ~loc:$sloc ~outer ~inner exp }
+      { let (outer, inner) = ren in
+        mkexp_renaming ~loc:$sloc ~outer ~inner exp }
 ;
 %inline expr_attrs:
   | LET MODULE ext_attributes mkrhs(module_name) module_binding_body IN seq_expr
@@ -2698,16 +2750,16 @@ let_binding_body:
             (wrap_exp_local_if $1 (mkexp_constraint ~loc:$sloc $5 $3))
         in
         (pat, exp) }
-  | optional_local let_ident COLON core_type LBRACKET effects RBRACKET EQUAL seq_expr
-      { let typloc = ($startpos($4), $endpos($7)) in
-        let patloc = ($startpos($2), $endpos($7)) in
-        let typ = mktyp_effects $4 $6 in
+  | optional_local let_ident COLON core_type effects EQUAL seq_expr
+      { let typloc = ($startpos($4), $endpos($5)) in
+        let patloc = ($startpos($2), $endpos($5)) in
+        let typ = mktyp_effects $4 $5 in
         let pat =
           mkpat_local_if $1
             (ghpat ~loc:patloc
                (Ppat_constraint($2, ghtyp ~loc:typloc (Ptyp_poly([],typ)))))
         in
-        let exp = mkexp_local_if $1 ~loc:$sloc $9 in
+        let exp = mkexp_local_if $1 ~loc:$sloc $7 in
         (pat, exp) }
   | optional_local let_ident COLON typevar_list DOT core_type_with_effs EQUAL seq_expr
       (* TODO: could replace [typevar_list DOT core_type]
@@ -3093,7 +3145,7 @@ value_description:
   attrs1 = attributes
   id = mkrhs(val_ident)
   COLON
-  ty = core_type_with_effs
+  ty = core_type_with_effect_context
   attrs2 = post_item_attributes
     { let attrs = attrs1 @ attrs2 in
       let loc = make_loc $sloc in
@@ -3110,7 +3162,7 @@ primitive_declaration:
   attrs1 = attributes
   id = mkrhs(val_ident)
   COLON
-  ty = core_type_with_effs
+  ty = core_type_with_effect_context
   EQUAL
   prim = raw_string+
   attrs2 = post_item_attributes
@@ -3513,8 +3565,8 @@ with_type_binder:
 possibly_poly(X):
   X
     { $1 }
-| X LBRACKET effects RBRACKET
-    { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effects $1 $3))) }
+| X effects
+    { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effects $1 $2))) }
 | mktyp(poly(X))
     { $1 }
 ;
@@ -3534,15 +3586,22 @@ possibly_poly(X):
 core_type_with_effs:
     core_type
       { $1 }
-  | core_type LBRACKET effects RBRACKET
-      { mktyp_effects $1 $3 }
+  | core_type effects
+      { mktyp_effects $1 $2 }
+;
+
+core_type_with_effect_context:
+    core_type
+      { $1 }
+  | core_type effect_context
+      { mktyp_effect_context $1 $2 }
 ;
 
 core_type_with_poly_effs:
     core_type
       { $1 }
-  | core_type LBRACKET effects RBRACKET
-      { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effects $1 $3))) }
+  | core_type effects
+      { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effects $1 $2))) }
 ;
 
 (* A core type (core_type) is a core type without attributes (core_type_no_attr)
@@ -3636,7 +3695,7 @@ strict_function_type:
     { $1 }
 
   | mktyp(
-    LPAREN ty = core_type LBRACKET eff = effects RBRACKET RPAREN
+    LPAREN ty = core_type eff = effects RPAREN
       { Ptyp_poly([], mktyp_effects ty eff) }
     )
     { $1 }
@@ -3814,28 +3873,64 @@ effect:
       { ($1, None) }
 ;
 
-%inline effects:
-  separated_list(SEMI, effect)
-    { $1 }
-;
-effect_var:
-  label AS mkrhs(LIDENT)
-    { ($1, Pat.var $3) }
+effect_context:
+  LBRACKET separated_list(SEMI, effect) RBRACKET
+    { $2 }
 ;
 effect_binding:
+  | label COLON core_type
+      { ($1, Adj_type $3, $sloc) }
   | label AS mkrhs(LIDENT)
-      { ($1, Pat.var $3) }
+      { ($1, Adj_var $3, $sloc) }
   | label COLON DOT
-      { ($1, Pat.any ()) }
-;
-%inline effect_vars:
-  separated_list(SEMI, effect_var)
-    { $1 }
+      { ($1, Adj_dot, $sloc) }
 ;
 %inline effect_bindings:
   separated_list(SEMI, effect_binding)
     { $1 }
 ;
+effect_adjustment:
+    LBRACKET PLUS outer = effect_bindings
+      DIV inner = effect_bindings RBRACKET
+      { let outer = List.map adjustment_outer_of_binding outer in
+        let inner = List.map adjustment_inner_of_binding inner in
+        outer, inner }
+  | LBRACKET PLUS inner = effect_bindings RBRACKET
+      { let inner = List.map adjustment_inner_of_binding inner in
+        [], inner }
+;
+effects:
+  | effect_adjustment
+      { Some $1, None }
+  | effect_context
+      { None, Some $1 }
+  | effect_adjustment effect_context
+      { Some $1, Some $2 }
+;
+effect_renaming_inner_item:
+  label AS mkrhs(LIDENT)
+    { ($1, $3) }
+;
+effect_renaming_outer_item:
+  | label AS mkrhs(LIDENT)
+      { ($1, Some $3) }
+  | label COLON DOT
+      { ($1, None) }
+;
+%inline effect_renaming_outer:
+  separated_list(SEMI, effect_renaming_outer_item)
+    { $1 }
+;
+%inline effect_renaming_inner:
+  separated_list(SEMI, effect_renaming_inner_item)
+    { $1 }
+;
+effect_renaming:
+  LBRACKET outer = effect_renaming_outer
+    DIV inner = effect_renaming_inner RBRACKET
+    { outer, inner }
+;
+
 /* Constants */
 
 constant:

@@ -58,10 +58,8 @@ open Local_store
 
 module Unification_trace = struct
 
-  type position = First | Second
-  let swap_position = function
-    | First -> Second
-    | Second -> First
+  type position = Misc.position = First | Second
+  let swap_position = Misc.swap_position
 
   type desc = { t: type_expr; expanded: type_expr option }
   type 'a diff = { got: 'a; expected: 'a}
@@ -93,11 +91,13 @@ module Unification_trace = struct
 
   type eff =
     | No_effect of position
-    | Not_equal of Effect_context.equal_error
+    | Not_equal of Effect_context.Equal_error.t
+    | Not_subeffects of Effect_context.Subeffect_error.t
+    | Cannot_join of Effect_context.Join_error.t
 
   type adj =
     | No_adjustment of position
-    | Not_equal of Effect_mode.Adjustment.equal_error
+    | Not_equal of Effect_mode.Adjustment.Equal_error.t
 
   type 'a elt =
     | Diff of 'a diff
@@ -107,9 +107,9 @@ module Unification_trace = struct
     | Incompatible_fields of {name:string; diff:type_expr diff }
     | Rec_occur of type_expr * type_expr
     | Incompatible_effects of
-        {name:string; index:string; diff:type_expr diff }
+        {name:string; diff:type_expr diff }
     | Incompatible_adjustments of
-        {name:string; index:string; diff:type_expr diff }
+        {name:string; index:int; diff:type_expr diff }
     | Eff of eff
     | Adj of adj
     | Effect_diff of effect_context diff
@@ -145,24 +145,27 @@ module Unification_trace = struct
   let swap_diff x = { got = x.expected; expected = x.got }
   let swap_elt = function
     | Diff x -> Diff (swap_diff x)
-    | Incompatible_fields {name;diff} ->
-        Incompatible_fields { name; diff = swap_diff diff}
-    | Incompatible_effects {name;diff} ->
+    | Incompatible_fields {name; diff} ->
+        Incompatible_fields {name; diff = swap_diff diff}
+    | Incompatible_effects {name; diff} ->
         Incompatible_effects { name; diff = swap_diff diff}
-    | Incompatible_adjustments {name;diff} ->
-        Incompatible_adjustments { name; diff = swap_diff diff}
+    | Incompatible_adjustments {name; index; diff} ->
+        Incompatible_adjustments {name; index; diff = swap_diff diff}
     | Obj (Missing_field(pos,s)) -> Obj(Missing_field(swap_position pos,s))
     | Obj (Abstract_row pos) -> Obj(Abstract_row (swap_position pos))
     | Variant (Fixed_row(pos,k,f)) -> Variant (Fixed_row(swap_position pos,k,f))
     | Variant (No_tags(pos,f)) -> Variant (No_tags(swap_position pos,f))
-    | Eff (Missing_effect(pos, s)) -> Eff (Missing_effect(swap_position pos, s))
-    | Eff (Different_effect_names(s1, s2)) ->
-        Eff (Different_effect_names(s2, s1))
+    | Eff (Not_equal err) ->
+        Eff (Not_equal (Effect_context.Equal_error.swap_position err))
+    | Eff (Not_subeffects err) ->
+        Eff (Not_subeffects (Effect_context.Subeffect_error.swap_position err))
+    | Eff (Cannot_join err) ->
+        Eff (Cannot_join (Effect_context.Join_error.swap_position err))
     | Eff (No_effect pos) -> Eff (No_effect (swap_position pos))
     | Effect_diff x -> Effect_diff (swap_diff x)
     | Adj (No_adjustment pos) -> Adj (No_adjustment (swap_position pos))
-    | Adj (Different_effect_names(s1, s2)) ->
-        Adj (Different_effect_names(s2, s1))
+    | Adj (Not_equal err) ->
+        Adj (Not_equal (Effect_mode.Adjustment.Equal_error.swap_position err))
     | x -> x
   let swap x = List.map swap_elt x
 
@@ -175,40 +178,8 @@ module Unification_trace = struct
     Incompatible_fields {name; diff={got; expected} }
   let incompatible_effects name got expected =
     Incompatible_effects {name; diff={got; expected}}
-  let incompatible_adjustments name got expected =
-    Incompatible_adjustments {name; diff={got; expected}}
-
-  let effect_context_join
-        (err : Effect_context.join_error) : eff =
-    match err with
-    | Different_effect_names(n1, n2) ->
-        Different_effect_names(n1, n2)
-
-  let effect_context_equal
-        (err : Effect_context.equal_error) : eff =
-    match err with
-    | Different_effect_names(n1, n2) ->
-        Different_effect_names(n1, n2)      
-    | Missing_effect(First, n) ->
-        Missing_effect(First, n)
-    | Missing_effect(Second, n) ->
-        Missing_effect(Second, n)
-
-  let effect_context_subeffect
-        (err : Effect_context.subeffect_error) : eff =
-    match err with
-    | Different_effect_names(n1, n2) ->
-        Different_effect_names(n1, n2)      
-    | Missing_effect n ->
-        Missing_effect(Second, n)
-
-  let effect_adjustment_equal
-        (err : Effect_mode.Adjustment.equal_error) : eff =
-    match err with
-    | Different_effect_names(n1, n2) ->
-        Different_effect_names(n1, n2)      
-    | Different_at(s, n) ->
-        Different_at(s, n))
+  let incompatible_adjustments name index got expected =
+    Incompatible_adjustments {name; index; diff={got; expected}}
 
   let explain trace f =
     let rec explain = function
@@ -2641,7 +2612,7 @@ and mcomp_effect_adjustment_option type_pairs env adj1 adj2 =
 and mcomp_effect_adjustment type_pairs env adj1 adj2 =
   match
     Effect_mode.Adjustment.equal
-      (fun () _ ty1 ty2 -> mcomp type_pairs env ty1 ty2)
+      (fun () _ _ ty1 ty2 -> mcomp type_pairs env ty1 ty2)
       () adj1 adj2
   with
   | Ok () -> ()
@@ -3215,8 +3186,7 @@ and unify_effect_context env eff1 eff2 =
   with
   | Ok () -> ()
   | Error err ->
-      let err = Trace.effect_context_equal err in
-      raise (Unify Trace.[Eff err])
+      raise (Unify Trace.[Eff (Not_equal err)])
 
 and unify_effect_adjustment_option env adj1 adj2 =
   match adj1, adj2 with
@@ -3227,18 +3197,17 @@ and unify_effect_adjustment_option env adj1 adj2 =
 
 and unify_effect_adjustment env adj1 adj2 =
   match
-    Effect_adjustment.equal
-      (fun () n ty1 ty2 ->
+    Effect_mode.Adjustment.equal
+      (fun () n i ty1 ty2 ->
         match unify env ty1 ty2 with
         | () -> ()
         | exception Unify trace ->
-            raise (Unify (Trace.incompatible_adjustments n ty1 ty2 :: trace)))
+            raise (Unify (Trace.incompatible_adjustments n i ty1 ty2 :: trace)))
       () adj1 adj2
   with
   | Ok () -> ()
   | Error err ->
-      let err = Trace.effect_adjustment_equal err in
-      raise (Unify Trace.[Adj err])
+      raise (Unify Trace.[Adj (Not_equal err)])
 
 (* Build a fresh row variable for unification *)
 and make_rowvar level use1 rest1 use2 rest2  =
@@ -3554,13 +3523,13 @@ let subeffect env eff1 eff2 =
         match unify env ty1 ty2 with
         | () -> ()
         | exception Unify trace ->
-            raise (Unify (Trace.incompatible_effects name ty1 ty2 :: trace)))
+            let err = Trace.incompatible_effects name ty1 ty2 in
+            raise (Unify (err :: trace)))
       eff1 eff2
   with
   | Ok () -> ()
   | Error err ->
-      let err = Trace.effect_context_subeffect err in
-      raise (Unify Trace.[Eff err])
+      raise (Unify Trace.[Eff (Not_subeffects err)])
 
 let _ = unify' := unify_var
 
@@ -3571,21 +3540,22 @@ let unify_pairs env ty1 ty2 pairs =
 let unify env ty1 ty2 =
   unify_pairs (ref env) ty1 ty2 []
 
-let join_effect_bounds env eff1 eff2 =
+let join_effect_contexts env eff1 eff2 =
   match
-    Effect_context.Upper_bound.join
+    Effect_context.join
       (fun name ty1 ty2 ->
          match unify env ty1 ty2 with
          | () -> ty1
          | exception Unify trace ->
-             let trace = Trace.incompatible_effects name ty1 ty2 :: trace in
-             raise (Unify trace))
+             let err = Trace.incompatible_effects name ty1 ty2 in
+             raise (Unify (err :: trace)))
       eff1 eff2
   with
   | Ok eff -> eff
   | Error err ->
-      let err = Trace.effect_context_join err in
-      raise (Unify Trace.[Eff err])
+      raise (Unify Trace.[effect_diff eff1 eff2; Eff (Cannot_join err)])
+  | exception Unify trace ->
+      raise (Unify (Trace.effect_diff eff1 eff2 :: trace))
 
 let unify_effect_context env eff1 eff2 =
   univar_pairs := [];
@@ -3671,7 +3641,7 @@ let filter_arrow env t l force_poly =
 
 let filter_mono ty =
   match (repr ty).desc with
-  | Tpoly(ty, [], None) -> ty
+  | Tpoly(ty, [], None ,None) -> ty
   | _ -> raise (Unify [])
 
 let filter_arrow_mono env t l =
@@ -3883,14 +3853,18 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               moregen_fields inst_nongen variance type_pairs env t1' t2'
           | (Tnil, Tnil) ->
               ()
-          | (Tpoly (t1, [], eff1), Tpoly (t2, [], eff2)) ->
+          | (Tpoly (t1, [], adj1, eff1), Tpoly (t2, [], adj2, eff2)) ->
               moregen inst_nongen variance type_pairs env t1 t2;
+              moregen_effect_adjustment_option
+                inst_nongen variance type_pairs env adj1 adj2;          
               moregen_effect_context_option
                 inst_nongen variance type_pairs env eff1 eff2
-          | (Tpoly (t1, tl1, eff1), Tpoly (t2, tl2, eff2)) ->
-              enter_poly env univar_pairs t1 tl1 eff1 t2 tl2 eff2
-                (fun t1 eff1 t2 eff2 ->
+          | (Tpoly (t1, tl1, adj1, eff1), Tpoly (t2, tl2, adj2, eff2)) ->
+              enter_poly env univar_pairs t1 tl1 adj1 eff1 t2 tl2 adj2 eff2
+                (fun t1 adj1 eff1 t2 adj2 eff2 ->
                   moregen inst_nongen variance type_pairs env t1 t2;
+                  moregen_effect_adjustment_option
+                    inst_nongen variance type_pairs env adj1 adj2;          
                   moregen_effect_context_option
                     inst_nongen variance type_pairs env eff1 eff2)
           | (Tunivar _, Tunivar _) ->
@@ -3929,6 +3903,25 @@ and moregen_effect_context_sub inst_nongen type_pairs env eff1 eff2 =
       (fun _ ty1 ty2 ->
         moregen inst_nongen Covariant type_pairs env ty1 ty2)
       eff1 eff2
+  with
+  | Ok () -> ()
+  | Error _ -> raise (Unify [])
+
+and moregen_effect_adjustment_option
+    inst_nongen variance type_pairs env a1 a2 =
+  match a1, a2 with
+  | None, None -> ()
+  | Some adj1, Some adj2 ->
+      moregen_effect_adjustment inst_nongen variance type_pairs env adj1 adj2
+  | None, Some _ | Some _, None ->
+      raise (Unify [])
+
+and moregen_effect_adjustment inst_nongen variance type_pairs env adj1 adj2 =
+  match
+    Effect_mode.Adjustment.equal
+      (fun () _ _ ty1 ty2 ->
+        moregen inst_nongen variance type_pairs env ty1 ty2)
+      () adj1 adj2
   with
   | Ok () -> ()
   | Error _ -> raise (Unify [])
@@ -4212,14 +4205,18 @@ let rec eqtype rename type_pairs subst env t1 t2 =
               eqtype_fields rename type_pairs subst env t1' t2'
           | (Tnil, Tnil) ->
               ()
-          | (Tpoly (t1, [], eff1), Tpoly (t2, [], eff2)) ->
+          | (Tpoly (t1, [], adj1, eff1), Tpoly (t2, [], adj2, eff2)) ->
               eqtype rename type_pairs subst env t1 t2;
+              eqtype_effect_adjustment_option
+                rename type_pairs subst env adj1 adj2;
               eqtype_effect_context_option
                 rename type_pairs subst env eff1 eff2
-          | (Tpoly (t1, tl1, eff1), Tpoly (t2, tl2, eff2)) ->
-              enter_poly env univar_pairs t1 tl1 eff1 t2 tl2 eff2
-                (fun t1 eff1 t2 eff2 ->
+          | (Tpoly (t1, tl1, adj1, eff1), Tpoly (t2, tl2, adj2, eff2)) ->
+              enter_poly env univar_pairs t1 tl1 adj1 eff1 t2 tl2 adj2 eff2
+                (fun t1 adj1 eff1 t2 adj2 eff2 ->
                   eqtype rename type_pairs subst env t1 t2;
+                  eqtype_effect_adjustment_option
+                    rename type_pairs subst env adj1 adj2;
                   eqtype_effect_context_option
                     rename type_pairs subst env eff1 eff2)
           | (Tunivar _, Tunivar _) ->
@@ -4246,6 +4243,22 @@ and eqtype_effect_context rename type_pairs subst env eff1 eff2 =
     Effect_context.equal
       (fun () _ ty1 ty2 -> eqtype rename type_pairs subst env ty1 ty2)
       () eff1 eff2
+  with
+  | Ok () -> ()
+  | Error _ -> raise (Unify [])
+
+and eqtype_effect_adjustment_option rename type_pairs subst env adj1 adj2 =
+  match adj1, adj2 with
+  | None, None -> ()
+  | Some adj1, Some adj2 ->
+      eqtype_effect_adjustment rename type_pairs subst env adj1 adj2
+  | None, Some _ | Some _, None -> raise (Unify [])
+
+and eqtype_effect_adjustment rename type_pairs subst env adj1 adj2 =
+  match
+    Effect_mode.Adjustment.equal
+      (fun () _ _ ty1 ty2 -> eqtype rename type_pairs subst env ty1 ty2)
+      () adj1 adj2
   with
   | Ok () -> ()
   | Error _ -> raise (Unify [])
@@ -4860,9 +4873,24 @@ let rec build_subtype env visited loops posi level t =
       end
   | Tsubst _ | Tlink _ ->
       assert false
-  | Tpoly(t1, tl, eff) ->
+  | Tpoly(t1, tl, adj, eff) ->
       let (t1', c1) = build_subtype env visited loops posi level t1 in
-      let (eff', c2) =
+      let (adj', c2) =
+        match adj with
+        | None -> (None, Unchanged)
+        | (Some adj) as adjo ->
+            let c, adj =
+              Effect_mode.Adjustment.copy_fold
+                (fun c ty ->
+                  let ty, c' = build_subtype env visited loops posi level ty in
+                  let c = max c c' in
+                  c, ty)
+                Unchanged adj
+            in
+            if c > Unchanged then (Some adj, c)
+            else (adjo, Unchanged)
+      in
+      let (eff', c3) =
         match eff with
         | None -> (None, Unchanged)
         | (Some eff) as effo ->
@@ -4877,8 +4905,8 @@ let rec build_subtype env visited loops posi level t =
             if c > Unchanged then (Some eff, c)
             else (effo, Unchanged)
       in
-      let c = max c1 c2 in
-      if c > Unchanged then (newty (Tpoly(t1', tl, eff')), c)
+      let c = max c1 (max c2 c3) in
+      if c > Unchanged then (newty (Tpoly(t1', tl, adj', eff')), c)
       else (t, Unchanged)
   | Tunivar _ | Tpackage _ ->
       (t, Unchanged)
@@ -4979,18 +5007,27 @@ let rec subtype_rec env trace t1 t2 cstrs =
         with Exit ->
           (trace, t1, t2, !univar_pairs)::cstrs
         end
-    | (Tpoly (u1, [], eff1), Tpoly (u2, [], eff2)) ->
+    | (Tpoly (u1, [], adj1, eff1), Tpoly (u2, [], adj2, eff2)) ->
         let cstrs = subtype_rec env trace u1 u2 cstrs in
+        let cstrs =
+          subtype_effect_adjustment_option env trace adj1 adj2 cstrs
+        in
         subtype_effect_context_option env trace eff1 eff2 cstrs
-    | (Tpoly (u1, tl1, eff1), Tpoly (u2, [], eff2)) ->
-        let _, u1', eff1' = instance_poly false tl1 u1 eff1 in
+    | (Tpoly (u1, tl1, adj1, eff1), Tpoly (u2, [], adj2, eff2)) ->
+        let _, u1', adj1', eff1' = instance_poly false tl1 u1 adj1 eff1 in
         let cstrs = subtype_rec env trace u1' u2 cstrs in
+        let cstrs =
+          subtype_effect_adjustment_option env trace adj1' adj2 cstrs
+        in
         subtype_effect_context_option env trace eff1' eff2 cstrs
-    | (Tpoly (u1, tl1, eff1), Tpoly (u2, tl2, eff2)) ->
+    | (Tpoly (u1, tl1, adj1, eff1), Tpoly (u2, tl2, adj2, eff2)) ->
         begin try
-          enter_poly env univar_pairs u1 tl1 eff1 u2 tl2 eff2
-            (fun t1 eff1 t2 eff2 ->
+          enter_poly env univar_pairs u1 tl1 adj1 eff1 u2 tl2 adj2 eff2
+            (fun t1 adj1 eff1 t2 adj2 eff2 ->
               let cstrs = subtype_rec env trace t1 t2 cstrs in
+              let cstrs =
+                subtype_effect_adjustment_option env trace adj1 adj2 cstrs
+              in
               subtype_effect_context_option env trace eff1 eff2 cstrs)
         with Unify _ ->
           (trace, t1, t2, !univar_pairs)::cstrs
@@ -5043,6 +5080,22 @@ and subtype_effect_context env trace eff1 eff2 cstrs =
       (fun cstrs _ ty1 ty2 ->
         subtype_rec env (Trace.diff ty1 ty2::trace) ty1 ty2 cstrs)
       cstrs eff1 eff2
+  with
+  | Ok cstrs -> cstrs
+  | Error _ -> subtype_error env trace
+
+and subtype_effect_adjustment_option env trace adj1 adj2 cstrs =
+  match adj1, adj2 with
+  | None, None -> cstrs
+  | Some adj1, Some adj2 -> subtype_effect_adjustment env trace adj1 adj2 cstrs
+  | None, Some _ | Some _, None -> subtype_error env trace
+
+and subtype_effect_adjustment env trace adj1 adj2 cstrs =
+  match
+    Effect_mode.Adjustment.equal
+      (fun cstrs _ _ ty1 ty2 ->
+        subtype_rec env (Trace.diff ty1 ty2::trace) ty1 ty2 cstrs)
+      cstrs adj1 adj2
   with
   | Ok cstrs -> cstrs
   | Error _ -> subtype_error env trace

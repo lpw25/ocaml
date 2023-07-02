@@ -145,8 +145,8 @@ let equal equal acc t1 t2 =
         | Some (n1, ty1), Some (n2, ty2) ->
             if not (String.equal n1 n2) then
               raise (Equal_error(Different_effect_names(n1, n2)));
-            equal acc n1 ty1 ty2)
-      pairs
+            equal acc n1 i ty1 ty2)
+      acc pairs
   with
   | res -> Ok res
   | exception Equal_error err -> Error err

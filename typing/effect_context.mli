@@ -22,33 +22,55 @@ val append : (string * 'ty) list -> 'ty t -> 'ty t
 
 val empty : 'ty t
 
-type join_error =
-  | Different_effect_names of string * string
+val is_empty : 'ty t -> bool
 
-type position =
-  | First
-  | Second
+module Join_error : sig
 
-type equal_error =
-  | Different_effect_names of string * string
-  | Missing_effect of position * string
+  type t =
+    | Different_effect_names of string * string
+
+  val swap_position : t -> t
+
+end
+
+val join :
+  (string -> 'ty -> 'ty -> 'ty)
+  -> 'ty t
+  -> 'ty t
+  -> ('ty t, Join_error.t) Result.t
+
+module Equal_error : sig
+
+  type t =
+    | Different_effect_names of string * string
+    | Missing_effect of Misc.position * string
+
+  val swap_position : t -> t
+
+end
 
 val equal :
   ('a -> string -> 'ty -> 'ty -> 'a)
   -> 'a
   -> 'ty t
   -> 'ty t
-  -> ('a, equal_error) Result.t
+  -> ('a, Equal_error.t) Result.t
 
-type subeffect_error =
-  | Different_effect_names of string * string
-  | Missing_effect of string
+module Subeffect_error : sig
+
+  type t =
+    | Different_effect_names of string * string
+    | Missing_effect of string
+
+  val swap_position : t -> t
+
+end
 
 val subeffect :
   (string -> 'ty -> 'ty -> unit)
   -> 'ty t
   -> 'ty t
-  -> (unit, subeffect_error) Result.t
+  -> (unit, Subeffect_error.t) Result.t
 
 type handle_error =
   | Different_effect_names of string * string
@@ -70,6 +92,8 @@ val copy_fold :
 module Desc : sig
 
   type 'ty t = (string * 'ty option) list
+
+  val map : ('a -> 'b) -> 'a t -> 'b t
 
 end
 

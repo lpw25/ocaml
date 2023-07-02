@@ -60,27 +60,30 @@ module General_adjustment = struct
       Int.Map.fold
         (fun eff hash renames ->
           Array.fold_left
-            (fun eff (name, adjustment) ->
-              match Effect_context.handle name eff with
-              | Error err -> raise (Apply_error err)
-              | Ok (None, eff) -> eff
-              | Ok (Some ty, eff) -> begin
-                  match adjustment with
-                  | Rename { to_hash; to_index } ->
-                      let outer = Hashtbl.find outer to_hash in
-                      let outer_name, outer_tyo = outer.(to_index) in
-                      let outer_ty =
-                        match outer_tyo with
-                        | None -> ty
-                        | Some outer_ty -> contract name ty old_ty
-                      in
-                      outer.(to_index) <- (outer_name, Some outer_ty);
-                      eff
-                  | Bind a ->
-                      consume name ty a;
-                      eff
-                end)
-            eff renames)
+            (fun (eff, i) (name, adjustment) ->
+              let eff =
+                match Effect_context.handle name eff with
+                | Error err -> raise (Apply_error err)
+                | Ok (None, eff) -> eff
+                | Ok (Some ty, eff) -> begin
+                    match adjustment with
+                    | Rename { to_hash; to_index } ->
+                        let outer = Hashtbl.find outer to_hash in
+                        let outer_name, outer_tyo = outer.(to_index) in
+                        let outer_ty =
+                          match outer_tyo with
+                          | None -> ty
+                          | Some outer_ty -> contract name ty old_ty
+                        in
+                        outer.(to_index) <- (outer_name, Some outer_ty);
+                        eff
+                    | Bind a ->
+                        consume name i ty a;
+                        eff
+                  end
+              in
+              eff, i + 1)
+            (eff, 0) renames)
         eff t.renames
     in
     let outer_effs =
@@ -155,7 +158,7 @@ module General_adjustment = struct
             match adjust1, adjust2 with
             | Rename _, Bind _ | Bind _, Rename _ ->
                 different_at name1 i
-            | Bind c1, Bind c2 -> consumed name1 c1 c2
+            | Bind c1, Bind c2 -> consumed name1 i c1 c2
             | Rename { to_hash = to_hash1;
                        to_index = to_index1; },
               Rename { to_hash = to_hash2;
@@ -169,7 +172,7 @@ module General_adjustment = struct
                 let to_name2 = to_image2.(to_index2) in
                 if not (String.equal to_name1 to_name2) then begin
                   different_output_names
-                    ~origin:name1 ~index:i
+                    ~origin:name1 ~origin_index:i
                     ~first_destination:to_name1
                     ~second_destination:to_name2
                     ~destination_index:to_index
@@ -361,7 +364,7 @@ module General_adjustment = struct
     let different_input_names _ _ _ = ()
 
     let different_output_names
-          ~origin:_ ~index:_ ~first_destination:_
+          ~origin:_ ~origin_index:_ ~first_destination:_
           ~second_destination:_ ~destination_index:_ = ()
 
     let different_at t1 t2 origin origin_index =
@@ -396,12 +399,6 @@ module General_adjustment = struct
 
   type equal_error =
     | Different_input_names of string * string * index
-    | Different_output_names of
-        { origin : string;
-          index : int;
-          first_destination : string;
-          second_destination : string;
-          destination_index : int; }
     | Missing_bind of string * int * position
     | Missing_rename of string * int * position
     | Different_renames of
@@ -415,15 +412,18 @@ module General_adjustment = struct
     exception Equal_error of equal_error
 
     let different_input_names name1 name2 index =
-      raise Equal_error(Different_input_names(name1, name2, index)
+      raise Equal_error(Different_input_names(name1, name2, index))
 
     let different_output_names
-          ~origin ~index ~first_destination
+          ~origin ~origin_index ~first_destination
           ~second_destination ~destination_index =
+      let first_destination_index = destination_index in
+      let second_destination_index = destination_index in
       let err =
-        Different_output_names
-          { orgin; index; first_destination;
-            second_destination; destination_index }
+        Different_renames
+          { orgin; origin_index;
+            first_destination; first_destination_index;
+            second_destination; second_destination_index }
       in
       raise (Equal_error err)
 

@@ -545,6 +545,13 @@ let snd4 (_,x,_, _) = x
 let thd4 (_,_,x,_) = x
 let for4 (_,_,_,x) = x
 
+type position =
+  | First
+  | Second
+
+let swap_position = function
+  | First -> Second
+  | Second -> First
 
 module LongString = struct
   type t = bytes array

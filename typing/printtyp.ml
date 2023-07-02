@@ -521,10 +521,11 @@ and raw_type_desc ppf = function
   | Tlink t -> fprintf ppf "@[<1>Tlink@,%a@]" raw_type t
   | Tsubst t -> fprintf ppf "@[<1>Tsubst@,%a@]" raw_type t
   | Tunivar name -> fprintf ppf "Tunivar %a" print_name name
-  | Tpoly (t, tl, eff) ->
-      fprintf ppf "@[<hov1>Tpoly(@,%a,@,%a,@,%a)@]"
+  | Tpoly (t, tl, adj, eff) ->
+      fprintf ppf "@[<hov1>Tpoly(@,%a,@,%a,@,%a@,%a)@]"
         raw_type t
         raw_type_list tl
+        raw_effect_adjustment_option adj
         raw_effect_context_option eff
   | Tvariant row ->
       fprintf ppf
@@ -550,57 +551,46 @@ and raw_effect_context_option ppf eff =
   | None -> fprintf ppf "-"
   | Some eff -> raw_effect_context ppf eff
 
+and raw_effect_adjustment_option ppf eff =
+  match eff with
+  | None -> fprintf ppf "-"
+  | Some eff -> raw_effect_adjustment ppf eff
+
 and raw_effect_type ppf tyo =
   match tyo with
   | None -> fprintf ppf "."
   | Some ty -> raw_type ppf ty
 
-and raw_effect_extension_desc ppf desc =
+and raw_effect_context_desc ppf desc =
   pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ";@ ")
     (fun ppf (s, ty) -> fprintf ppf "@[%s: %a@]" s raw_effect_type ty)
     ppf desc
 
-and raw_effect_extension ppf eff =
-  raw_effect_extension_desc ppf (Effect_context.Extension.desc eff)
+and raw_effect_context ppf eff =
+  raw_effect_context_desc ppf (Effect_context.desc eff)
 
-and raw_effect_mode_desc ppf desc =
-  let open Effect_context.Mode.Desc in
+and raw_effect_adjustment_desc ppf desc =
+  let open Effect_mode.Adjustment.Desc in
   let raw_effect_outer ppf = function
     | None -> fprintf ppf ": ."
     | Some var -> fprintf ppf "as %s" var
   in
   let raw_effect_inner ppf = function
-    | Bind ty ->
-        fprintf ppf ":@ %a" raw_type ty
-    | Rename var ->
-        fprintf ppf "as %s" var
+    | Bind (Some ty) -> fprintf ppf ":@ %a" raw_type ty
+    | Bind None -> fprintf ppf ": ."
+    | Rename var -> fprintf ppf "as %s" var
   in
-  let raw_effect_adjustment ppf desc =
-    fprintf ppf
-      "@[<2>[%a@ /@ %a]@]"
+  fprintf ppf
+    "@[<2>[%a@ /@ %a]@]"
     (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ";@ ")
        (fun ppf (s, outer) -> fprintf ppf "@[%s %a@]" s raw_effect_outer outer))
     desc.outer
     (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ";@ ")
        (fun ppf (s, inner) -> fprintf ppf "@[%s %a@]" s raw_effect_inner inner))
     desc.inner
-  in
-  let raw_effect_mode_origin ppf = function
-    | Default m ->
-        fprintf ppf "Default of %a" Alloc_mode.print m
-    | Expected adj ->
-        fprintf ppf "Expected of %a" raw_effect_adjustment adj
-  in
-  fprintf ppf "@[[%a|%a]@]"
-    raw_effect_mode_origin desc.origin raw_effect_adjustment desc.offset
 
-and raw_effect_context ppf eff =
-  let open Effect_context.Desc in
-  let {modes; extension} = Effect_context.desc eff in
-  fprintf ppf "@[<2>{@ modes:@ %a;@ extension:@ %a@ }@]"
-     (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf "or@ ")
-        raw_effect_mode_desc) modes
-     raw_effect_extension_desc extension
+and raw_effect_adjustment ppf adj =
+  raw_effect_adjustment_desc ppf (Effect_mode.Adjustment.desc adj)
 
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
@@ -983,9 +973,12 @@ let rec mark_loops_rec visited ty =
     | Tnil -> ()
     | Tsubst ty -> mark_loops_rec visited ty
     | Tlink _ -> fatal_error "Printtyp.mark_loops_rec (2)"
-    | Tpoly (ty, tyl, eff) ->
+    | Tpoly (ty, tyl, adj, eff) ->
         List.iter (fun t -> add_alias t) tyl;
         mark_loops_rec visited ty;
+        Option.iter
+          (fun adj -> Effect_mode.Adjustment.iter (mark_loops_rec visited) adj)
+          adj;
         Option.iter
           (fun eff -> Effect_context.iter (mark_loops_rec visited) eff)
           eff
@@ -1117,20 +1110,20 @@ let rec tree_of_typexp sch ty =
         tree_of_typexp sch ty
     | Tlink _ ->
         fatal_error "Printtyp.tree_of_typexp"
-    | Tpoly (ty, [], eff) ->
-        tree_of_type_and_effect_context_option sch ty eff
-    | Tpoly (ty, tyl, eff) ->
+    | Tpoly (ty, [], adj, eff) ->
+        tree_of_type_poly sch ty adj eff
+    | Tpoly (ty, tyl, adj, eff) ->
         (*let print_names () =
           List.iter (fun (_, name) -> prerr_string (name ^ " ")) !names;
           prerr_string "; " in *)
         let tyl = List.map repr tyl in
-        if tyl = [] then tree_of_type_and_effect_context_option sch ty eff else begin
+        if tyl = [] then tree_of_type_poly sch ty adj eff else begin
           let old_delayed = !delayed in
           (* Make the names delayed, so that the real type is
              printed once when used as proxy *)
           List.iter add_delayed tyl;
           let tl = List.map (name_of_type new_name) tyl in
-          let tr = Otyp_poly (tl, tree_of_type_and_effect_context_option sch ty eff) in
+          let tr = Otyp_poly (tl, tree_of_type_poly sch ty adj eff) in
           (* Forget names when we leave scope *)
           remove_names tyl;
           delayed := old_delayed; tr
@@ -1148,8 +1141,15 @@ let rec tree_of_typexp sch ty =
     Otyp_alias (pr_typ (), name_of_type new_name px) end
   else pr_typ ()
 
-and tree_of_type_and_effect_context_option sch ty eff =
+and tree_of_type_poly sch ty adj eff =
   let ty = tree_of_typexp sch ty in
+  let ty =
+    match adj with
+    | None -> ty
+    | Some adj ->
+        let adj = tree_of_effect_adjustment sch adj in
+        Otyp_effect_adjustment(ty, adj)
+  in
   match eff with
   | None -> ty
   | Some eff ->
@@ -1157,13 +1157,18 @@ and tree_of_type_and_effect_context_option sch ty eff =
       Otyp_effect_context(ty, eff)
 
 and tree_of_effect_context sch eff =
-  List.map
-    (fun (s, tyo) -> (s, Option.map (tree_of_typexp sch) tyo))
-    eff.effects
+  Effect_context.Desc.map
+    (tree_of_typexp sch)
+    (Effect_context.desc eff)
+
+and tree_of_effect_adjustment sch adj =
+  Effect_mode.Adjustment.Desc.map
+    (tree_of_typexp sch)
+    (Effect_mode.Adjustment.desc adj)
 
 and tree_of_type_and_effect_context sch ty eff =
-  let ty = tree_of_typexp sch ty in
-  if eff.effects = [] then
+  let ty = tree_of_typexp sch ty in  
+  if Effect_context.is_empty eff then
     ty
   else begin
     let eff = tree_of_effect_context sch eff in
@@ -1574,16 +1579,16 @@ let value_description id ppf decl =
 
 let method_type (_, kind, ty) =
   match field_kind_repr kind, repr ty with
-    Fpresent, {desc=Tpoly(ty, tyl, eff)} -> (ty, tyl, eff)
-  | _       , ty                    -> (ty, [], None)
+    Fpresent, {desc=Tpoly(ty, tyl, adj, eff)} -> (ty, tyl, adj, eff)
+  | _       , ty                    -> (ty, [], None, None)
 
 let tree_of_metho sch concrete csil (lab, kind, ty) =
   if lab <> dummy_method then begin
     let kind = field_kind_repr kind in
     let priv = kind <> Fpresent in
     let virt = not (Concr.mem lab concrete) in
-    let (ty, tyl, eff) = method_type (lab, kind, ty) in
-    let tty = tree_of_type_and_effect_context_option sch ty eff in
+    let (ty, tyl, adj, eff) = method_type (lab, kind, ty) in
+    let tty = tree_of_type_poly sch ty adj eff in
     remove_names tyl;
     Ocsg_method (lab, priv, virt, tty) :: csil
   end
@@ -1608,13 +1613,14 @@ let rec prepare_class_type params = function
       in
       List.iter
         (fun met ->
-          let ty, _, eff = method_type met in
+          let ty, _, adj, eff = method_type met in
           mark_loops ty;
           Option.iter
-            (fun eff ->
-              List.iter
-                (fun (_, tyo) -> Option.iter mark_loops tyo)
-                eff.effects)
+            (fun adj ->
+              Effect_mode.Adjustment.iter mark_loops adj)
+            adj;
+          Option.iter
+            (fun eff -> Effect_context.iter mark_loops eff)
             eff)
         fields;
       Vars.iter (fun _ (_, _, ty) -> mark_loops ty) sign.csig_vars
@@ -2127,7 +2133,7 @@ let print_tags =
   Format.pp_print_list ~pp_sep:comma print_tag
 
 let is_unit_arg env ty =
-  let ty, vars, _ = get_poly ty in
+  let ty, vars, _, _ = get_poly ty in
   if vars <> [] then false
   else begin
     match (Ctype.expand_head env ty).desc with
@@ -2250,17 +2256,82 @@ let explain_object = function
         print_pos pos
     )
 
-let explain_effect = function
-  | Trace.Missing_effect (pos,f) ->
-      Some(dprintf "@,@[The %a effect context has no effect %s@]" print_pos pos f)
-  | Trace.Different_effect_names (s1, s2) ->
-      Some(dprintf "@,@[The first effect context has effect %s@ \
-                    where the second has effect %s.@ These effect names have the same hash.@]" s1 s2)
-  | Trace.No_effect pos -> Some(
+let explain_missing_effect pos f =
+  dprintf "@,@[The %a effect context has no effect %s@]" print_pos pos f
+
+let explain_different_effect_names s1 s2 =
+  dprintf "@,@[The first effect context has effect %s@ \
+               where the second has effect %s.@ \
+               These effect names have the same hash.@]"
+    s1 s2
+
+let explain_effect_context_equality
+    : Effect_context.Equal_error.t -> _ = function
+  | Missing_effect (pos,f) ->
+      Some (explain_missing_effect pos f)
+  | Different_effect_names (s1, s2) ->
+      Some (explain_different_effect_names s1 s2)
+
+let explain_effect_context_subeffect
+    : Effect_context.Subeffect_error.t -> _ = function
+  | Missing_effect f ->
+      Some (explain_missing_effect Second f)
+  | Different_effect_names (s1, s2) ->
+      Some (explain_different_effect_names s1 s2)
+
+let explain_effect_context_join : Effect_context.Join_error.t -> _ = function
+  | Different_effect_names (s1, s2) ->
+      Some (explain_different_effect_names s1 s2)
+
+let explain_effect_context : Trace.eff -> _ = function
+  | No_effect pos -> Some(
       dprintf
         "@,@[The %a type has no effect context@]"
         print_pos pos
     )
+  | Not_equal err -> explain_effect_context_equality err
+  | Not_subeffects err -> explain_effect_context_subeffect err
+  | Cannot_join err -> explain_effect_context_join err
+
+let print_singleton_effect ppf (name, index) =
+  for _ = 0 to (index - 1) do
+    fprintf ppf "%s: .;" name
+  done;
+  fprintf ppf "%s: 'a" name
+
+let explain_effect_adjustment_equality
+    : Effect_mode.Adjustment.Equal_error.t -> _ = function
+  | Different_input_names(s1, s2, idx) ->
+      dprintf "@,@[The first adjustment expects %a@ \
+               where the second would expect %a.@ \
+               %s and %s have the same hash.@]"
+        print_singleton_effect (s1, idx)
+        print_singleton_effect (s2, idx)
+        s1 s2
+  | Missing_bind(s, _, pos) ->
+      dprintf "@,@[The %a adjustment does not bind %s.@]"
+        print_pos pos s
+  | Missing_rename(s, _, pos) ->
+      dprintf "@,@[The %a adjustment does not rename %s.@]"
+        print_pos pos s
+  | Different_renames
+      { origin; origin_index;
+        first_destination; first_destination_index;
+        second_destination; second_destination_index; } ->
+      dprintf "@,@[The first adjustment maps %a to %a@ \
+               where the second would map it to %a.@]"
+        print_singleton_effect (origin, origin_index)
+        print_singleton_effect (first_destination, first_destination_index)
+        print_singleton_effect (second_destination, second_destination_index)
+
+let explain_effect_adjustment = function
+  | Trace.No_adjustment pos -> Some(
+      dprintf
+        "@,@[The %a type has no effect adjustment@]"
+        print_pos pos
+    )
+  | Trace.Not_equal err ->
+      Some (explain_effect_adjustment_equality err)
 
 let explanation intro prev env = function
   | Trace.Diff { Trace.got = _, s; expected = _,t } -> explanation_diff env s t
@@ -2269,9 +2340,12 @@ let explanation intro prev env = function
         Some(dprintf "@,Types for method %s are incompatible" name)
   | Trace.Incompatible_effects { name; _ } ->
         Some(dprintf "@,Types for effect %s are incompatible" name)
+  | Trace.Incompatible_adjustments { name; _ } ->
+        Some(dprintf "@,Types for effect %s are incompatible" name)
   | Trace.Variant v -> explain_variant v
   | Trace.Obj o -> explain_object o
-  | Trace.Eff e -> explain_effect e
+  | Trace.Eff e -> explain_effect_context e
+  | Trace.Adj a -> explain_effect_adjustment a
   | Trace.Effect_diff _ -> None
   | Trace.Rec_occur(x,y) ->
       reset_and_mark_loops y;

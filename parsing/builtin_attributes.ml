@@ -507,38 +507,31 @@ let has_operation attrs =
   else
     Ok false
 
-let outer_renaming_item_of_expression pexp =
+
+let list_of_payload of_pexp payload =
+  let pexps =
+    match payload with
+    | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] ->
+        pexps
+    | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] ->
+        [pexp]
+    | _ -> []
+  in
+  List.filter_map of_pexp pexps
+
+let outer_item_of_pexp pexp =
   match pexp.pexp_desc with
-  | Pexp_extension({txt=name}, PPat(pat, None)) -> begin
-      match pat.ppat_desc with
-      | Ppat_any -> Some (name, None)
-      | Ppat_var v -> Some (name, Some v)
-      | _ -> None
-    end
+  | Pexp_extension({txt=name}, PPat({ppat_desc=Ppat_var v}, None)) ->
+      Some (name, Some v)
+  | Pexp_extension({txt=name}, PStr []) ->
+      Some (name, None)
   | _ -> None
 
-let outer_renaming_list_of_payload = function
-  | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] ->
-      List.filter_map outer_renaming_item_of_expression pexps
-  | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] ->
-      List.filter_map outer_renaming_item_of_expression [pexp]
-  | _ -> []  
-
-let inner_renaming_item_of_expression pexp =
+let inner_renaming_item_of_pexp pexp =
   match pexp.pexp_desc with
-  | Pexp_extension({txt=name}, PPat(pat, None)) -> begin
-      match pat.ppat_desc with
-      | Ppat_var v -> Some (name, v)
-      | _ -> None
-    end
+  | Pexp_extension({txt=name}, PPat({ppat_desc=Ppat_var v}, None)) ->
+      Some (name, v)
   | _ -> None
-
-let inner_renaming_list_of_payload = function
-  | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] ->
-      List.filter_map inner_renaming_item_of_expression pexps
-  | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] ->
-      List.filter_map inner_renaming_item_of_expression [pexp]
-  | _ -> []  
 
 let effect_renaming_of_payload payload =
     match payload with
@@ -548,6 +541,32 @@ let effect_renaming_of_payload payload =
       if not (Clflags.Extension.is_enabled Effects) then
         Error `Disabled
       else
-        Ok (outer_renaming_list_of_payload outer,
-            inner_renaming_list_of_payload inner)
+        Ok (list_of_payload outer_item_of_pexp outer,
+            list_of_payload inner_renaming_item_of_pexp inner)
+  | _ -> Error `Payload
+
+type inner_adjustment_item =
+  | Rename of string Location.loc
+  | Bind of core_type option
+
+let inner_adjustment_item_of_pexp pexp =
+  match pexp.pexp_desc with
+  | Pexp_extension({txt=name}, PPat({ppat_desc=Ppat_var v}, None)) ->
+      Some (name, Rename v)
+  | Pexp_extension({txt=name}, PTyp t) ->
+      Some (name, Bind (Some t))
+  | Pexp_extension({txt=name}, PStr []) ->
+      Some (name, Bind None)
+  | _ -> None
+
+let effect_adjustment_of_payload payload =
+    match payload with
+  | PStr [{pstr_desc=Pstr_eval({pexp_desc=
+      Pexp_tuple([{pexp_desc=Pexp_extension({txt="outer"}, outer)};
+                  {pexp_desc=Pexp_extension({txt="inner"}, inner)}])}, [])}] ->
+      if not (Clflags.Extension.is_enabled Effects) then
+        Error `Disabled
+      else
+        Ok (list_of_payload outer_item_of_pexp outer,
+            list_of_payload inner_adjustment_item_of_pexp inner)
   | _ -> Error `Payload

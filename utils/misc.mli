@@ -322,6 +322,12 @@ val snd4: 'a * 'b * 'c * 'd -> 'b
 val thd4: 'a * 'b * 'c * 'd -> 'c
 val for4: 'a * 'b * 'c * 'd -> 'd
 
+type position =
+  | First
+  | Second
+
+val swap_position : position -> position
+
 module LongString :
   sig
     type t = bytes array

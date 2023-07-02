@@ -283,7 +283,7 @@ let expr sub {exp_extra; exp_desc; exp_env; _} =
   | Texp_probe {handler;_} -> sub.expr sub handler
   | Texp_probe_is_enabled _ -> ()
   | Texp_perform (_, _, _, args) -> List.iter (sub.expr sub) args
-  | Texp_effect_adjustment(_, exp) -> sub.expr sub exp
+  | Texp_rename_effects(_, exp) -> sub.expr sub exp
 
 let package_type sub {pack_fields; _} =
   List.iter (fun (_, p) -> sub.typ sub p) pack_fields

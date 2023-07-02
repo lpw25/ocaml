@@ -628,17 +628,17 @@ let expression sub exp =
           Exp.mk ~loc:Location.none (Pexp_extension(str, PStr payload))
         in
         Pexp_apply(ext, [Nolabel, constr])
-    | Texp_effect_adjustment(adj, arg) ->
-        let outer_expr outer =
-          let pat =
-            match outer.outer_binding with
-            | None -> Pat.any ()
-            | Some v -> Pat.var v
+    | Texp_rename_effects(ren, arg) ->
+        let outer_expr (name, outer) =
+          let payload =
+            match outer with
+            | None -> PStr []
+            | Some v -> PPat(Pat.var v, None)
           in
-          Exp.extension (mknoloc outer.outer_label, PPat(pat, None))
+          Exp.extension (mknoloc name, payload)
         in
         let outer_payload =
-          match adj.ea_outer with
+          match ren.er_outer with
           | [] -> PStr []
           | [outer] -> PStr[Str.eval (outer_expr outer)]
           | outers -> PStr[Str.eval (Exp.tuple (List.map outer_expr outers))]
@@ -647,12 +647,11 @@ let expression sub exp =
         let outer =
           Exp.extension ~loc:Location.none (outer_str, outer_payload)
         in
-        let inner_expr inner =
-          Exp.extension
-            (mknoloc inner.inner_label, PPat(Pat.var inner.inner_var, None))
+        let inner_expr (name, inner) =
+          Exp.extension (mknoloc name, PPat(Pat.var inner, None))
         in
         let inner_payload =
-          match adj.ea_inner with
+          match ren.er_inner with
           | [] -> PStr []
           | [inner] -> PStr[Str.eval (inner_expr inner)]
           | inners -> PStr[Str.eval (Exp.tuple (List.map inner_expr inners))]
@@ -662,7 +661,7 @@ let expression sub exp =
           Exp.extension ~loc:Location.none (inner_str, inner_payload)
         in
         let payload = [Str.eval (Exp.tuple [outer; inner])] in
-        let str = mknoloc "extension.adjust" in
+        let str = mknoloc "extension.renaming" in
         let ext =
           Exp.mk ~loc:Location.none (Pexp_extension(str, PStr payload))
         in

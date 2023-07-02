@@ -118,3 +118,12 @@ val effect_renaming_of_payload :
   Parsetree.payload
   -> ((string * string Location.loc option) list
       * (string * string Location.loc) list, [`Disabled | `Payload]) result
+
+type inner_adjustment_item =
+  | Rename of string Location.loc
+  | Bind of Parsetree.core_type option
+
+val effect_adjustment_of_payload :
+  Parsetree.payload
+  -> ((string * string Location.loc option) list
+      * (string * inner_adjustment_item) list, [`Disabled | `Payload]) result

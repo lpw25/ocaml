@@ -274,6 +274,9 @@ let rec print_out_type_0 mode ppf =
       fprintf ppf "@[<hov 2>%a.@ %a@]"
         pr_vars sl
         (print_out_type_0 mode) ty
+  | Otyp_effect_adjustment(t, adj) ->
+      fprintf ppf "@[<1>%a %a@]"
+        (print_out_type_0 Oam_local) t print_out_effect_adjustment adj
   | Otyp_effect_context(t, eff) ->
       fprintf ppf "@[<1>%a %a@]"
         (print_out_type_0 Oam_local) t print_out_effect_context eff
@@ -363,7 +366,9 @@ and print_out_type_3 mode ppf =
          else if tags = None then "> " else "? ")
         print_fields row_fields
         print_present tags
-  | Otyp_alias _ | Otyp_poly _ | Otyp_effect_context _ | Otyp_arrow _ | Otyp_tuple _ as ty ->
+  | Otyp_alias _ | Otyp_poly _
+  | Otyp_effect_adjustment _ | Otyp_effect_context _
+  | Otyp_arrow _ | Otyp_tuple _ as ty ->
       pp_open_box ppf 1;
       pp_print_char ppf '(';
       print_out_type_0 mode ppf ty;
@@ -451,8 +456,8 @@ and print_out_effect ppf (s, tyo) =
   | None -> fprintf ppf "%s: ." s
   | Some ty -> fprintf ppf "%s:@ %a" s print_out_type ty 
 
-and print_out_effect_extension ppf eff =
-  fprintf ppf "[%a]"
+and print_out_effect_context ppf eff =
+  fprintf ppf "@[<2>[%a]@]"
     (print_list print_out_effect (fun ppf -> fprintf ppf ";@ "))
     eff
 
@@ -462,43 +467,17 @@ and print_out_effect_adjustment_outer ppf (s, outer) =
   | Some var -> fprintf ppf "%s as %s" s var
 
 and print_out_effect_adjustment_inner ppf (s, inner) =
-  match inner with
-  | Oeai_rename var -> fprintf ppf "%s as %s" s var
-  | Oeai_bind None -> fprintf ppf "%s: ." s
-  | Oeai_bind (Some ty) -> fprintf ppf "%s:@ %a" s print_out_type ty
+  match (inner : _ Effect_mode.Adjustment.Desc.inner) with
+  | Rename var -> fprintf ppf "%s as %s" s var
+  | Bind None -> fprintf ppf "%s: ." s
+  | Bind (Some ty) -> fprintf ppf "%s:@ %a" s print_out_type ty
 
-and print_out_effect_adjustment ppf { oea_outer; oea_inner } =
-  fprintf ppf "@[<2>%a@ /@ %a@]"
+and print_out_effect_adjustment ppf (adj : _ Effect_mode.Adjustment.Desc.t) =
+  fprintf ppf "@[<2>[+ %a@ /@ %a]@]"
     (print_list print_out_effect_adjustment_outer (fun ppf -> fprintf ppf ";@ "))
-    oea_outer
+    adj.outer
     (print_list print_out_effect_adjustment_inner (fun ppf -> fprintf ppf ";@ "))
-    oea_inner
-
-and print_out_effect_mode ppf { oem_origin; oem_offset } =
-  match oem_origin with
-  | Oemo_default (Oam_global | Oam_unknown) -> ()
-  | Oemo_default Oam_local -> begin
-      match oem_offset with
-      | { oea_outer = []; oea_inner = [] } -> ()
-      | _ ->
-          fprintf ppf "@[<2>[- %a]]@"
-            print_out_effect_adjustment oem_offset
-    end
-  | Oemo_expected adj -> begin
-      match oem_offset with
-      | { oea_outer = []; oea_inner = [] } ->
-          fprintf ppf "@[<2>[+ %a]]@"
-            print_out_effect_adjustment adj
-      | _ ->
-          fprintf ppf "@[<2>[+ %a@ - %a]]@"
-            print_out_effect_adjustment adj
-            print_out_effect_adjustment oem_offset
-    end
-
-and print_out_effect_context ppf { oeff_mode; oeff_extension } =
-  fprintf ppf "%a%a"
-    print_out_effect_mode oeff_mode
-    print_out_effect_extension oeff_extension
+    adj.inner
 
 let out_effect_context = ref print_out_effect_context
 

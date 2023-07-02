@@ -149,7 +149,6 @@ let option i f ppf x =
 
 let longident i ppf li = line i ppf "%a\n" fmt_longident li;;
 let string i ppf s = line i ppf "\"%s\"\n" s;;
-let string_loc i ppf s = string i ppf s.txt
 let arg_label i ppf = function
   | Nolabel -> line i ppf "Nolabel\n"
   | Optional s -> line i ppf "Optional \"%s\"\n" s
@@ -329,11 +328,19 @@ and comprehension i ppf comp_types=
     Option.iter (expression i ppf) guard
   ) comp_types
 
+and effect_renaming_outer i ppf (name, outer) =
+  match outer with
+  | Some s -> line i ppf "\"%s\" as \"%s\"" name s.txt
+  | None -> line i ppf "%s : ." name
+
+and effect_renaming_inner i ppf (name, s) =
+  line i ppf "\"%s\" as \"%s\"" name s.txt
+
 and effect_renaming i ppf {er_outer;er_inner} =
   line i ppf "outer:\n";
-  list (i+1) (fun i -> option i string_loc) ppf er_outer;
+  list (i+1) effect_renaming_outer ppf er_outer;
   line i ppf "inner:\n";
-  list (i+1) string_loc ppf er_inner
+  list (i+1) effect_renaming_inner ppf er_inner
 
 and expression i ppf x =
   line i ppf "expression %a\n" fmt_location x.exp_loc;
