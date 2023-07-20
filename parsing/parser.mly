@@ -3819,11 +3819,11 @@ effect:
     { $1 }
 ;
 effect_var:
-  label COLON mkrhs(LIDENT)
+  label AS mkrhs(LIDENT)
     { ($1, Pat.var $3) }
 ;
 effect_binding:
-  | label COLON mkrhs(LIDENT)
+  | label AS mkrhs(LIDENT)
       { ($1, Pat.var $3) }
   | label COLON DOT
       { ($1, Pat.any ()) }
