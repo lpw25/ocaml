@@ -7184,7 +7184,7 @@ and type_let
          )
     )
     pat_list spatl exp_list;
-  let pvs =
+  let pvs' =
     List.map
       (fun pv ->
         let pv_type, pv_eff = instance_pv_scheme pv.pv_type pv.pv_eff in
@@ -7200,7 +7200,7 @@ and type_let
        end;
        lower_current_eff exp.exp_loc env exp.exp_eff)
     pat_list exp_list;
-  iter_pattern_variables_type generalize_pv_scheme pvs;
+  iter_pattern_variables_type generalize_pv_scheme pvs';
   List.iter2
     (fun (_,_,_,expected_ty) (exp, vars) ->
        match vars with
