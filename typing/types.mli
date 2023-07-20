@@ -125,9 +125,8 @@ and type_desc =
   | Tpoly of
       type_expr
       * type_expr list
-      * effect_adjustment option
-      * effect_context option
-  (** [Tpoly (ty,tyl,adj,ctx)] ==> ['a1... 'an. ty [+adj][ctx]],
+      * effect_modality
+  (** [Tpoly (ty,tyl,eff)] ==> ['a1... 'an. ty [eff]],
       where 'a1 ... 'an are names given to types in tyl
       and occurrences of those types in ty. *)
 
@@ -154,6 +153,17 @@ and alloc_mode =
 and effect_context = type_expr Effect_context.t
 
 and effect_adjustment = type_expr Effect_mode.Adjustment.t
+
+and effect_modality =
+  | Enone
+  | Eadjustment of effect_adjustment
+  | Econtext of effect_context
+
+and effect_mode = (type_expr, alloc_mode) Effect_mode.Mode.t
+
+and effect_mode_var = (type_expr, alloc_mode) Effect_mode.Mode.Var.t
+
+and effect_mode_usage = (type_expr, alloc_mode) Effect_mode.Mode.Usage.t
 
 (** [  `X | `Y ]       (row_closed = true)
     [< `X | `Y ]       (row_closed = true)
@@ -407,9 +417,9 @@ and record_representation =
   | Record_extension of Path.t          (* Inlined record under extension *)
 
 and global_flag =
-  | Global
-  | Nonlocal
-  | Unrestricted
+  | Gf_global
+  | Gf_nonlocal
+  | Gf_unrestricted
 
 and label_declaration =
   {

@@ -64,14 +64,13 @@ module Unification_trace: sig
     | Self_cannot_be_closed
 
   type eff =
-    | No_effect of position
-    | Not_equal of Effect_context.Equal_error.t
-    | Not_subeffects of Effect_context.Subeffect_error.t
-    | Cannot_join of Effect_context.Join_error.t
-
-  type adj =
+    | No_context of position
     | No_adjustment of position
-    | Not_equal of Effect_mode.Adjustment.Equal_error.t
+    | Different_modalities of position
+    | Not_equal_contexts of Effect_context.Equal_error.t
+    | Not_sub_contexts of Effect_context.Subeffect_error.t
+    | Cannot_join_contexts of Effect_context.Join_error.t
+    | Not_equal_adjustments of Effect_mode.Adjustment.Equal_error.t
 
   type 'a elt =
     | Diff of 'a diff
@@ -82,11 +81,8 @@ module Unification_trace: sig
     | Rec_occur of type_expr * type_expr
     | Incompatible_effects of
         {name:string; diff:type_expr diff }
-    | Incompatible_adjustments of
-        {name:string; index:int; diff:type_expr diff }
     | Eff of eff
-    | Adj of adj
-    | Effect_diff of effect_context diff
+    | Effect_diff of effect_modality diff
 
   type t = desc elt list
 
@@ -118,6 +114,7 @@ exception Tags of label * label
 exception Subtype of Unification_trace.t * Unification_trace.t
 exception Cannot_expand
 exception Cannot_apply
+exception Escaped
 
 val init_def: int -> unit
         (* Set the initial variable level *)
@@ -218,8 +215,8 @@ val limited_generalize: type_expr -> type_expr -> unit
            Make the remaining of the type non-generalizable *)
 val generalize_effect_context: effect_context -> unit
 val generalize_effect_context_structure: effect_context -> unit
-val generalize_poly_effect_context: effect_context option -> unit
-val generalize_poly_effect_context_structure: effect_context option -> unit
+val generalize_effect_modality: effect_modality -> unit
+val generalize_effect_modality_structure: effect_modality -> unit
 
 val fully_generic: type_expr -> bool
 
@@ -271,18 +268,14 @@ val instance_class:
         type_expr list -> class_type -> type_expr list * class_type
 val instance_poly:
         ?keep_names:bool
-        -> bool -> type_expr list -> type_expr
-        -> effect_adjustment option -> effect_context option
-        -> type_expr list * type_expr
-           * effect_adjustment option * effect_context option
+        -> bool -> type_expr list -> type_expr -> effect_modality
+        -> type_expr list * type_expr * effect_modality
         (* Take an instance of a type scheme containing free univars *)
 val polyfy: Env.t -> type_expr -> type_expr list
-            -> effect_adjustment option -> effect_context option
-            -> type_expr * bool
+            -> effect_modality -> type_expr * bool
 val instance_label:
         bool -> label_description ->
-        type_expr list * type_expr * type_expr
-        * effect_adjustment option * effect_context option
+        type_expr list * type_expr * type_expr * effect_modality
         (* Same, for a label *)
 val prim_mode :
         alloc_mode option -> (Primitive.mode * Primitive.native_repr)
@@ -326,11 +319,11 @@ val unify_var: Env.t -> type_expr -> type_expr -> unit
 val unify_alloc_mode: alloc_mode -> alloc_mode -> unit
 val join_effect_contexts:
         Env.t -> effect_context -> effect_context -> effect_context
-val unify_effect_context:
-        Env.t -> effect_context -> effect_context -> unit
-val unify_effect_context_option:
-        Env.t -> effect_context option -> effect_context option -> unit
+val unify_effect_modality:
+        Env.t -> effect_modality -> effect_modality -> unit
 val subeffect : Env.t -> effect_context -> effect_context -> unit
+val apply_adjustment : Env.t -> effect_adjustment -> effect_context -> effect_context
+val match_effect_usage_adjusted : Env.t -> effect_mode_usage -> effect_adjustment -> unit
 val filter_arrow: Env.t -> type_expr -> arg_label -> bool ->
                   alloc_mode * type_expr * alloc_mode * type_expr
         (* A special case of unification (with l:'a -> 'b). *)
@@ -344,6 +337,8 @@ val check_filter_method: Env.t -> string -> private_flag -> type_expr -> unit
 val occur_in: Env.t -> type_expr -> type_expr -> bool
 val deep_occur: type_expr -> type_expr -> bool
 val deep_occur_scheme: type_expr -> type_expr -> effect_context -> bool
+val deep_occur_poly:
+        type_expr -> type_expr -> effect_modality -> bool
 val filter_self_method:
         Env.t -> string -> private_flag -> (Ident.t * type_expr) Meths.t ref ->
         type_expr -> Ident.t * type_expr

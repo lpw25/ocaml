@@ -226,17 +226,17 @@ let transl_labels env closed lbls =
     List.map
       (fun ld ->
          let ty = ld.ld_type.ctyp_type in
-         let ty = match ty.desc with Tpoly(t,[],None) -> t | _ -> ty in
+         let ty = match ty.desc with Tpoly(t,[],Enone) -> t | _ -> ty in
          let gbl =
            match ld.ld_mutable with
-           | Mutable -> Types.Global
+           | Mutable -> Gf_global
            | Immutable ->
                if Builtin_attributes.has_global ld.ld_attributes then
-                 Types.Global
+                 Gf_global
                else if Builtin_attributes.has_nonlocal ld.ld_attributes then
-                 Types.Nonlocal
+                 Gf_nonlocal
                else
-                 Types.Unrestricted
+                 Gf_unrestricted
          in
          {Types.ld_id = ld.ld_id;
           ld_mutable = ld.ld_mutable;
@@ -562,7 +562,7 @@ let rec check_constraints_rec env loc visited ty =
   | Tpoly (ty, tl, eff) ->
       let _, ty, eff = Ctype.instance_poly false tl ty eff in
       check_constraints_rec env loc visited ty;
-      Btype.iter_effect_context_option
+      Btype.iter_effect_modality
         (check_constraints_rec env loc visited) eff
   | _ ->
       Btype.iter_type_expr (check_constraints_rec env loc visited) ty
@@ -840,7 +840,7 @@ let check_recursion ~orig_env env loc path decl to_check =
             Ctype.instance_poly ~keep_names:true false tl ty eff
           in
           check_regular cpath args prev_exp prev_expansions ty;
-          Btype.iter_effect_context_option
+          Btype.iter_effect_modality
             (check_regular cpath args prev_exp prev_expansions) eff
       | _ ->
           Btype.iter_type_expr
@@ -1451,7 +1451,7 @@ let check_unboxable env loc ty =
         if tydecl.type_unboxed.default then
           Path.Set.add p acc
         else acc
-      | Tpoly (ty, [], None) -> check_type acc ty
+      | Tpoly (ty, [], Enone) -> check_type acc ty
       | _ -> acc
     with Not_found -> acc
   in
@@ -1466,7 +1466,9 @@ let check_unboxable env loc ty =
 
 (* Translate a value declaration *)
 let transl_value_decl env loc valdecl =
-  let cty, eff = Typetexp.transl_type_scheme env valdecl.pval_type in
+  let cty, teff = Typetexp.transl_type_scheme env valdecl.pval_type in
+  let eff = Option.map (fun teff -> teff.ec_type) teff in
+  let eff = Option.value ~default:Effect_context.empty eff in
   let ty = cty.ctyp_type in
   let v =
   match valdecl.pval_prim with
@@ -1516,6 +1518,7 @@ let transl_value_decl env loc valdecl =
      val_id = id;
      val_name = valdecl.pval_name;
      val_desc = cty; val_val = v;
+     val_eff = teff;
      val_prim = valdecl.pval_prim;
      val_loc = valdecl.pval_loc;
      val_attributes = valdecl.pval_attributes;

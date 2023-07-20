@@ -445,27 +445,37 @@ let has_include_functor attr =
   else
     Ok false
 
+type effect_context =
+  (string Location.loc * Parsetree.core_type option) list
+
 let effect_of_expression pexp =
   match pexp.pexp_desc with
-  | Pexp_extension({txt=name}, PTyp typ) -> Some (name, Some typ)
-  | Pexp_extension({txt=name}, PStr []) -> Some (name, None)
+  | Pexp_extension(name, PTyp typ) -> Some (name, Some typ)
+  | Pexp_extension(name, PStr []) -> Some (name, None)
   | _ -> None
 
-let effect_context_of_payload = function
-  | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] ->
-      List.filter_map effect_of_expression pexps
-  | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] ->
-      List.filter_map effect_of_expression [pexp]
-  | _ -> []
+let effect_context_of_payload payload =
+  let pexps =
+    match payload with
+    | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_tuple pexps},_)}] -> Ok pexps
+    | PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_extension _} as pexp,_)}] -> Ok [pexp]
+    | _ -> Error `Payload
+  in
+  match pexps with
+  | Ok pexps ->
+      if not (Clflags.Extension.is_enabled Effects) then
+        Error `Disabled
+      else
+        Ok (List.filter_map effect_of_expression pexps)
+  | Error _ as err -> err
 
 let get_effect_context attr =
   match List.find_opt (check ["extension.effects"]) attr with
   | None -> Ok None
   | Some attr ->
-      if not (Clflags.Extension.is_enabled Effects) then
-        Error ()
-      else
-        Ok (Some (effect_context_of_payload attr.attr_payload))
+      match effect_context_of_payload attr.attr_payload with
+      | Ok eff -> Ok (Some eff)
+      | Error _ as err -> err
 
 let effect_name_of_payload payload =
   match payload with
@@ -507,7 +517,6 @@ let has_operation attrs =
   else
     Ok false
 
-
 let list_of_payload of_pexp payload =
   let pexps =
     match payload with
@@ -519,30 +528,24 @@ let list_of_payload of_pexp payload =
   in
   List.filter_map of_pexp pexps
 
-let outer_item_of_pexp pexp =
+let renaming_item_of_pexp pexp =
   match pexp.pexp_desc with
-  | Pexp_extension({txt=name}, PPat({ppat_desc=Ppat_var v}, None)) ->
+  | Pexp_extension(name, PPat({ppat_desc=Ppat_var v}, None)) ->
       Some (name, Some v)
-  | Pexp_extension({txt=name}, PStr []) ->
+  | Pexp_extension(name, PStr []) ->
       Some (name, None)
   | _ -> None
 
-let inner_renaming_item_of_pexp pexp =
-  match pexp.pexp_desc with
-  | Pexp_extension({txt=name}, PPat({ppat_desc=Ppat_var v}, None)) ->
-      Some (name, v)
-  | _ -> None
-
 let effect_renaming_of_payload payload =
-    match payload with
+  match payload with
   | PStr [{pstr_desc=Pstr_eval({pexp_desc=
       Pexp_tuple([{pexp_desc=Pexp_extension({txt="outer"}, outer)};
                   {pexp_desc=Pexp_extension({txt="inner"}, inner)}])}, [])}] ->
       if not (Clflags.Extension.is_enabled Effects) then
         Error `Disabled
       else
-        Ok (list_of_payload outer_item_of_pexp outer,
-            list_of_payload inner_renaming_item_of_pexp inner)
+        Ok (list_of_payload renaming_item_of_pexp outer,
+            list_of_payload renaming_item_of_pexp inner)
   | _ -> Error `Payload
 
 type inner_adjustment_item =
@@ -551,22 +554,50 @@ type inner_adjustment_item =
 
 let inner_adjustment_item_of_pexp pexp =
   match pexp.pexp_desc with
-  | Pexp_extension({txt=name}, PPat({ppat_desc=Ppat_var v}, None)) ->
+  | Pexp_extension(name, PPat({ppat_desc=Ppat_var v}, None)) ->
       Some (name, Rename v)
-  | Pexp_extension({txt=name}, PTyp t) ->
+  | Pexp_extension(name, PTyp t) ->
       Some (name, Bind (Some t))
-  | Pexp_extension({txt=name}, PStr []) ->
+  | Pexp_extension(name, PStr []) ->
       Some (name, Bind None)
   | _ -> None
 
-let effect_adjustment_of_payload payload =
-    match payload with
+type effect_adjustment =
+  { outer : (string Location.loc * string Location.loc option) list;
+    inner : (string Location.loc * inner_adjustment_item) list;
+    loc : Location.t }
+
+type effects =
+  | Adjustment of effect_adjustment
+  | Context of effect_context
+
+let effect_adjustment_of_payload loc payload =
+  match payload with
   | PStr [{pstr_desc=Pstr_eval({pexp_desc=
       Pexp_tuple([{pexp_desc=Pexp_extension({txt="outer"}, outer)};
                   {pexp_desc=Pexp_extension({txt="inner"}, inner)}])}, [])}] ->
       if not (Clflags.Extension.is_enabled Effects) then
         Error `Disabled
-      else
-        Ok (list_of_payload outer_item_of_pexp outer,
-            list_of_payload inner_adjustment_item_of_pexp inner)
+      else begin
+        let outer = list_of_payload renaming_item_of_pexp outer in
+        let inner = list_of_payload inner_adjustment_item_of_pexp inner in
+        Ok {outer; inner; loc}
+      end
   | _ -> Error `Payload
+
+let get_effects attr =
+  match List.find_opt (check ["extension.adjustment"]) attr with
+  | Some attr -> begin
+      match effect_adjustment_of_payload attr.attr_loc attr.attr_payload with
+      | Ok adj -> Ok (Some (Adjustment adj))
+      | Error _ as err -> err
+    end
+  | None -> begin
+      match List.find_opt (check ["extension.effects"]) attr with
+      | None -> Ok None
+      | Some attr -> begin
+          match effect_context_of_payload attr.attr_payload with
+          | Ok eff -> Ok (Some (Context eff))
+          | Error _ as err -> err
+        end
+    end

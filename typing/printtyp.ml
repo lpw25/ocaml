@@ -423,6 +423,10 @@ let strings_of_paths namespace p =
   let trees = List.map (tree_of_path namespace) p in
   List.map (Format.asprintf "%a" !Oprint.out_ident) trees
 
+let out_optional_effect_modality ppf = function
+  | None -> fprintf ppf "no modality"
+  | Some eff -> !Oprint.out_effect_modality ppf eff
+
 let () = Env.print_path := path
 
 (* Print a recursive annotation *)
@@ -521,12 +525,11 @@ and raw_type_desc ppf = function
   | Tlink t -> fprintf ppf "@[<1>Tlink@,%a@]" raw_type t
   | Tsubst t -> fprintf ppf "@[<1>Tsubst@,%a@]" raw_type t
   | Tunivar name -> fprintf ppf "Tunivar %a" print_name name
-  | Tpoly (t, tl, adj, eff) ->
-      fprintf ppf "@[<hov1>Tpoly(@,%a,@,%a,@,%a@,%a)@]"
+  | Tpoly (t, tl, eff) ->
+      fprintf ppf "@[<hov1>Tpoly(@,%a,@,%a,@,%a)@]"
         raw_type t
         raw_type_list tl
-        raw_effect_adjustment_option adj
-        raw_effect_context_option eff
+        raw_effect_modality eff
   | Tvariant row ->
       fprintf ppf
         "@[<hov1>{@[%s@,%a;@]@ @[%s@,%a;@]@ %s%B;@ %s%a;@ @[<1>%s%t@]}@]"
@@ -546,15 +549,11 @@ and raw_type_desc ppf = function
       fprintf ppf "@[<hov1>Tpackage(@,%a@,%a)@]" path p
         raw_type_list tl
 
-and raw_effect_context_option ppf eff =
+and raw_effect_modality ppf eff =
   match eff with
-  | None -> fprintf ppf "-"
-  | Some eff -> raw_effect_context ppf eff
-
-and raw_effect_adjustment_option ppf eff =
-  match eff with
-  | None -> fprintf ppf "-"
-  | Some eff -> raw_effect_adjustment ppf eff
+  | Enone -> fprintf ppf "-"
+  | Econtext eff -> raw_effect_context ppf eff
+  | Eadjustment adj -> raw_effect_adjustment ppf adj
 
 and raw_effect_type ppf tyo =
   match tyo with
@@ -973,15 +972,10 @@ let rec mark_loops_rec visited ty =
     | Tnil -> ()
     | Tsubst ty -> mark_loops_rec visited ty
     | Tlink _ -> fatal_error "Printtyp.mark_loops_rec (2)"
-    | Tpoly (ty, tyl, adj, eff) ->
+    | Tpoly (ty, tyl, eff) ->
         List.iter (fun t -> add_alias t) tyl;
         mark_loops_rec visited ty;
-        Option.iter
-          (fun adj -> Effect_mode.Adjustment.iter (mark_loops_rec visited) adj)
-          adj;
-        Option.iter
-          (fun eff -> Effect_context.iter (mark_loops_rec visited) eff)
-          eff
+        iter_effect_modality (mark_loops_rec visited) eff
     | Tunivar _ -> add_named_var ty
 
 let mark_loops ty =
@@ -990,6 +984,12 @@ let mark_loops ty =
 
 let mark_effect_context eff =
   Effect_context.iter mark_loops eff
+
+let mark_effect_adjustment adj =
+  Effect_mode.Adjustment.iter mark_loops eff
+
+let mark_effect_modality eff =
+  iter_effect_modality mark_loops eff
 
 let reset_loop_marks () =
   visited_objects := []; aliased := []; delayed := []
@@ -1010,6 +1010,10 @@ let reset_and_mark_loops_list tyl =
 let reset_and_mark_effect_context eff =
   reset_except_context ();
   mark_effect_context eff
+
+let reset_and_mark_effect_adjustment adj =
+  reset_except_context ();
+  mark_effect_adjustment adj
 
 (* Disabled in classic mode when printing an unification error *)
 let print_labels = ref true
@@ -1110,20 +1114,20 @@ let rec tree_of_typexp sch ty =
         tree_of_typexp sch ty
     | Tlink _ ->
         fatal_error "Printtyp.tree_of_typexp"
-    | Tpoly (ty, [], adj, eff) ->
-        tree_of_type_poly sch ty adj eff
-    | Tpoly (ty, tyl, adj, eff) ->
+    | Tpoly (ty, [], eff) ->
+        tree_of_type_poly sch ty eff
+    | Tpoly (ty, tyl, eff) ->
         (*let print_names () =
           List.iter (fun (_, name) -> prerr_string (name ^ " ")) !names;
           prerr_string "; " in *)
         let tyl = List.map repr tyl in
-        if tyl = [] then tree_of_type_poly sch ty adj eff else begin
+        if tyl = [] then tree_of_type_poly sch ty eff else begin
           let old_delayed = !delayed in
           (* Make the names delayed, so that the real type is
              printed once when used as proxy *)
           List.iter add_delayed tyl;
           let tl = List.map (name_of_type new_name) tyl in
-          let tr = Otyp_poly (tl, tree_of_type_poly sch ty adj eff) in
+          let tr = Otyp_poly (tl, tree_of_type_poly sch ty eff) in
           (* Forget names when we leave scope *)
           remove_names tyl;
           delayed := old_delayed; tr
@@ -1141,20 +1145,11 @@ let rec tree_of_typexp sch ty =
     Otyp_alias (pr_typ (), name_of_type new_name px) end
   else pr_typ ()
 
-and tree_of_type_poly sch ty adj eff =
+and tree_of_type_poly sch ty eff =
   let ty = tree_of_typexp sch ty in
-  let ty =
-    match adj with
-    | None -> ty
-    | Some adj ->
-        let adj = tree_of_effect_adjustment sch adj in
-        Otyp_effect_adjustment(ty, adj)
-  in
-  match eff with
+  match tree_of_effect_modality sch eff with
   | None -> ty
-  | Some eff ->
-      let eff = tree_of_effect_context sch eff in
-      Otyp_effect_context(ty, eff)
+  | Some eff -> Otyp_effect_modality(ty, eff)
 
 and tree_of_effect_context sch eff =
   Effect_context.Desc.map
@@ -1166,13 +1161,22 @@ and tree_of_effect_adjustment sch adj =
     (tree_of_typexp sch)
     (Effect_mode.Adjustment.desc adj)
 
+and tree_of_effect_modality sch = function
+  | Enone -> None
+  | Econtext eff ->
+      let eff = tree_of_effect_context sch eff in
+      Some (Oem_context eff)
+  | Eadjustment adj ->
+      let adj = tree_of_effect_adjustment sch adj in
+      Some (Oem_adjustment adj)
+
 and tree_of_type_and_effect_context sch ty eff =
   let ty = tree_of_typexp sch ty in  
   if Effect_context.is_empty eff then
     ty
   else begin
     let eff = tree_of_effect_context sch eff in
-    Otyp_effect_context(ty, eff)
+    Otyp_effect_modality(ty, Oem_context eff)
   end
 
 and tree_of_row_field sch (l, f) =
@@ -1259,6 +1263,11 @@ let effect_context ppf eff =
   reset_and_mark_effect_context eff;
   let tr = tree_of_effect_context false eff in
   !Oprint.out_effect_context ppf tr
+
+let effect_adjustment ppf adj =
+  reset_and_mark_effect_adjustment adj;
+  let tr = tree_of_effect_adjustment false adj in
+  !Oprint.out_effect_adjustment ppf tr
 
 (* Maxence *)
 let type_scheme_max ?(b_reset_names=true) ppf ty =
@@ -1453,9 +1462,9 @@ and tree_of_label l =
   let gom =
     match l.ld_mutable, l.ld_global with
     | Mutable, _ -> Ogom_mutable
-    | Immutable, Global -> Ogom_global
-    | Immutable, Nonlocal -> Ogom_nonlocal
-    | Immutable, Unrestricted -> Ogom_immutable
+    | Immutable, Gf_global -> Ogom_global
+    | Immutable, Gf_nonlocal -> Ogom_nonlocal
+    | Immutable, Gf_unrestricted -> Ogom_immutable
   in
   (Ident.name l.ld_id, gom, tree_of_typexp false l.ld_type)
 
@@ -1579,16 +1588,16 @@ let value_description id ppf decl =
 
 let method_type (_, kind, ty) =
   match field_kind_repr kind, repr ty with
-    Fpresent, {desc=Tpoly(ty, tyl, adj, eff)} -> (ty, tyl, adj, eff)
-  | _       , ty                    -> (ty, [], None, None)
+    Fpresent, {desc=Tpoly(ty, tyl, eff)} -> (ty, tyl, eff)
+  | _       , ty                    -> (ty, [], Enone)
 
 let tree_of_metho sch concrete csil (lab, kind, ty) =
   if lab <> dummy_method then begin
     let kind = field_kind_repr kind in
     let priv = kind <> Fpresent in
     let virt = not (Concr.mem lab concrete) in
-    let (ty, tyl, adj, eff) = method_type (lab, kind, ty) in
-    let tty = tree_of_type_poly sch ty adj eff in
+    let (ty, tyl, eff) = method_type (lab, kind, ty) in
+    let tty = tree_of_type_poly sch ty eff in
     remove_names tyl;
     Ocsg_method (lab, priv, virt, tty) :: csil
   end
@@ -1613,15 +1622,9 @@ let rec prepare_class_type params = function
       in
       List.iter
         (fun met ->
-          let ty, _, adj, eff = method_type met in
+          let ty, _, eff = method_type met in
           mark_loops ty;
-          Option.iter
-            (fun adj ->
-              Effect_mode.Adjustment.iter mark_loops adj)
-            adj;
-          Option.iter
-            (fun eff -> Effect_context.iter mark_loops eff)
-            eff)
+          iter_effect_modality mark_loops eff)
         fields;
       Vars.iter (fun _ (_, _, ty) -> mark_loops ty) sign.csig_vars
   | Cty_arrow (_, ty, cty) ->
@@ -2123,8 +2126,8 @@ let may_prepare_expansion compact (t, t') =
       mark_loops t; (t, t)
   | _ -> prepare_expansion (t, t')
 
-let prepare_effect_context eff =
-  mark_effect_context eff; eff
+let prepare_effect_modality eff =
+  mark_effect_modality eff; eff
 
 let print_tag ppf = fprintf ppf "`%s"
 
@@ -2133,7 +2136,7 @@ let print_tags =
   Format.pp_print_list ~pp_sep:comma print_tag
 
 let is_unit_arg env ty =
-  let ty, vars, _, _ = get_poly ty in
+  let ty, vars, _ = get_poly ty in
   if vars <> [] then false
   else begin
     match (Ctype.expand_head env ty).desc with
@@ -2283,16 +2286,6 @@ let explain_effect_context_join : Effect_context.Join_error.t -> _ = function
   | Different_effect_names (s1, s2) ->
       Some (explain_different_effect_names s1 s2)
 
-let explain_effect_context : Trace.eff -> _ = function
-  | No_effect pos -> Some(
-      dprintf
-        "@,@[The %a type has no effect context@]"
-        print_pos pos
-    )
-  | Not_equal err -> explain_effect_context_equality err
-  | Not_subeffects err -> explain_effect_context_subeffect err
-  | Cannot_join err -> explain_effect_context_join err
-
 let print_singleton_effect ppf (name, index) =
   for _ = 0 to (index - 1) do
     fprintf ppf "%s: .;" name
@@ -2301,37 +2294,54 @@ let print_singleton_effect ppf (name, index) =
 
 let explain_effect_adjustment_equality
     : Effect_mode.Adjustment.Equal_error.t -> _ = function
-  | Different_input_names(s1, s2, idx) ->
+  | Different_input_names(s1, s2, idx) -> Some (
       dprintf "@,@[The first adjustment expects %a@ \
                where the second would expect %a.@ \
                %s and %s have the same hash.@]"
         print_singleton_effect (s1, idx)
         print_singleton_effect (s2, idx)
         s1 s2
-  | Missing_bind(s, _, pos) ->
+    )
+  | Missing_bind(s, _, pos) -> Some (
       dprintf "@,@[The %a adjustment does not bind %s.@]"
         print_pos pos s
-  | Missing_rename(s, _, pos) ->
+    )
+  | Missing_rename(s, _, pos) -> Some (
       dprintf "@,@[The %a adjustment does not rename %s.@]"
         print_pos pos s
+    )
   | Different_renames
       { origin; origin_index;
         first_destination; first_destination_index;
-        second_destination; second_destination_index; } ->
+        second_destination; second_destination_index; } -> Some (
       dprintf "@,@[The first adjustment maps %a to %a@ \
                where the second would map it to %a.@]"
         print_singleton_effect (origin, origin_index)
         print_singleton_effect (first_destination, first_destination_index)
         print_singleton_effect (second_destination, second_destination_index)
+    )
 
-let explain_effect_adjustment = function
-  | Trace.No_adjustment pos -> Some(
+let explain_effect_modality : Trace.eff -> _ = function
+  | No_context pos -> Some(
+      dprintf
+        "@,@[The %a type has no effect context@]"
+        print_pos pos
+    )
+  | No_adjustment pos -> Some(
       dprintf
         "@,@[The %a type has no effect adjustment@]"
         print_pos pos
     )
-  | Trace.Not_equal err ->
-      Some (explain_effect_adjustment_equality err)
+  | Different_modalities pos -> Some(
+      dprintf
+        "@,@[The %a type has an effect adjustment@ \
+             where the other has an effect context@]"
+        print_pos pos
+    )
+  | Not_equal_contexts err -> explain_effect_context_equality err
+  | Not_sub_contexts err -> explain_effect_context_subeffect err
+  | Cannot_join_contexts err -> explain_effect_context_join err
+  | Not_equal_adjustments err -> explain_effect_adjustment_equality err
 
 let explanation intro prev env = function
   | Trace.Diff { Trace.got = _, s; expected = _,t } -> explanation_diff env s t
@@ -2340,12 +2350,9 @@ let explanation intro prev env = function
         Some(dprintf "@,Types for method %s are incompatible" name)
   | Trace.Incompatible_effects { name; _ } ->
         Some(dprintf "@,Types for effect %s are incompatible" name)
-  | Trace.Incompatible_adjustments { name; _ } ->
-        Some(dprintf "@,Types for effect %s are incompatible" name)
   | Trace.Variant v -> explain_variant v
   | Trace.Obj o -> explain_object o
-  | Trace.Eff e -> explain_effect_context e
-  | Trace.Adj a -> explain_effect_adjustment a
+  | Trace.Eff e -> explain_effect_modality e
   | Trace.Effect_diff _ -> None
   | Trace.Rec_occur(x,y) ->
       reset_and_mark_loops y;
@@ -2388,13 +2395,13 @@ let warn_on_missing_def env ppf t =
 type expansion_head =
    | No_head
    | Type_head of (Types.type_expr * Types.type_expr) Trace.diff
-   | Effect_head of effect_context Trace.diff
+   | Effect_head of effect_modality Trace.diff
 
 let prepare_expansion_head empty_tr = function
   | Trace.Diff d ->
       Type_head (Trace.map_diff (may_prepare_expansion empty_tr) d)
   | Trace.Effect_diff d ->
-      Effect_head (Trace.map_diff prepare_effect_context d)
+      Effect_head (Trace.map_diff prepare_effect_modality d)
   | _ -> No_head
 
 let head_error_printer txt_got txt_but = function
@@ -2405,10 +2412,10 @@ let head_error_printer txt_got txt_but = function
         txt_got type_expansion d.Trace.got
         txt_but type_expansion d.Trace.expected
   | Effect_head d ->
-      let d = Trace.map_diff (tree_of_effect_context false) d in
+      let d = Trace.map_diff (tree_of_effect_modality false) d in
       dprintf "%t@;<1 2>%a@ %t@;<1 2>%a"
-        txt_got !Oprint.out_effect_context d.Trace.got
-        txt_but !Oprint.out_effect_context d.Trace.expected
+        txt_got out_optional_effect_modality d.Trace.got
+        txt_but out_optional_effect_modality d.Trace.expected
 
 let warn_on_missing_defs env ppf = function
   | No_head | Effect_head _ -> ()

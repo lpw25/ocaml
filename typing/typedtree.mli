@@ -368,9 +368,9 @@ and apply_position =
   | Default       (* tail-call optimised if in tail position *)
 
 and effect_renaming =
-  { er_outer : (string * string Location.loc option) list;
-    er_inner : (string * string Location.loc) list;
-    er_renaming : Effect_mode.Renaming.t }
+  { er_outer : (string Location.loc * string Location.loc option) list;
+    er_inner : (string Location.loc * string Location.loc option) list;
+    er_adjustment : Types.effect_adjustment; }
 
 (* Value expressions for the class language *)
 
@@ -655,7 +655,7 @@ and core_type_desc =
   | Ttyp_class of Path.t * Longident.t loc * core_type list
   | Ttyp_alias of core_type * string
   | Ttyp_variant of row_field list * closed_flag * label list option
-  | Ttyp_poly of string list * core_type
+  | Ttyp_poly of string list * core_type * effect_modality option
   | Ttyp_package of package_type
 
 and package_type = {
@@ -685,10 +685,30 @@ and object_field_desc =
   | OTtag of string loc * core_type
   | OTinherit of core_type
 
+and effect_context = {
+    ec_effects : (string loc * core_type option) list;
+    ec_type : Types.effect_context;
+  }
+
+and effect_adjustment_inner =
+  | Eai_rename of string Location.loc
+  | Eai_bind of core_type option
+
+and effect_adjustment = {
+    ea_outer : (string loc * string loc option) list;
+    ea_inner : (string loc * effect_adjustment_inner) list;
+    ea_type : Types.effect_adjustment;
+  }
+
+and effect_modality =
+  | Em_adjustment of effect_adjustment
+  | Em_context of effect_context
+
 and value_description =
   { val_id: Ident.t;
     val_name: string loc;
     val_desc: core_type;
+    val_eff: effect_context option;
     val_val: Types.value_description;
     val_prim: string list;
     val_loc: Location.t;
@@ -891,3 +911,9 @@ val pat_bound_idents_full:
 val split_pattern:
   computation general_pattern ->
   pattern option * pattern option * pattern Misc.Stdlib.String.Map.t
+
+val effect_context_type :
+  effect_context option -> Types.effect_context
+
+val effect_modality_type :
+  effect_modality option -> Types.effect_modality

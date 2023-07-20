@@ -49,7 +49,9 @@ type error =
   | Not_an_object of type_expr
   | Local_not_enabled
   | Effects_not_enabled
+  | Bad_effect_payload
   | Polymorphic_optional_param
+  | Bad_effect_adjustment of Effect_mode.Adjustment.Parse_error.t
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -169,7 +171,18 @@ let get_alloc_mode styp =
 let get_effect_context styp =
   match Builtin_attributes.get_effect_context styp.ptyp_attributes with
   | Ok effs -> effs
-  | Error () -> raise (Error(styp.ptyp_loc, Env.empty, Effects_not_enabled))
+  | Error `Disabled ->
+      raise (Error(styp.ptyp_loc, Env.empty, Effects_not_enabled))
+  | Error `Payload ->
+      raise (Error (styp.ptyp_loc, Env.empty, Bad_effect_payload))
+
+let get_effects styp =
+  match Builtin_attributes.get_effects styp.ptyp_attributes with
+  | Ok effs -> effs
+  | Error `Disabled ->
+      raise (Error(styp.ptyp_loc, Env.empty, Effects_not_enabled))
+  | Error `Payload ->
+      raise (Error (styp.ptyp_loc, Env.empty, Bad_effect_payload))
 
 let rec extract_params styp =
   let final styp =
@@ -538,17 +551,18 @@ and transl_type_aux env policy mode styp =
       let new_univars = List.map (fun name -> name, newvar ~name ()) vars in
       let old_univars = !univars in
       univars := new_univars @ !univars;
-      let cty, eff = transl_type_and_effect_context env policy mode st in
+      let cty, teff = transl_type_and_effects env policy mode st in
       let ty = cty.ctyp_type in
+      let eff = effect_modality_type teff in
       univars := old_univars;
       end_def();
       generalize ty;
-      generalize_poly_effect_context eff;
+      generalize_effect_modality eff;
       let ty_list =
         List.fold_left
           (fun tyl (name, ty1) ->
             let v = Btype.proxy ty1 in
-            if deep_occur v ty then begin
+            if deep_occur_poly v ty eff then begin
               match v.desc with
                 Tvar name when v.level = Btype.generic_level ->
                   v.desc <- Tunivar name;
@@ -560,7 +574,7 @@ and transl_type_aux env policy mode styp =
       in
       let ty' = Btype.newgenty (Tpoly(ty, List.rev ty_list, eff)) in
       unify_var env (newvar()) ty';
-      ctyp (Ttyp_poly (vars, cty)) ty'
+      ctyp (Ttyp_poly (vars, cty, teff)) ty'
   | Ptyp_package (p, l) ->
       let l, mty = create_package_mty true styp.ptyp_loc env (p, l) in
       let z = narrow () in
@@ -586,30 +600,97 @@ and transl_type_aux env policy mode styp =
 and transl_poly_type env policy mode t =
   transl_type env policy mode (Ast_helper.Typ.force_poly t)
 
+and transl_effect_context env policy seff =
+  let ec_effects =
+    List.map
+      (fun (s, stypo) ->
+        match stypo with
+        | None -> (s, None)
+        | Some styp ->
+            let cty = transl_type env policy Types.Global styp in
+            (s, Some cty))
+      seff
+  in
+  let effects =
+    List.map
+      (fun (s, ctyo) ->
+        let s = s.txt in
+        let tyo = Option.map (fun cty -> cty.ctyp_type) ctyo in
+        (s, tyo))
+      ec_effects
+  in
+  let ec_type = Effect_context.create effects in
+  {ec_effects; ec_type}
+
+and transl_effect_adjustment
+      env policy (sadj : Builtin_attributes.effect_adjustment) =
+  let ea_outer = sadj.outer in
+  let ea_inner =
+    List.map
+      (fun (name, inner) ->
+        let inner =
+          match inner with
+          | Builtin_attributes.Rename s -> Eai_rename s
+          | Builtin_attributes.Bind stypo ->
+              let ctyo =
+                match stypo with
+                | None -> None
+                | Some styp ->
+                    Some (transl_type env policy Global styp)
+              in
+              Eai_bind ctyo
+        in
+        (name, inner))
+      sadj.inner
+  in
+  let inner =
+    List.map
+      (fun (s, inner) ->
+        let inner =
+          match inner with
+          | Eai_rename s -> Effect_mode.Adjustment.Rename s.txt
+          | Eai_bind ctyo ->
+              let tyo = Option.map (fun cty -> cty.ctyp_type) ctyo in
+              Effect_mode.Adjustment.Bind tyo
+        in
+        (s.txt, inner))
+      ea_inner
+  in
+  let outer =
+    List.map
+      (fun (s, outer) ->
+        let outer = Option.map (fun outer -> outer.txt) outer in
+        (s.txt, outer))
+      ea_outer
+  in
+  let ea_type =
+    match Effect_mode.Adjustment.parse ~outer ~inner with
+    | Ok adj -> adj
+    | Error err -> raise (Error(sadj.loc, env, Bad_effect_adjustment err))
+  in
+  {ea_outer; ea_inner; ea_type}
+
+and transl_effects env policy (seff : Builtin_attributes.effects) =
+  match seff with
+  | Context eff -> Em_context (transl_effect_context env policy eff)
+  | Adjustment adj -> Em_adjustment (transl_effect_adjustment env policy adj)
+
 and transl_type_and_effect_context env policy mode styp =
-  let eff = get_effect_context styp in
+  let seff = get_effect_context styp in
   let mode =
-    if eff = None then mode
+    if seff = None then mode
     else Local
   in
   let ty = transl_type env policy mode styp in
-  let eff =
-    match eff with
-    | None -> None
-    | Some eff ->
-        let effects =
-          List.map
-            (fun (s, stypo) ->
-              match stypo with
-              | None -> (s, None)
-              | Some styp ->
-                  let cty = transl_type env policy mode styp in
-                  let ty = cty.ctyp_type in
-                  (s, Some ty)) eff
-        in
-        Some {effects}
-  in
-  ty, eff
+  let teff = Option.map (transl_effect_context env policy) seff in
+  ty, teff
+
+and transl_type_and_effects env policy mode styp =
+  let seffs = get_effects styp in
+  let mode = if seffs = None then mode else Local in
+  let ty = transl_type env policy mode styp in
+  let teffs = Option.map (transl_effects env policy) seffs in
+  ty, teffs
 
 and transl_fields env policy o fields =
   let hfields = Hashtbl.create 17 in
@@ -695,15 +776,21 @@ let rec make_fixed_univars ty =
         Btype.iter_type_expr make_fixed_univars ty
   end
 
-let make_fixed_univars ty =
-  make_fixed_univars ty;
-  Btype.unmark_type ty
-
 let make_fixed_univars_scheme ty eff =
   make_fixed_univars ty;
   Btype.iter_effect_context make_fixed_univars eff;
   Btype.unmark_type ty;
   Btype.iter_effect_context Btype.unmark_type eff
+
+let make_fixed_univars_poly ty eff =
+  make_fixed_univars ty;
+  Btype.iter_effect_modality make_fixed_univars eff;
+  Btype.unmark_type ty;
+  Btype.iter_effect_modality Btype.unmark_type eff
+
+let make_fixed_univars ty =
+  make_fixed_univars ty;
+  Btype.unmark_type ty
 
 let create_package_mty = create_package_mty false
 
@@ -740,25 +827,23 @@ let transl_simple_type env fixed mode styp =
 
 let transl_simple_type_scheme env fixed mode styp =
   univars := []; used_variables := TyVarMap.empty;
-  let typ, eff =
+  let typ, teff =
     transl_type_and_effect_context env
       (if fixed then Fixed else Extensible) mode styp
   in
-  let eff =
-    match eff with
-    | None -> Btype.empty_effect_context
-    | Some eff -> eff
-  in
+  let eff = effect_context_type teff in
   globalize_used_variables env fixed ();
   make_fixed_univars_scheme typ.ctyp_type eff;
-  typ, eff
+  typ, teff
 
 let transl_simple_type_univars env styp =
   univars := []; used_variables := TyVarMap.empty; pre_univars := [];
   begin_def ();
-  let typ, eff =
-    transl_type_and_effect_context env Univars Alloc_mode.Global styp
+  let typ, teff =
+    transl_type_and_effects env Univars Alloc_mode.Global styp
   in
+  let ty = typ.ctyp_type in
+  let eff = effect_modality_type teff in
   (* Only keep already global variables in used_variables *)
   let new_variables = !used_variables in
   used_variables := TyVarMap.empty;
@@ -769,8 +854,8 @@ let transl_simple_type_univars env styp =
     new_variables;
   globalize_used_variables env false ();
   end_def ();
-  generalize typ.ctyp_type;
-  generalize_poly_effect_context eff;
+  generalize ty;
+  generalize_effect_modality eff;
   let univs =
     List.fold_left
       (fun acc v ->
@@ -781,9 +866,9 @@ let transl_simple_type_univars env styp =
         | _ -> acc)
       [] !pre_univars
   in
-  Option.iter (make_fixed_univars_scheme typ.ctyp_type) eff;
-  { typ with ctyp_type =
-      instance (Btype.newgenty (Tpoly (typ.ctyp_type, univs, eff))) }
+  make_fixed_univars_poly ty eff;
+  let ty = Btype.newgenty (Tpoly (ty, univs, eff)) in
+  { typ with ctyp_type = instance ty }
 
 let transl_simple_type_delayed env mode styp =
   univars := []; used_variables := TyVarMap.empty;
@@ -802,11 +887,11 @@ let transl_simple_type_delayed env mode styp =
 let transl_type_scheme env styp =
   reset_type_variables();
   begin_def();
-  let typ, eff = transl_simple_type_scheme env false Alloc_mode.Global styp in
+  let typ, teff = transl_simple_type_scheme env false Alloc_mode.Global styp in
   end_def();
   generalize typ.ctyp_type;
-  generalize_effect_context eff;
-  typ, eff
+  generalize_effect_context (effect_context_type teff);
+  typ, teff
 
 
 (* Error report *)
@@ -915,8 +1000,13 @@ let report_error env ppf = function
   | Effects_not_enabled ->
       fprintf ppf "@[The effects extension is disabled@ \
                      To enable it, pass the '-extension effects' flag@]"
+  | Bad_effect_payload ->
+      fprintf ppf "Illegal effect attribute payload"
   | Polymorphic_optional_param ->
       fprintf ppf "@[Optional parameters cannot be polymorphic@]"
+  | Bad_effect_adjustment err ->
+      fprintf ppf "@[Invalid effect adjustment: %a.@]."
+        Effect_mode.Adjustment.Parse_error.print err      
 
 let () =
   Location.register_error_of_exn

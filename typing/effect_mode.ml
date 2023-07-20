@@ -2,24 +2,73 @@ type empty = |
 
 type position = First | Second
 
-module General_adjustment = struct
+module Adjustment = struct
 
   type 'ty adjust =
     | Rename of
         { to_hash : int;
           to_index : int; }
-    | Bind of 'ty
+    | Bind of 'ty option
 
-  type 'ty t =
+  type 'ty gen =
     { image : string array Int.Map.t;
       adjustments : (string * 'ty adjust) array Int.Map.t }
+
+  type 'ty t = 'ty option gen
 
   let identity =
     let image = Int.Map.empty in
     let adjustments = Int.Map.empty in
     { image; adjustments }
 
-  let expected_context consumed newvar t =
+  module Parse_error = struct
+
+    type t =
+      | Multiple_outer_uses of string
+      | No_outer_uses of string
+      | Multiple_inner_uses of string
+      | No_inner_uses of string
+
+    let print ppf = function
+      | Multiple_outer_uses name ->
+          Format.fprintf ppf
+            "%s appears multiple times in the outer context"
+            name
+      | No_outer_uses name ->
+          Format.fprintf ppf
+            "%s does not appear in the outer context"
+            name
+      | Multiple_inner_uses name ->
+          Format.fprintf ppf
+            "%s appears multiple times in the inner context"
+            name
+      | No_inner_uses name ->
+          Format.fprintf ppf
+            "%s does not appear in the inner context"
+            name
+  end
+
+  let handler ctx =
+    let image = Int.Map.empty in
+    let rev_adjustments =
+      List.fold_left
+        (fun rev_adjustments (name, tyo) ->
+          let hash = hash_name name in
+          Int.Map.update hash
+            (fun prev ->
+               let prev = Option.value prev ~default:[] in
+               (name, Bind tyo) :: prev)
+            rev_adjustments)
+        Int.Map.empty ctx
+    in
+    let adjustments =
+      Int.Map.map
+        (fun rev_adjusts -> Array.of_list (List.rev rev_adjusts))
+        rev_adjustments
+    in
+    { image; adjustments }
+
+  let expected_context newvar t =
     let vars_tbl = Int.Tbl.create 3 in
     Int.Map.iter
       (fun hash names ->
@@ -36,8 +85,7 @@ module General_adjustment = struct
                   let vars = Int.Tbl.find vars_tbl to_hash in
                   let var = vars.(to_index) in
                   (name, Some var)
-              | Bind a ->
-                  let tyo = consumed a in
+              | Bind tyo ->
                   (name, tyo))
            eff renames)
         [] t.renames
@@ -205,7 +253,9 @@ module General_adjustment = struct
 
   module Simplified = struct
 
-    type 'ty t = 'ty t
+    type 'ty gen = 'ty gen
+
+    type 'ty t = 'ty option gen
 
     let is_identity t =
       Int.Map.is_empty t.image
@@ -395,6 +445,8 @@ module General_adjustment = struct
       | () -> Ok ()
       | exception Equal_error err -> Error err
 
+    let reify t = t
+
   end
 
   type equal_error =
@@ -409,294 +461,238 @@ module General_adjustment = struct
           second_destination : string;
           second_destination_index : int; }
 
-    exception Equal_error of equal_error
+  exception Equal_error of equal_error
 
-    let different_input_names name1 name2 index =
-      raise Equal_error(Different_input_names(name1, name2, index))
+  let different_input_names name1 name2 index =
+    raise Equal_error(Different_input_names(name1, name2, index))
 
-    let different_output_names
-          ~origin ~origin_index ~first_destination
-          ~second_destination ~destination_index =
-      let first_destination_index = destination_index in
-      let second_destination_index = destination_index in
-      let err =
-        Different_renames
-          { orgin; origin_index;
-            first_destination; first_destination_index;
-            second_destination; second_destination_index }
-      in
-      raise (Equal_error err)
-
-    let different_at t1 t2 origin origin_index =
-      let res1 = apply_name t1 origin origin_index in
-      let res2 = apply_name t2 origin origin_index in
-      match res1, res2 with
-      | Bound, Bound -> assert false
-      | Renamed _, Bound ->
-          raise Equal_error(Missing_bind(origin, origin_index, First))
-      | Bound, Renamed _ ->
-          raise Equal_error(Missing_bind(origin, origin_index, Second))
-      | Renamed(_, _, Passive), Renamed(_, _, Active) ->
-          raise Equal_error(Missing_rename(origin, origin_index, First))
-      | Renamed(_, _, Active), Renamed(_, _, Passive) ->
-          raise Equal_error(Missing_rename(origin, origin_index, Second))
-      | Renamed (first_destination, first_destination_index, _),
-        Renamed (second_destination, second_destination_index, _) ->
-          assert ((not (String.equal first_destination second_destination))
-                  || (not (Int.equal first_destination_index
-                             second_destination_index)));
-          let err =
-            Different_renames
-              { origin; origin_index;
-                first_destination; first_destination_index;
-                second_destination; second_destination_index }
-          in
-          raise (Equal_error err)
-
-    let equal consumed t1 t2 =
-      match equal consumed ~different_input_names
-              ~different_output_names ~different_at t1 t2 with
-      | () -> Ok ()
-      | exception Equal_error err -> Error err
-
-end
-
-module Renaming = struct
-
-  type t = empty General_adjustment.t
-
-  let identity = General_adjustment.identity
-
-  let consume = function (_ : empty) -> .
-
-  let apply ctx t =
-    General_adjustment.apply consume
-
-  let compose t1 t2 =
-    General_adjustment.composet1 t2
-
-  type parse_error =
-    | Multiply_bound_variable of string loc
-    | Unmatched_effect_renaming_binding of string loc
-    | Unused_effect_renaming_binding of string loc
-
-  val parse :
-    outer:string loc option list
-    -> inner:string loc list
-    -> (t, parse_error) Result.t
-
-end
-
-module Adjustment = struct
-
-  type 'ty t = 'ty option General_adjustment.t
-
-  let identity = General_adjustment.identity
-
-  type apply_error = General_adjustment.apply_error
-
-  exception Apply_error = General_adjustment.Apply_error
-
-  let apply equal ctx t =
-    General_adjustment.apply equal ctx t
-
-  let compose t1 t2 = General_adjustment.compose t1 t2
-
-  let sequence t1 t2 = compose t2 t1
-
-  let expected_context newvar t =
-    expected_context (fun x -> x) newvar t
-
-  (* Need magic to do this efficiently due to a lack of
-     immutable arrays and no subtyping on the empty type. *)
-  let of_renaming (r : empty General_adjustment.t) =
-    (Obj.magic r : 'ty t)
-
-  let of_extension ctx =
-    let image = Int.Map.empty in
-    let rev_adjustments =
-      List.fold_left
-        (fun rev_adjustments (name, tyo) ->
-          let hash = hash_name name in
-          Int.Map.update hash
-            (fun prev ->
-               let prev = Option.value prev ~default:[] in
-               (name, Bind tyo) :: prev)
-            rev_adjustments)
-        Int.Map.empty ctx
+  let different_output_names
+        ~origin ~origin_index ~first_destination
+        ~second_destination ~destination_index =
+    let first_destination_index = destination_index in
+    let second_destination_index = destination_index in
+    let err =
+      Different_renames
+        { orgin; origin_index;
+          first_destination; first_destination_index;
+          second_destination; second_destination_index }
     in
-    let rev_adjustments =
-      Int.Map.map
-        (fun rev_adjusts -> Array.of_list (List.rev rev_adjusts))
-        rev_adjustments
-    in
-    { image; adjustments }
+    raise (Equal_error err)
 
-  let compose_extension t ctx =
-    compose t (of_extension ctx)
-
-  type equal_error =
-    | Different_effect_names of string * string
-    | Missing_effect of position * string
+  let different_at t1 t2 origin origin_index =
+    let res1 = apply_name t1 origin origin_index in
+    let res2 = apply_name t2 origin origin_index in
+    match res1, res2 with
+    | Bound, Bound -> assert false
+    | Renamed _, Bound ->
+        raise Equal_error(Missing_bind(origin, origin_index, First))
+    | Bound, Renamed _ ->
+        raise Equal_error(Missing_bind(origin, origin_index, Second))
+    | Renamed(_, _, Passive), Renamed(_, _, Active) ->
+        raise Equal_error(Missing_rename(origin, origin_index, First))
+    | Renamed(_, _, Active), Renamed(_, _, Passive) ->
+        raise Equal_error(Missing_rename(origin, origin_index, Second))
+    | Renamed (first_destination, first_destination_index, _),
+      Renamed (second_destination, second_destination_index, _) ->
+        assert ((not (String.equal first_destination second_destination))
+                || (not (Int.equal first_destination_index
+                           second_destination_index)));
+        let err =
+          Different_renames
+            { origin; origin_index;
+              first_destination; first_destination_index;
+              second_destination; second_destination_index }
+        in
+        raise (Equal_error err)
 
   let equal consumed t1 t2 =
-    General_adjustment.equal consumed t1 t2
+    match equal consumed ~different_input_names
+            ~different_output_names ~different_at t1 t2 with
+    | () -> Ok ()
+    | exception Equal_error err -> Error err
+
+  let simplify t = Simplified.normalize t
 
 end
 
 module Mode = struct
 
-  type 'ty t =
-    | Md_global
-    | Md_unused
-    | Md_local
-    | Md_adjustment of 'ty Adjustment.t
-    | Md_var of 'ty var
+  module Usage = struct
 
-  and 'ty var =
-    { mutable state : 'ty state }
+    type 'ty bind =
+      | Different_renames of
+          { first_destination : string;
+            first_destination_index : int;
+            second_destination : string;
+            second_destination_index : int; }
+      | Missing_bind
+      | Bind of 'ty option list
 
-  and 'ty state =
-    | Pressured of 'ty const
-    | Relaxed of { mutable constraints : ('ty t list * Location.t) list }
+    type ('ty, 'lcl) t =
+      | Escaping
+      | Used of
+          { adjustment : 'ty bind Adjustment.Simplified.gen;
+            localities : 'lcl list; }
+      | Used_unequal of
+          { first_adjustment : 'ty bind Adjustment.Simplified.gen;
+            second_adjustment : 'ty bind Adjustment.Simplified.gen;
+            localities : 'lcl list; }
+
+    let escaping = Escaping
+
+    let unadujusted lcl =
+      let adjustment = Adjustment.Simplified.identity in
+      let localities = [lcl] in
+      Used { adjustment; localities }
+
+    let adjusted adjustment =
+      let localities = [] in
+      Used { adjustment; localities }
+
+    let zero = Unused
+
+    let one =
+      let adjustment = Adjustment.Simplified.identity in
+      let localities = [] in
+      Used { adjustment; localities }
+
+    let times t1 t2 =
+      match t1, t2 with
+      | Unused, _ | _, Unused -> Unused
+      | Escaping, _ | _, Escaping -> Escaping
+      | 
+
+    let meet to1 t2 =
+      match to1 with
+      | None -> t2
+      | Some t1 ->
+          match t1, t2 with
+          | ....
+
+  end
+
+  type ('ty, 'lcl) t =
+    | Var of ('ty, 'lcl) var
+    | Escaping
+    | Unadjusted of 'lcl
+    | Adjusted of 'ty Adjustment.Simplified.t
+    | Zero
+    | One
+    | Times of ('ty, 'lcl) t * ('ty, 'lcl) t
+
+  and ('ty, 'lcl) var =
+    { mutable state : ('ty, 'lcl) state }
+
+  and ('ty, 'lcl) state =
+    | Forced of
+        { uses : (('ty, 'lcl) Usage.t * Location.t) list;
+          usage : ('ty, 'lcl) Usage.t; }
+    | Pressured of (('ty, 'lcl) Usage.t * Location.t) list
     | Escaped of Location.t
-
-  and 'ty const =
-    | Global of Location.t
-    | Used of ('ty Adjustment.t * Location.t) list
+    | Relaxed of
+        { mutable uses : (('ty, 'lcl) t * Location.t) list }
 
   let var v = Var v
 
-  let global = Global
+  let escaping = Escaping
 
-  let unused = Unused
+  let unadjusted lcl = Unadjusted lcl
 
-  let adjustment adj =
-    if Adjustment.is_identity adj then Local
-    else Adjusement adj
+  let adjusted adj = Adjusted adj
 
-  let extension ext =
-    adjustment (Adjustment.of_extension ext)
+  let local = One
 
-  let renaming ren =
-    adjustment (Adjustment.of_renaming ren)
+  let unused = Zero
+
+  let times t1 t2 =
+    match t1, t2 with
+    | Zero, _ | _, Zero -> Zero
+    | One, t -> t
+    | t, One -> t
+    | _, _ -> Times (t1, t2)
 
   module Var = struct
 
-    type 'ty t = 'ty var
+    type ('ty, 'lcl) t = ('ty, 'lcl) var
 
     let fresh () =
       let constraints = [] in
       let state = Relaxed { constraints } in
       { state }
 
-    module Constraints = struct
+    let usage_of_mode = function
+      | Var var -> force var
+      | Escaped -> Usage.escaped
+      | Unadjusted lcl -> Usage.unadjusted lcl
+      | Adjusted adj -> Usage.adjusted adj
+      | Zero -> Usage.zero
+      | One -> Usage.one
+      | Times(t1, t2) -> Usage.times t1 t2
 
-      type 'ty t = 'ty const =
-        | Global of Location.t
-        | Local of Location.t
-        | Unused
-        | Used_adjusted of ('ty Adjustment.t * Location.t) list
-
-    end
-
-    type use =
-      | Use_global
-      | Use_local
-      | Use_unused
-      | Use_adj of Adjustment.t list
-
-    let use_of_ts ts =
-      List.fold_left
-        (fun use t ->
-          match use, t with
-          | _, Var v -> begin
-              match use, pressue v with
-              | Use_unused, _ -> Use_unused
-              | _, Unused -> Use_unused
-              | Use_global, _ -> Use_global
-              | _, Global _ -> Use_global
-              | use, Local _ -> use
-              | Use_local, Used adjs ->
-                  Use_adj (List.map (fun (adj, _) -> adj) adjs)
-              | Uses adjs1, Uses adjs2 ->
-                  let adjs =
-                    List.concat_map
-                      (fun adj1 ->
-                        List.map
-                          (fun (adj2, _) -> Adjustment.sequence adj1 adj2)
-                          adjs2)
-                      adjs1
-                  in
-                  if List.for_all Adjustment.is_identity adjs then Use_local
-                  else Use_use adjs
-            end
-          | Use_unused, _ -> Use_unused
-          | _, Md_unused -> Use_unused
-          | Use_global, _ -> Use_global
-          | _, Md_global -> Use_global
-          | use, Md_local -> use
-          | Use_local, Md_adjustment adj -> Use_adj [adj]
-          | Use_adj adjs1, Md_adjustment adj2 ->
-              let adjs =
-                List.map (fun adj1 -> Adjustment.sequence adj1 adj2) adjs1
-              in
-              if List.for_all Adjustment.is_identity adjs then Use_local
-              else Use_use adjs)
-        Use_local ts
-          
     and pressure var =
       match var.state with
-      | Pressured consts -> consts
+      | Forced { uses; _ } -> uses
+      | Pressured uses -> uses
       | Escaped loc ->
-          var.state <- Pressured (Global loc)
-      | Relaxed { constraints } ->
-          let consts =
-            List.fold_left
-             (fun constrs (ts, loc) ->
-               match use_of_ts ts, constrs with
-               | Use_unused, constrs -> constrs
-               | Use_global, _ -> Global loc
-               | _, Global _ as constrs -> constrs
-               | Use_local, Unused -> Local loc
-               | Use_local, Local _ as constrs -> constrs
-               | Use_local, Used_adjusted adjs ->
-                   let adjs = (Adjustment.identity, loc) :: adjs in
-                   Used_adjusted adjs
-               | Use_adj adj, Local loc' ->
-                   let adjs = [adj, loc; Adjustment.identity, loc'] in
-                   Used_adjusted adjs
-               | Use_adj adj1, Used_adjusted adjs2 ->
-                   let adjs = (adj1, loc) :: adjs2 in
-                   Used_adjusted adjs)
-             Unused constraints
+          let uses = [Escaped, loc] in
+          var.state <- Pressured uses;
+          uses
+      | Relaxed { uses } ->
+          let uses =
+            List.map
+              (fun (t, loc) ->
+                let usage = usage_of_mode loc t in
+                usage, loc)
+              uses
           in
-          var.state <- Pressured consts
+          var.state <- Pressured uses;
+          uses
 
-    let rec is_obviously_global = function
-      | [] -> false
-      | Md_global :: _ -> true
-      | _ :: rest -> is_obviously_global rest
+    and force var =
+      match var.state with
+      | Forced { usage; _ } -> usage
+      | _ ->
+          let uses = pressure var in
+          let usage =
+            List.fold_left
+              (fun acc (usage, _) -> Usage.meet acc usage)
+              None uses
+          in
+          var.state <- Forced { uses; usage };
+          usage
 
-    let is_identical ts1 ts2 =
+    let is_unused = function
+      | Unused -> true
+      | _ -> false
+
+    let is_escaping = function
+      | Escaping -> true
+      | _ -> false
+
+    let is_identical t1 t2 =
       match ts1, ts2 with
       | [], [] -> true
       | t1 :: ts1, t2 :: ts2 ->
           t1 == t2 && is_identical ts1 ts2
       | [], _ :: _ | _ :: _, [] -> false    
 
-    let add_constraint var ts loc =
-      match var.state with
-      | Pressured _ -> failwith "Adding constraint to pressured effect mode variable"
-      | Escaped _ -> ()
-      | Relaxed r ->
-          if is_obviously_global ts then
-            var.state <- Escaped loc
-          else begin
-            match r.constraints with
-            | first :: _ when is_identical ts first -> ()
-            | prev -> r.constraints <- (ts, loc) :: prev
-          end
+    let use var t loc =
+      if is_unused t then ()
+      else begin
+        match var.state with
+        | Forced _ | Pressured _ ->
+            failwith "Adding use to pressured effect mode variable"
+        | Escaped _ -> ()
+        | Relaxed r ->
+            if is_escaping t then begin
+              var.state <- Escaped loc
+            end else begin
+              match r.uses with
+              | first :: _ when is_identical ts first -> ()
+              | prev -> r.uses <- (ts, loc) :: prev
+            end
+      end
+
   end
 
 end

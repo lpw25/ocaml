@@ -274,12 +274,9 @@ let rec print_out_type_0 mode ppf =
       fprintf ppf "@[<hov 2>%a.@ %a@]"
         pr_vars sl
         (print_out_type_0 mode) ty
-  | Otyp_effect_adjustment(t, adj) ->
+  | Otyp_effect_modality(t, eff) ->
       fprintf ppf "@[<1>%a %a@]"
-        (print_out_type_0 Oam_local) t print_out_effect_adjustment adj
-  | Otyp_effect_context(t, eff) ->
-      fprintf ppf "@[<1>%a %a@]"
-        (print_out_type_0 Oam_local) t print_out_effect_context eff
+        (print_out_type_0 Oam_local) t print_out_effect_modality eff
   | ty ->
       print_out_type_1 mode ppf ty
 
@@ -367,7 +364,7 @@ and print_out_type_3 mode ppf =
         print_fields row_fields
         print_present tags
   | Otyp_alias _ | Otyp_poly _
-  | Otyp_effect_adjustment _ | Otyp_effect_context _
+  | Otyp_effect_modality _
   | Otyp_arrow _ | Otyp_tuple _ as ty ->
       pp_open_box ppf 1;
       pp_print_char ppf '(';
@@ -479,7 +476,13 @@ and print_out_effect_adjustment ppf (adj : _ Effect_mode.Adjustment.Desc.t) =
     (print_list print_out_effect_adjustment_inner (fun ppf -> fprintf ppf ";@ "))
     adj.inner
 
+and print_out_effect_modality ppf = function
+  | Oem_context eff -> print_out_effect_context ppf eff
+  | Oem_adjustment adj -> print_out_effect_adjustment ppf adj
+
 let out_effect_context = ref print_out_effect_context
+
+let out_effect_modality = ref print_out_effect_modality
 
 let out_label = ref print_out_label
 

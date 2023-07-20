@@ -313,21 +313,25 @@ let fold_effect_context_option f init = function
 let iter_effect_context f eff =
   Effect_context.iter f eff
 
-let iter_effect_context_option f eff =
-  fold_effect_context_option (fun () ty -> f ty) () eff
+let iter_effect_context_option f = function
+  | None -> ()
+  | Some eff -> iter_effect_context f eff
 
-let fold_effect_adjustment f init eff =
-  Effect_mode.Adjustment.fold f init eff
-
-let fold_effect_adjustment_option f init = function
-  | None -> init
-  | Some eff -> fold_effect_adjustment f init eff
+let fold_effect_adjustment f init adj =
+  Effect_mode.Adjustment.fold f init adj
 
 let iter_effect_adjustment f eff =
   Effect_mode.Adjustment.iter f eff
 
-let iter_effect_adjustment_option f eff =
-  fold_effect_adjustment_option (fun () ty -> f ty) () eff
+let fold_effect_modality f init = function
+  | Enone -> init
+  | Eadjustment adj -> fold_effect_adjustment f init adj
+  | Econtext eff -> fold_effect_context f init eff
+
+let iter_effect_modality f = function
+  | Enone -> ()
+  | Eadjustment adj -> iter_effect_adjustment f adj
+  | Econtext eff -> iter_effect_context f eff
 
 let fold_type_expr f init ty =
   match ty.desc with
@@ -352,11 +356,10 @@ let fold_type_expr f init ty =
   | Tlink ty            -> f init ty
   | Tsubst ty           -> f init ty
   | Tunivar _           -> init
-  | Tpoly (ty, tyl, adj, eff)     ->
+  | Tpoly (ty, tyl, eff)     ->
     let result = f init ty in
     let result = List.fold_left f result tyl in
-    let result = fold_effect_adjustment_option f result adj in
-    fold_effect_context_option f result eff
+    fold_effect_modality f result eff
   | Tpackage (_, _, l)  -> List.fold_left f init l
 
 let iter_type_expr f ty =
@@ -539,12 +542,13 @@ let copy_effect_context_option f = function
   | None -> None
   | Some eff -> Some (copy_effect_context f eff)
 
-let copy_effect_adjustment f eff =
-  Effect_mode.Adjustment.copy f eff
+let copy_effect_adjustment f adj =
+  Effect_mode.Adjustment.copy f adj
 
-let copy_effect_adjustment_option f = function
-  | None -> None
-  | Some eff -> Some (copy_effect_adjustment f eff)
+let copy_effect_modality f = function
+  | Enone -> Enone
+  | Eadjustment adj -> Eadjustment (copy_effect_adjustment f adj)
+  | Econtext eff -> Econtext (copy_effect_context f eff)
 
 let rec copy_type_desc ?(keep_names=false) f = function
     Tvar _ as ty        -> if keep_names then ty else Tvar None
@@ -561,11 +565,10 @@ let rec copy_type_desc ?(keep_names=false) f = function
   | Tlink ty            -> copy_type_desc f ty.desc
   | Tsubst _            -> assert false
   | Tunivar _ as ty     -> ty (* always keep the name *)
-  | Tpoly (ty, tyl, adj, eff)     ->
+  | Tpoly (ty, tyl, eff)     ->
       let tyl = List.map (fun x -> norm_univar (f x)) tyl in
-      let adj = copy_effect_adjustment_option f adj in
-      let eff = copy_effect_context_option f eff in
-      Tpoly (f ty, tyl, adj, eff)
+      let eff = copy_effect_modality f eff in
+      Tpoly (f ty, tyl, eff)
   | Tpackage (p, n, l)  -> Tpackage (p, n, List.map f l)
 
 (* Utilities for copying *)
@@ -795,20 +798,19 @@ let current_eff eff =
 
 let is_mono ty =
   match (repr ty).desc with
-  | Tpoly(_, [], None, None) -> true
-  | Tpoly(_, _ :: _, _, _)
-  | Tpoly(_, _, Some _, _)
-  | Tpoly(_, _, _, Some _) -> false
+  | Tpoly(_, [], Enone) -> true
+  | Tpoly(_, _ :: _, _)
+  | Tpoly(_, _, (Eadjustment _ | Econtext _)) -> false
   | _ -> assert false
 
 let get_poly ty =
   match (repr ty).desc with
-  | Tpoly(ty, vars, adj, eff) -> (ty, vars, adj, eff)
+  | Tpoly(ty, vars, eff) -> (ty, vars, eff)
   | _ -> assert false
 
 let get_mono ty =
   match (repr ty).desc with
-  | Tpoly(ty, [], None, None) -> ty
+  | Tpoly(ty, [], Enone) -> ty
   | _ -> assert false
 
                   (**********************************)

@@ -1,64 +1,32 @@
 
-module Renaming : sig
-
-  type t
-
-  type parse_error =
-    | Multiply_bound_variable of string Location.loc
-    | Unbound_variable of string Location.loc
-    | Multiply_used_variable of string Location.loc
-    | Unused_variable of string Location.loc
-
-  type outer = string Location.loc option
-
-  type inner = string Location.loc
-
-  val parse :
-    outer: (string * outer) list
-    -> inner: (string * inner) list
-    -> (t, parse_error) Result.t
-
-  val apply :
-    (string -> 'ty -> 'ty -> unit) -> 'ty Effect_context.t -> t -> 'ty Effect_context.t
-
-  val compose : t -> t -> t
-
-  module Desc : sig
-
-    type outer = string option
-
-    type inner = string
-
-    type t =
-      { outer : (string * outer) list;
-        inner : (string * inner) list; }
-
-  end
-
-  val desc : t -> Desc.t
-
-end
-
 module Adjustment : sig
 
   type 'ty t
 
-  type parse_error =
-    | Multiply_bound_variable of string Location.loc
-    | Unbound_variable of string Location.loc
-    | Multiply_used_variable of string Location.loc
-    | Unused_variable of string Location.loc
+  module Parse_error : sig
 
-  type outer = string Location.loc option
+    type t =
+      | Multiple_outer_uses of string
+      | No_outer_uses of string
+      | Multiple_inner_uses of string
+      | No_inner_uses of string
+
+    val print : Format.formatter -> t -> unit
+
+  end
+
+  type outer = string option
 
   type 'ty inner =
-    | Rename of string Location.loc
+    | Rename of string
     | Bind of 'ty option
 
   val parse :
     outer:(string * outer) list
     -> inner:(string * 'ty inner) list
-    -> ('ty t, parse_error) Result.t
+    -> ('ty t, Parse_error.t) Result.t
+
+  val handler : 'ty Effect_context.t -> 'ty t
 
   module Desc : sig
 
@@ -83,14 +51,17 @@ module Adjustment : sig
     type t =
       | Different_effect_names of string * string
 
+    val swap_position : t -> t
+
   end
 
   val apply :
-    (string -> int -> 'ty -> 'ty -> unit)
+    equal:(string -> int -> 'ty -> 'ty -> unit)
     -> 'ty t
     -> 'ty Effect_context.t
     -> ('ty Effect_context.t, Apply_error.t) Result.t
 
+  val expected_context : (unit -> 'ty) -> 'ty t -> 'ty Effect_context.t
 
   module Equal_error : sig
 
@@ -111,7 +82,7 @@ module Adjustment : sig
   end
 
   val equal :
-    ('a -> string -> int -> 'ty -> 'ty -> 'a)
+    equal:('a -> string -> int -> 'ty -> 'ty -> 'a)
     -> 'a
     -> 'ty t
     -> 'ty t
@@ -128,30 +99,40 @@ module Adjustment : sig
 
   module Simplified : sig
 
+    type 'ty adjustment := 'ty t
+
     type 'ty t
     (** Simplified adjustments ignore names and whether a transparent
         renaming is explicit or not. *)
 
-    module Equal_error : sig
-
-      type t =
-        | Missing_bind of string * int * Misc.position
-        | Different_renames of
-            { origin : string;
-              origin_index : int;
-              first_destination : string;
-              first_destination_index : int;
-              second_destination : string;
-              second_destination_index : int; }
-
-    end
-
     val equal :
-      ('a -> string -> int -> 'ty -> 'ty -> 'a)
+      equal:('a -> string -> int -> 'ty -> 'ty -> 'a)
       -> 'a
       -> 'ty t
       -> 'ty t
       -> ('a, Equal_error.t) Result.t
+
+    val join :
+      join:(string -> int -> 'ty -> 'ty -> 'ty)
+      -> 'ty t
+      -> 'ty t
+      -> 'ty t
+
+    module Action : sig
+
+      type rename =
+        { tag : int;
+          depth : int; }
+
+      type t =
+        { renames : rename option list;
+          shift : int; }
+
+    end
+
+    val fold_actions : ('a -> Action.t -> 'a) -> 'a -> 'ty t -> 'a
+
+    val reify : 'ty t -> 'ty adjustment
 
   end
 
@@ -161,48 +142,74 @@ end
 
 module Mode : sig
 
-  type 'ty t
+  type ('ty, 'lcl) t
 
-  module Var : sig
+  module Usage : sig
 
-    type 'ty mode := 'ty t
+    type ('ty, 'lcl) t
 
-    type 'ty t
+    module Adjusted_match_error : sig
 
-    val fresh : unit -> 'ty t
-
-    module Constraints : sig
-
-      type 'ty t =
-        | Global of Location.t
-        | Local of Location.t
-        | Unused
-        | Used_adjusted of ('ty Adjustment.Simplified.t * Location.t) list
+      type ('ty, 'lcl) t =
+        | Escaping
+        | Adjusted of 'ty Adjustment.Simplified.t * Adjustment.Equal_error.t
 
     end
 
-    val pressure : 'ty t -> 'ty Constraints.t
-    (** [pressure t] returns the constraints on [t]. Attempts to add
-        constraints to a variable after it has been pressured will fail
-        with an exception. *)
+    val matches_adjusted :
+      equal:(string -> int -> 'ty -> 'ty -> unit)
+      -> is_local:('lcl -> unit)
+      -> 'ty Adjustment.Simplified.t
+      -> ('ty, 'lcl) t
+       -> (unit, ('ty, 'lcl) Adjusted_match_error.t) Result.t
 
-    val add_constraint : 'ty t -> 'ty mode list -> Location.t -> unit
-    (** [add_constraint t [a; b; c]] adds a constraint that [t = a . b . c].
-        Note that pressuring [t] will now pressure [a], [b] and [c] as
-        well. *)
+    module Unadjusted_match_error : sig
+
+      type ('ty, 'lcl) t =
+        | Adjusted of 'ty Adjustment.Simplified.t
+
+    end
+
+    val matches_unadjusted :
+      submode:('lcl -> 'lcl -> unit)
+      -> is_global:('lcl -> unit)
+      -> ('ty, 'lcl) t
+      -> 'lcl
+      -> (unit, ('ty, 'lcl) Unadjusted_match_error.t) Result.t
 
   end
 
-  val var : 'ty Var.t -> 'ty t
+  module Var : sig
 
-  val global : 'ty t
+    type ('ty, 'lcl) mode := ('ty, 'lcl) t
 
-  val unused : 'ty t
+    type ('ty, 'lcl) t
 
-  val adjustment : 'ty Adjustment.t -> 'ty t
+    val fresh : unit -> ('ty, 'lcl) t
 
-  val extension : 'ty Effect_context.t -> 'ty t
+    val pressure : ('ty, 'lcl) t -> (('ty, 'lcl) Usage.t * Location.t) list
+    (** [pressure t] returns the uses on [t]. Attempts to add
+        uses to a variable after it has been pressured will fail
+        with an exception. *)
 
-  val renaming : Renaming.t -> 'ty t
+    val use : ('ty, 'lcl) t -> ('ty, 'lcl) mode -> Location.t -> unit
+    (** [add_use t m] adds a uses of [t] at mode [m].  Note that
+        pressuring [t] will now pressure [m] as well. *)
+
+  end
+
+  val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
+
+  val escaping : ('ty, 'lcl) t
+
+  val unused : ('ty, 'lcl) t
+
+  val local : ('ty, 'lcl) t
+
+  val unadjusted : 'lcl -> ('ty, 'lcl) t
+
+  val adjusted : 'ty Adjustment.t -> ('ty, 'lcl) t
+
+  val times : ('ty, 'lcl) t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
 
 end

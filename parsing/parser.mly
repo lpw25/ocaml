@@ -362,6 +362,13 @@ type adjustment_binding =
   | Adj_var of string Location.loc
   | Adj_dot
 
+type effects =
+  | Adjustment of
+      { outer :(string * Ast_helper.str option) list;
+        inner : (string * adjustment_binding) list;
+        loc : loc }
+  | Context of (string * Parsetree.core_type option) list
+
 let adjustment_outer_of_binding (name, inner, loc) =
   let outer =
     match inner with
@@ -394,24 +401,19 @@ let extension_list_expr name expr rens =
   in
   Exp.extension ~loc:Location.none (name, payload)
 
-let adjustment_attr ~outer ~inner =
+let adjustment_attr ~outer ~inner loc =
   let outer = extension_list_expr outer_loc outer_expr outer in
   let inner = extension_list_expr inner_loc adjustment_inner_expr inner in
   let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
-  Attr.mk ~loc:Location.none adjustment_loc payload
+  Attr.mk ~loc adjustment_loc payload
 
-let mktyp_effects typ (adj, eff) =
-  let attrs = typ.ptyp_attributes in
-  let attrs =
-    match adj with
-    | None -> attrs
-    | Some (outer, inner) -> adjustment_attr ~outer ~inner :: attrs
+let mktyp_effects typ effs =
+  let attr =
+    match effs with
+    | Adjustment {outer; inner; loc} -> adjustment_attr ~outer ~inner loc
+    | Context eff -> effects_attr eff
   in
-  let attrs =
-    match eff with
-    | None -> attrs
-    | Some eff -> effects_attr eff :: attrs
-  in
+  let attrs = attr :: typ.ptyp_attributes in
   {typ with ptyp_attributes = attrs}
 
 let effect_type_loc = mknoloc "extension.effect_type"
@@ -429,12 +431,9 @@ let mkcds_effect_type cds =
 
 let renaming_loc = mknoloc "extension.renaming"
 
-let renaming_inner_expr (name, s) =
-  Exp.extension (mknoloc name, PPat(Pat.var s, None))
-
 let renaming_extension ~outer ~inner =
   let outer = extension_list_expr outer_loc outer_expr outer in
-  let inner = extension_list_expr inner_loc renaming_inner_expr inner in
+  let inner = extension_list_expr inner_loc outer_expr inner in
   let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
   Exp.extension ~loc:Location.none (renaming_loc, payload)
 
@@ -3894,40 +3893,33 @@ effect_adjustment:
       DIV inner = effect_bindings RBRACKET
       { let outer = List.map adjustment_outer_of_binding outer in
         let inner = List.map adjustment_inner_of_binding inner in
-        outer, inner }
+        let loc = make_loc $sloc in
+        Adjustment {outer; inner; loc} }
   | LBRACKET PLUS inner = effect_bindings RBRACKET
-      { let inner = List.map adjustment_inner_of_binding inner in
-        [], inner }
+      { let outer = [] in
+        let inner = List.map adjustment_inner_of_binding inner in
+        let loc = make_loc $sloc in
+        Adjustment {outer; inner; loc} }
 ;
 effects:
   | effect_adjustment
-      { Some $1, None }
+      { $1 }
   | effect_context
-      { None, Some $1 }
-  | effect_adjustment effect_context
-      { Some $1, Some $2 }
+      { Context $1 }
 ;
-effect_renaming_inner_item:
-  label AS mkrhs(LIDENT)
-    { ($1, $3) }
-;
-effect_renaming_outer_item:
+effect_renaming_item:
   | label AS mkrhs(LIDENT)
       { ($1, Some $3) }
   | label COLON DOT
       { ($1, None) }
 ;
-%inline effect_renaming_outer:
-  separated_list(SEMI, effect_renaming_outer_item)
-    { $1 }
-;
-%inline effect_renaming_inner:
-  separated_list(SEMI, effect_renaming_inner_item)
+%inline effect_renaming_items:
+  separated_list(SEMI, effect_renaming_item)
     { $1 }
 ;
 effect_renaming:
-  LBRACKET outer = effect_renaming_outer
-    DIV inner = effect_renaming_inner RBRACKET
+  LBRACKET outer = effect_renaming_items
+    DIV inner = effect_renaming_items RBRACKET
     { outer, inner }
 ;
 

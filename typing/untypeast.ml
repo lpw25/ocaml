@@ -433,6 +433,39 @@ let value_binding sub vb =
     (sub.pat sub vb.vb_pat)
     (sub.expr sub vb.vb_expr)
 
+let extension_of_effect_renaming ren =
+  let item_expr (name, outer) =
+    let payload =
+      match outer with
+      | None -> PStr []
+      | Some v -> PPat(Pat.var v, None)
+    in
+    Exp.extension (name, payload)
+  in
+  let outer_payload =
+    match ren.er_outer with
+    | [] -> PStr []
+    | [outer] -> PStr[Str.eval (item_expr outer)]
+    | outers -> PStr[Str.eval (Exp.tuple (List.map item_expr outers))]
+  in
+  let outer_str = mknoloc "outer" in
+  let outer =
+    Exp.extension ~loc:Location.none (outer_str, outer_payload)
+  in
+  let inner_payload =
+    match ren.er_inner with
+    | [] -> PStr []
+    | [inner] -> PStr[Str.eval (item_expr inner)]
+    | inners -> PStr[Str.eval (Exp.tuple (List.map item_expr inners))]
+  in
+  let inner_str = mknoloc "inner" in
+  let inner =
+    Exp.extension ~loc:Location.none (inner_str, inner_payload)
+  in
+  let payload = PStr [Str.eval (Exp.tuple [outer; inner])] in
+  let str = mknoloc "extension.renaming" in
+  Exp.mk ~loc:Location.none (Pexp_extension(str, payload))
+
 let expression sub exp =
   let loc = sub.location sub exp.exp_loc in
   let attrs = sub.attributes sub exp.exp_attributes in
@@ -629,42 +662,7 @@ let expression sub exp =
         in
         Pexp_apply(ext, [Nolabel, constr])
     | Texp_rename_effects(ren, arg) ->
-        let outer_expr (name, outer) =
-          let payload =
-            match outer with
-            | None -> PStr []
-            | Some v -> PPat(Pat.var v, None)
-          in
-          Exp.extension (mknoloc name, payload)
-        in
-        let outer_payload =
-          match ren.er_outer with
-          | [] -> PStr []
-          | [outer] -> PStr[Str.eval (outer_expr outer)]
-          | outers -> PStr[Str.eval (Exp.tuple (List.map outer_expr outers))]
-        in
-        let outer_str = mknoloc "outer" in
-        let outer =
-          Exp.extension ~loc:Location.none (outer_str, outer_payload)
-        in
-        let inner_expr (name, inner) =
-          Exp.extension (mknoloc name, PPat(Pat.var inner, None))
-        in
-        let inner_payload =
-          match ren.er_inner with
-          | [] -> PStr []
-          | [inner] -> PStr[Str.eval (inner_expr inner)]
-          | inners -> PStr[Str.eval (Exp.tuple (List.map inner_expr inners))]
-        in
-        let inner_str = mknoloc "inner" in
-        let inner =
-          Exp.extension ~loc:Location.none (inner_str, inner_payload)
-        in
-        let payload = [Str.eval (Exp.tuple [outer; inner])] in
-        let str = mknoloc "extension.renaming" in
-        let ext =
-          Exp.mk ~loc:Location.none (Pexp_extension(str, PStr payload))
-        in
+        let ext = extension_of_effect_renaming ren in
         Pexp_apply(ext, [Nolabel, sub.expr sub arg])
   in
   List.fold_right (exp_extra sub) exp.exp_extra
@@ -893,6 +891,68 @@ let class_type_field sub ctf =
   in
   Ctf.mk ~loc ~attrs desc
 
+let attr_of_effect_adjustment sub adj =
+  let outer_expr (name, outer) =
+    let payload =
+      match outer with
+      | None -> PStr []
+      | Some v -> PPat(Pat.var v, None)
+    in
+    Exp.extension (name, payload)
+  in
+  let outer_payload =
+    match adj.ea_outer with
+    | [] -> PStr []
+    | [outer] -> PStr[Str.eval (outer_expr outer)]
+    | outers -> PStr[Str.eval (Exp.tuple (List.map outer_expr outers))]
+  in
+  let outer_str = mknoloc "outer" in
+  let outer =
+    Exp.extension ~loc:Location.none (outer_str, outer_payload)
+  in
+  let inner_expr (name, inner) =
+    let payload =
+      match inner with
+      | Eai_rename s -> PPat(Pat.var s, None)
+      | Eai_bind None -> PStr []
+      | Eai_bind (Some ct) -> PTyp (sub.typ sub ct)
+    in
+    Exp.extension (name, payload)
+  in
+  let inner_payload =
+    match adj.ea_inner with
+    | [] -> PStr []
+    | [inner] -> PStr[Str.eval (inner_expr inner)]
+    | inners -> PStr[Str.eval (Exp.tuple (List.map inner_expr inners))]
+  in
+  let inner_str = mknoloc "inner" in
+  let inner =
+    Exp.extension ~loc:Location.none (inner_str, inner_payload)
+  in
+  let payload =
+    PStr [Str.eval (Exp.tuple [outer; inner])]
+  in
+  let str = mknoloc "extension.adjustment" in
+  Attr.mk str payload
+
+let attr_of_effect_context sub eff =
+  let effect_expr (name, cto) =
+    let payload =
+      match cto with
+      | None -> PStr []
+      | Some ct -> PTyp (sub.typ sub ct)
+    in
+    Exp.extension (name, payload)
+  in
+  let payload =
+    match eff.ec_effects with
+    | [] -> PStr []
+    | [effect] -> PStr[Str.eval (effect_expr effect)]
+    | effects -> PStr[Str.eval (Exp.tuple (List.map effect_expr effects))]
+  in
+  let str = mknoloc "extension.effects" in
+  Attr.mk str payload
+
 let core_type sub ct =
   let loc = sub.location sub ct.ctyp_loc in
   let attrs = sub.attributes sub ct.ctyp_attributes in
@@ -914,9 +974,20 @@ let core_type sub ct =
         Ptyp_alias (sub.typ sub ct, s)
     | Ttyp_variant (list, bool, labels) ->
         Ptyp_variant (List.map (sub.row_field sub) list, bool, labels)
-    | Ttyp_poly (list, ct) ->
+    | Ttyp_poly (list, ct, eff) ->
         let list = List.map (fun v -> mkloc v loc) list in
-        Ptyp_poly (list, sub.typ sub ct)
+        let ct = sub.typ sub ct in
+        let ct =
+          match eff with
+          | None -> ct
+          | Some (Em_context eff) ->
+              let attr = attr_of_effect_context sub eff in
+              { ct with ptyp_attributes = attr :: ct.ptyp_attributes }
+          | Some (Em_adjustment adj) ->
+              let attr = attr_of_effect_adjustment sub adj in
+              { ct with ptyp_attributes = attr :: ct.ptyp_attributes }
+        in
+        Ptyp_poly (list, ct)
     | Ttyp_package pack -> Ptyp_package (sub.package_type sub pack)
   in
   Typ.mk ~loc ~attrs desc

@@ -113,11 +113,7 @@ val current_eff : effect_context -> expr_effect_context
 val is_mono : type_expr -> bool
 val get_mono : type_expr -> type_expr
 val get_poly :
-  type_expr
-  -> type_expr
-     * type_expr list
-     * effect_adjustment option
-     * effect_context option
+  type_expr -> type_expr * type_expr list * effect_modality
 
 (**** Utilities for private abbreviations with fixed rows ****)
 val row_of_type: type_expr -> type_expr
@@ -141,13 +137,8 @@ val iter_effect_context_option:
   (type_expr -> unit) -> effect_context option -> unit
 val fold_effect_context_option:
   ('a -> type_expr -> 'a) -> 'a -> effect_context option -> 'a
-val iter_effect_adjustment: (type_expr -> unit) -> effect_adjustment -> unit
-val fold_effect_adjustment: ('a -> type_expr -> 'a) -> 'a -> effect_adjustment -> 'a
-val iter_effect_adjustment_option:
-  (type_expr -> unit) -> effect_adjustment option -> unit
-val fold_effect_adjustment_option:
-  ('a -> type_expr -> 'a) -> 'a -> effect_adjustment option -> 'a
-
+val iter_effect_modality: (type_expr -> unit) -> effect_modality -> unit
+val fold_effect_modality: ('a -> type_expr -> 'a) -> 'a -> effect_modality -> 'a
 
 type type_iterators =
   { it_signature: type_iterators -> signature -> unit;
@@ -183,12 +174,8 @@ val copy_effect_context:
   (type_expr -> type_expr) -> effect_context -> effect_context
 val copy_effect_context_option:
   (type_expr -> type_expr) -> effect_context option -> effect_context option
-val copy_effect_adjustment:
-  (type_expr -> type_expr) -> effect_adjustment -> effect_adjustment
-val copy_effect_adjustment_option:
-  (type_expr -> type_expr)
-  -> effect_adjustment option -> effect_adjustment option
-
+val copy_effect_modality:
+  (type_expr -> type_expr) -> effect_modality -> effect_modality
 
 module For_copy : sig
 

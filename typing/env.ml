@@ -220,12 +220,12 @@ type escaping_context =
   | Tailcall_function
   | Partial_application
 
-type value_lock_source =
-  | Closure of escaping_context option
-  | Effect_handler
-
 type value_lock =
-  | Lock of { mode : Value_mode.t; source : value_lock_source }
+  | Closure_lock of
+      { mode : Value_mode.t;
+        escaping_context : escaping_context option;
+        effect_mode : effect_mode; }
+  | Adjustment_lock of effect_mode
   | Region_lock
 
 module IdTbl =
@@ -506,7 +506,8 @@ and address_lazy = (address_unforced, address) EnvLazy.t
 and value_data =
   { vda_description : value_description;
     vda_address : address_lazy;
-    vda_mode : value_mode }
+    vda_mode : value_mode;
+    vda_effect_mode : effect_mode_var option; }
 
 and value_mode =
   | Ordinary of Value_mode.t
@@ -583,7 +584,7 @@ type lookup_error =
   | Generative_used_as_applicative of Longident.t
   | Illegal_reference_to_recursive_module
   | Cannot_scrape_alias of Longident.t * Path.t
-  | Local_value_used_in_closure of Longident.t * value_lock_source
+  | Local_value_used_in_closure of Longident.t * escaping_context option
 
 type error =
   | Missing_module of Location.t * Path.t * Path.t
@@ -1612,9 +1613,12 @@ let rec components_of_module_maker
               | Val_prim _ -> EnvLazy.create_failed Not_found
               | _ -> next_address ()
             in
-            let vda = { vda_description = decl';
-                        vda_address = addr;
-                        vda_mode = Ordinary Value_mode.global } in
+            let vda =
+              { vda_description = decl';
+                vda_address = addr;
+                vda_mode = Ordinary Value_mode.global;
+                vda_effect_mode = None; }
+            in
             c.comp_values <- NameMap.add (Ident.name id) vda c.comp_values;
         | SigL_type(id, decl, _, _) ->
             let final_decl = Subst.type_declaration sub decl in
@@ -1760,13 +1764,16 @@ and check_value_name name loc =
         error (Illegal_value_name(loc, name))
     done
 
-and store_value ?check ~delayed mode id addr decl env =
+and store_value ?check ~delayed mode effect_mode id addr decl env =
   check_value_name (Ident.name id) decl.val_loc;
   Option.iter
     (fun f -> check_usage decl.val_loc id decl.val_uid f !value_declarations)
     check;
   let mode = if delayed then Delayed mode else Ordinary mode in
-  let vda = { vda_description = decl; vda_address = addr; vda_mode = mode } in
+  let vda =
+    { vda_description = decl; vda_address = addr;
+      vda_mode = mode; vda_effect_mode = effect_mode; }
+  in
   { env with
     values = IdTbl.add id (Val_bound vda) env.values;
     summary = Env_value(env.summary, id, decl) }
@@ -1957,9 +1964,11 @@ let add_functor_arg id env =
    functor_args = Ident.add id () env.functor_args;
    summary = Env_functor_arg (env.summary, id)}
 
-let add_value ?check ?(mode = Value_mode.global) ?(delayed=false) id desc env =
+let add_value
+      ?check ?(mode = Value_mode.global) ?(delayed=false)
+      ?effect_mode id desc env =
   let addr = value_declaration_address env id desc in
-  store_value ?check ~delayed mode id addr desc env
+  store_value ?check ~delayed mode effect_mode id addr desc env
 
 let add_type ~check id info env =
   store_type ~check id info env
@@ -2017,7 +2026,7 @@ let enter_value ?check name desc env =
   let id = Ident.create_local name in
   let addr = value_declaration_address env id desc in
   let env =
-    store_value ?check Value_mode.global ~delayed:false id addr desc env
+    store_value ?check Value_mode.global None ~delayed:false id addr desc env
   in
   (id, env)
 
@@ -2055,15 +2064,13 @@ let enter_cltype ~scope name desc env =
 let enter_module ~scope ?arg s presence mty env =
   enter_module_declaration ~scope ?arg s presence (md mty) env
 
-let add_lock ?escaping_context mode env =
-  let source = Closure escaping_context in
-  let lock = Lock { mode; source } in
+let add_closure_lock ?escaping_context mode effect_mode env =
+  let lock = Closure_lock { mode; escaping_context; effect_mode } in
   { env with values = IdTbl.add_lock lock env.values }
 
-let add_handler_lock env =
-  let mode = Value_mode.global in
-  let source = Effect_handler in
-  let lock = Lock { mode; source } in
+let add_adjustment_lock adj env =
+  let effect_mode = Effect_mode.Mode.adjusted adj in
+  let lock = Adjustment_lock effect_mode in
   { env with values = IdTbl.add_lock lock env.values }
 
 let add_region_lock env =
@@ -2490,30 +2497,52 @@ let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
     end
 
 let lock_mode ~errors ~loc env id vmode locks =
-  let mode =
+  let mode, effect_mode =
     List.fold_left
-      (fun vmode lock ->
+      (fun (vmode, effect_mode_acc) lock ->
         match vmode, lock with
-        | Ordinary vmode, Region_lock -> Ordinary (Value_mode.local_to_regional vmode)
-        | Ordinary vmode, Lock {mode; source} -> begin
-            match Value_mode.submode vmode mode with
-            | Ok () -> Ordinary vmode
+        | Ordinary vmode, Region_lock ->
+            Ordinary (Value_mode.local_to_regional vmode), effect_mode_acc
+        | Ordinary vmode, Closure_lock {mode; escaping_context; effect_mode} ->
+            begin match Value_mode.submode vmode mode with
+            | Ok () ->
+                let vmode = Ordinary vmode in
+                let effect_mode_acc = 
+                  Effect_mode.Mode.times effect_mode_acc effect_mode
+                in
+                vmode, effect_mode_acc
             | Error _ ->
                 may_lookup_error errors loc env
-                  (Local_value_used_in_closure (id, source))
-          end
-        | Delayed vmode, Lock _ -> Ordinary vmode
-        | Delayed _, Region_lock -> assert false)
-      vmode locks
+                  (Local_value_used_in_closure (id, escaping_context))
+            end
+        | Ordinary _, Adjustment_lock effect_mode ->
+            let effect_mode_acc =
+              Effect_mode.Mode.times effect_mode_acc effect_mode
+            in
+            vmode, effect_mode_acc
+        | Delayed vmode, Closure_lock _ -> Ordinary vmode, effect_mode_acc
+        | Delayed _, Region_lock -> assert false
+        | Delayed _, Adjustment_lock _ -> assert false)
+      (vmode, Effect_mode.Mode.local) locks
   in
   match mode with
   | Delayed _ -> assert false
-  | Ordinary mode -> mode
+  | Ordinary mode -> mode, effect_mode
 
-let lookup_ident_value ~errors ~use ~loc name env =
+let add_effect_mode_use ~loc effect_mode_var effect_mode =
+  match effect_mode_var with
+  | None -> ()
+  | Some effect_mode_var ->
+      Effect_mode.Mode.Var.use effect_mode_var effect_mode loc
+
+let lookup_ident_value ~errors ~use ~effect_mode ~loc name env =
   match IdTbl.find_name_and_modes wrap_value ~mark:use name env.values with
   | (path, locks, Val_bound vda) ->
-      let mode = lock_mode ~errors ~loc env (Lident name) vda.vda_mode locks in
+      let mode, lock_effect_mode =
+        lock_mode ~errors ~loc env (Lident name) vda.vda_mode locks
+      in
+      let effect_mode = Effect_mode.Mode.times lock_effect_mode effect_mode in
+      add_effect_mode_use ~loc vda.vda_effect_mode effect_mode;
       use_value ~use ~loc path vda;
       path, vda.vda_description, mode
   | (_, _, Val_unbound reason) ->
@@ -2760,9 +2789,9 @@ let lookup_module_path ~errors ~use ~loc ~load lid env : Path.t =
       check_functor_appl ~errors ~loc env p1 f arg p2 md2;
       Papply(p1, p2)
 
-let lookup_value ~errors ~use ~loc lid env =
+let lookup_value ~errors ~use ~effect_mode ~loc lid env =
   match lid with
-  | Lident s -> lookup_ident_value ~errors ~use ~loc s env
+  | Lident s -> lookup_ident_value ~errors ~use ~effect_mode ~loc s env
   | Ldot(l, s) ->
     let path, desc = lookup_dot_value ~errors ~use ~loc l s env in
     let mode = Value_mode.global in
@@ -2861,7 +2890,10 @@ let find_module_by_name lid env =
 
 let find_value_by_name lid env =
   let loc = Location.(in_file !input_name) in
-  let path, desc, _ = lookup_value ~errors:false ~use:false ~loc lid env in
+  let effect_mode = Effect_mode.Mode.unused in
+  let path, desc, _ =
+    lookup_value ~errors:false ~use:false ~effect_mode ~loc lid env
+  in
   path, desc
 
 let find_type_by_name lid env =
@@ -2896,9 +2928,10 @@ let lookup_module_path ?(use=true) ~loc ~load lid env =
 let lookup_module ?(use=true) ~loc lid env =
   lookup_module ~errors:true ~use ~loc lid env
 
-let lookup_value ?(use=true) ~loc lid env =
+let lookup_value ?(use=true) ?(effect_mode=Effect_mode.Mode.local)
+      ~loc lid env =
   check_value_name (Longident.last lid) loc;
-  lookup_value ~errors:true ~use ~loc lid env
+  lookup_value ~errors:true ~use ~effect_mode ~loc lid env
 
 let lookup_type ?(use=true) ~loc lid env =
   lookup_type ~errors:true ~use ~loc lid env
@@ -3372,25 +3405,17 @@ let report_lookup_error _loc env ppf = function
       fprintf ppf
         "The module %a is an alias for module %a, which %s"
         !print_longident lid !print_path p cause
-  | Local_value_used_in_closure (lid, source) -> begin
-      match source with
-      | Closure context -> begin
-          fprintf ppf
-            "@[The value %a is local, so cannot be used \
-             inside a closure that might escape@]"
-            !print_longident lid;
-          match context with
-          | Some Tailcall_argument ->
-              fprintf ppf "@.@[Hint: The closure might escape because it \
-                           is an argument to a tail call@]"
-          | _ -> ()
-        end
-      | Effect_handler ->
-          fprintf ppf
-            "@[The value %a is local, so cannot be used \
-             inside an effect handler@]"
-            !print_longident lid;
-      end
+  | Local_value_used_in_closure (lid, context) -> begin
+      fprintf ppf
+        "@[The value %a is local, so cannot be used \
+         inside a closure that might escape@]"
+        !print_longident lid;
+      match context with
+      | Some Tailcall_argument ->
+          fprintf ppf "@.@[Hint: The closure might escape because it \
+                       is an argument to a tail call@]"
+      | _ -> ()
+    end
 
 let report_error ppf = function
   | Missing_module(_, path1, path2) ->

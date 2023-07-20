@@ -41,8 +41,7 @@ and type_desc =
   | Tpoly of
       type_expr
       * type_expr list
-      * effect_adjustment option
-      * effect_context option
+      * effect_modality
   | Tpackage of Path.t * Longident.t list * type_expr list
 
 and arrow_desc =
@@ -65,6 +64,17 @@ and alloc_mode =
 and effect_context = type_expr Effect_context.t
 
 and effect_adjustment = type_expr Effect_mode.Adjustment.t
+
+and effect_modality =
+  | Enone
+  | Eadjustment of effect_adjustment
+  | Econtext of effect_context
+
+and effect_mode = (type_expr, alloc_mode) Effect_mode.Mode.t
+
+and effect_mode_var = (type_expr, alloc_mode) Effect_mode.Mode.Var.t
+
+and effect_mode_usage = (type_expr, alloc_mode) Effect_mode.Mode.Usage.t
 
 and row_desc =
     { row_fields: (label * row_field) list;
@@ -280,9 +290,9 @@ and record_representation =
   | Record_extension of Path.t          (* Inlined record under extension *)
 
 and global_flag =
-  | Global
-  | Nonlocal
-  | Unrestricted
+  | Gf_global
+  | Gf_nonlocal
+  | Gf_unrestricted
 
 and label_declaration =
   {

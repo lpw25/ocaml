@@ -647,6 +647,37 @@ let class_type_field sub x =
   in
   {x with ctf_desc}
 
+let effect_context sub eff =
+  let ec_effects =
+    List.map
+      (fun (s, cto) ->
+        let cto = Option.map (sub.typ sub) cto in
+        (s, cto))
+      eff.ec_effects
+  in
+  { eff with ec_effects }
+
+let effect_adjustment sub adj =
+  let ea_inner =
+    List.map
+      (fun (s, inner) ->
+        let inner =
+          match inner with
+          | Eai_rename _ -> inner
+          | Eai_bind cto ->
+              let cto = Option.map (sub.typ sub) cto in
+              Eai_bind cto
+        in
+        (s, inner))
+      adj.ea_inner
+  in
+  { adj with ea_inner }
+
+let effect_modality sub eff =
+  match eff with
+  | Em_context eff -> Em_context (effect_context sub eff)
+  | Em_adjustment adj -> Em_adjustment (effect_adjustment sub adj)
+
 let typ sub x =
   let ctyp_env = sub.env sub x.ctyp_env in
   let ctyp_desc =
@@ -670,8 +701,10 @@ let typ sub x =
         Ttyp_alias (sub.typ sub ct, s)
     | Ttyp_variant (list, closed, labels) ->
         Ttyp_variant (List.map (sub.row_field sub) list, closed, labels)
-    | Ttyp_poly (sl, ct) ->
-        Ttyp_poly (sl, sub.typ sub ct)
+    | Ttyp_poly (sl, ct, eff) ->
+        let ct = sub.typ sub ct in
+        let eff = Option.map (effect_modality sub) eff in
+        Ttyp_poly (sl, ct, eff)
     | Ttyp_package pack ->
         Ttyp_package (sub.package_type sub pack)
   in

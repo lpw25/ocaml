@@ -473,17 +473,17 @@ and compare_labels env params1 params2
         Some (Mutability ord)
       else begin
         match ld1.ld_global, ld2.ld_global with
-        | Global, (Nonlocal | Unrestricted) ->
+        | Gf_global, (Gf_nonlocal | Gf_unrestricted) ->
           Some (Nonlocality(First, false))
-        | (Nonlocal | Unrestricted), Global ->
+        | (Gf_nonlocal | Gf_unrestricted), Gf_global ->
           Some (Nonlocality(Second, false))
-        | Nonlocal, Unrestricted ->
+        | Gf_nonlocal, Gf_unrestricted ->
           Some (Nonlocality(First, true))
-        | Unrestricted, Nonlocal ->
+        | Gf_unrestricted, Gf_nonlocal ->
           Some (Nonlocality(Second, true))
-        | Global, Global
-        | Nonlocal, Nonlocal
-        | Unrestricted, Unrestricted ->
+        | Gf_global, Gf_global
+        | Gf_nonlocal, Gf_nonlocal
+        | Gf_unrestricted, Gf_unrestricted ->
           if Ctype.equal env true (ld1.ld_type::params1) (ld2.ld_type::params2)
           then None
           else Some (Type : label_mismatch)

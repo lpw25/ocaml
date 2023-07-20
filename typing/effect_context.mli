@@ -16,9 +16,9 @@ val hash_name : string -> int
 
 type 'ty t
 
-val create : (string * 'ty) list -> 'ty t
+val create : (string * 'ty option) list -> 'ty t
 
-val append : (string * 'ty) list -> 'ty t -> 'ty t
+val append : (string * 'ty option) list -> 'ty t -> 'ty t
 
 val empty : 'ty t
 
@@ -34,7 +34,7 @@ module Join_error : sig
 end
 
 val join :
-  (string -> 'ty -> 'ty -> 'ty)
+  join:(string -> 'ty -> 'ty -> 'ty)
   -> 'ty t
   -> 'ty t
   -> ('ty t, Join_error.t) Result.t
@@ -50,7 +50,7 @@ module Equal_error : sig
 end
 
 val equal :
-  ('a -> string -> 'ty -> 'ty -> 'a)
+  equal:('a -> string -> 'ty -> 'ty -> 'a)
   -> 'a
   -> 'ty t
   -> 'ty t
@@ -67,7 +67,7 @@ module Subeffect_error : sig
 end
 
 val subeffect :
-  (string -> 'ty -> 'ty -> unit)
+  subtype:(string -> 'ty -> 'ty -> unit)
   -> 'ty t
   -> 'ty t
   -> (unit, Subeffect_error.t) Result.t

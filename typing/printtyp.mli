@@ -111,6 +111,7 @@ val marked_type_expr: formatter -> type_expr -> unit
  *)
 
 val effect_context: formatter -> effect_context -> unit
+val effect_adjustment: formatter -> effect_adjustment -> unit
 
 val constructor_arguments: formatter -> constructor_arguments -> unit
 val tree_of_type_scheme: type_expr -> effect_context -> out_type

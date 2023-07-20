@@ -433,6 +433,24 @@ let class_type_field sub {ctf_desc; _} =
       sub.typ sub ct2
   | Tctf_attribute _ -> ()
 
+let effect_context sub eff =
+  List.iter
+    (fun (_, cto) -> Option.iter (sub.typ sub) cto)
+    eff.ec_effects
+
+let effect_adjustment sub adj =
+  List.iter
+    (fun (_, inner) ->
+      match inner with
+      | Eai_rename _ -> ()
+      | Eai_bind cto -> Option.iter (sub.typ sub) cto)
+    adj.ea_inner
+
+let effect_modality sub eff =
+  match eff with
+  | Em_context eff -> effect_context sub eff
+  | Em_adjustment adj -> effect_adjustment sub adj
+
 let typ sub {ctyp_desc; ctyp_env; _} =
   sub.env sub ctyp_env;
   match ctyp_desc with
@@ -447,7 +465,9 @@ let typ sub {ctyp_desc; ctyp_env; _} =
   | Ttyp_class (_, _, list) -> List.iter (sub.typ sub) list
   | Ttyp_alias (ct, _) -> sub.typ sub ct
   | Ttyp_variant (list, _, _) -> List.iter (sub.row_field sub) list
-  | Ttyp_poly (_, ct) -> sub.typ sub ct
+  | Ttyp_poly (_, ct, eff) ->
+      sub.typ sub ct;
+      Option.iter (effect_modality sub) eff
   | Ttyp_package pack -> sub.package_type sub pack
 
 let class_structure sub {cstr_self; cstr_fields; _} =

@@ -207,19 +207,15 @@ let rec immediate_subtypes : type_expr -> type_expr list = fun ty ->
   | Tlink _ | Tsubst _ -> assert false (* impossible due to Ctype.repr *)
   | Tvar _ | Tunivar _ -> []
   | Tpoly (pty, _, eff) ->
-      pty :: immediate_subtypes_effect_context_option eff
+      pty :: immediate_subtypes_effect_modality eff
   | Tconstr (_path, tys, _) -> tys
 
-and immediate_subtypes_effect_context_option eff =
+and immediate_subtypes_effect_modality eff =
   match eff with
-  | None -> []
-  | Some eff ->
-      List.fold_left
-        (fun acc (_, tyo) ->
-          match tyo with
-          | None -> acc
-          | Some ty -> ty :: acc)
-        [] eff.effects
+  | Enone -> []
+  | Econtext eff -> Effect_context.fold (fun acc ty -> ty :: acc) [] eff
+  | Eadjustment adj ->
+      Effect_mode.Adjustment.fold (fun acc ty -> ty :: acc) [] adj
 
 and immediate_subtypes_object_row acc ty = match (Ctype.repr ty).desc with
   | Tnil -> acc

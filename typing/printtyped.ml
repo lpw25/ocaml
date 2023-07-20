@@ -214,10 +214,11 @@ let rec core_type i ppf x =
   | Ttyp_alias (ct, s) ->
       line i ppf "Ttyp_alias \"%s\"\n" s;
       core_type i ppf ct;
-  | Ttyp_poly (sl, ct) ->
+  | Ttyp_poly (sl, ct, eff) ->
       line i ppf "Ttyp_poly%a\n"
         (fun ppf -> List.iter (fun x -> fprintf ppf " '%s" x)) sl;
       core_type i ppf ct;
+      option i effect_modality ppf eff
   | Ttyp_package { pack_path = s; pack_fields = l } ->
       line i ppf "Ttyp_package %a\n" fmt_path s;
       list i package_with ppf l;
@@ -225,6 +226,42 @@ let rec core_type i ppf x =
 and package_with i ppf (s, t) =
   line i ppf "with type %a\n" fmt_longident s;
   core_type i ppf t
+
+and effect_context_item i ppf (s, cto) =
+  line i ppf "\"%s\":@ " s.txt;
+  option (i+1) core_type ppf cto
+
+and effect_context i ppf eff =
+  line i ppf "effect_context";
+  list (i+1) effect_context_item ppf eff.ec_effects
+  
+and effect_adjustment_outer_item i ppf (s, vo) =
+  match vo with
+  | None ->
+      line i ppf "\"%s\": ." s.txt
+  | Some v ->
+      line i ppf "\"%s\" as \"%s\"" s.txt v.txt
+
+and effect_adjustment_inner_item i ppf (s, inner) =
+  match inner with
+  | Eai_rename v ->
+      line i ppf "\"%s\" as \"%s\"" s.txt v.txt
+  | Eai_bind None ->
+      line i ppf "\"%s\": ." s.txt
+  | Eai_bind (Some ct) ->
+      line i ppf "\"%s\":@ " s.txt;
+      core_type (i+1) ppf ct
+
+and effect_adjustment i ppf adj =
+  line i ppf "effect_adjustment";
+  line i ppf "outer";
+  list (i+1) effect_adjustment_outer_item ppf adj.ea_outer;
+  line i ppf "inner";
+  list (i+1) effect_adjustment_inner_item ppf adj.ea_inner
+
+and effect_modality i ppf = function
+  | Em_adjustment adj -> effect_adjustment i ppf adj
+  | Em_context eff -> effect_context i ppf eff
 
 and pattern : type k . _ -> _ -> k general_pattern -> unit = fun i ppf x ->
   line i ppf "pattern %a\n" fmt_location x.pat_loc;
@@ -328,19 +365,16 @@ and comprehension i ppf comp_types=
     Option.iter (expression i ppf) guard
   ) comp_types
 
-and effect_renaming_outer i ppf (name, outer) =
+and effect_renaming_item i ppf (name, outer) =
   match outer with
-  | Some s -> line i ppf "\"%s\" as \"%s\"" name s.txt
-  | None -> line i ppf "%s : ." name
-
-and effect_renaming_inner i ppf (name, s) =
-  line i ppf "\"%s\" as \"%s\"" name s.txt
+  | Some s -> line i ppf "\"%s\" as \"%s\"" name.txt s.txt
+  | None -> line i ppf "%s : ." name.txt
 
 and effect_renaming i ppf {er_outer;er_inner} =
   line i ppf "outer:\n";
-  list (i+1) effect_renaming_outer ppf er_outer;
+  list (i+1) effect_renaming_item ppf er_outer;
   line i ppf "inner:\n";
-  list (i+1) effect_renaming_inner ppf er_inner
+  list (i+1) effect_renaming_item ppf er_inner
 
 and expression i ppf x =
   line i ppf "expression %a\n" fmt_location x.exp_loc;
