@@ -625,7 +625,7 @@ let match_eff eff =
 let type_adjustment env outer inner =
   let vars = String.Tbl.create 3 in
   let vars_unused = String.Tbl.create 3 in
-  let _, outer, touter =
+  let _, rev_outer, rev_touter =
     List.fold_left
       (fun (idx, outer, touter) (name, var_opt) ->
          let binding =
@@ -645,7 +645,9 @@ let type_adjustment env outer inner =
          (idx, outer, touter))
       (0, [], []) outer
   in
-  let inner, tinner =
+  let outer = List.rev rev_outer in
+  let touter = List.rev rev_touter in
+  let rev_inner, rev_tinner =
     List.fold_left
       (fun (inner, tinner) (name, var) ->
         let idx =
@@ -662,6 +664,8 @@ let type_adjustment env outer inner =
         )
       ([], []) inner
   in
+  let inner = List.rev rev_inner in
+  let tinner = List.rev rev_tinner in
   String.Tbl.iter
     (fun _ loc -> raise (Error (loc, env, Unused_effect_adjustment_binding)))
     vars_unused;

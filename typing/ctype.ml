@@ -3616,7 +3616,7 @@ let adjust_effect_context env eff adj =
   let outer =
     Array.map (fun name -> (name, None)) (Array.of_list adj.outer)
   in
-  let _ =
+  let eff =
     try
       List.fold_left
         (fun eff (name, idx) ->
@@ -3656,7 +3656,7 @@ let adjust_effect_context env eff adj =
       in
       raise (Unify (Trace.effect_diff eff expected_eff :: trace))
   in
-  { effects = Array.to_list outer }
+  { effects = Array.to_list outer @ eff.effects }
 
 (**** Special cases of unification ****)
 
