@@ -56,10 +56,10 @@ module Adjustment : sig
   end
 
   val apply :
-    equal:(string -> int -> 'ty -> 'ty -> unit)
-    -> 'ty t
-    -> 'ty Effect_context.t
-    -> ('ty Effect_context.t, Apply_error.t) Result.t
+    equal:(string -> int -> 'ty1 -> 'ty2 -> unit)
+    -> 'ty1 t
+    -> 'ty2 Effect_context.t
+    -> ('ty2 Effect_context.t, Apply_error.t) Result.t
 
   val expected_context : (unit -> 'ty) -> 'ty t -> 'ty Effect_context.t
 
@@ -82,10 +82,10 @@ module Adjustment : sig
   end
 
   val equal :
-    equal:('a -> string -> int -> 'ty -> 'ty -> 'a)
+    equal:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
     -> 'a
-    -> 'ty t
-    -> 'ty t
+    -> 'ty1 t
+    -> 'ty2 t
     -> ('a, Equal_error.t) Result.t
 
   val iter : ('ty -> unit) -> 'ty t -> unit
@@ -106,31 +106,15 @@ module Adjustment : sig
         renaming is explicit or not. *)
 
     val equal :
-      equal:('a -> string -> int -> 'ty -> 'ty -> 'a)
+      equal:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
       -> 'a
-      -> 'ty t
-      -> 'ty t
+      -> 'ty1 t
+      -> 'ty2 t
       -> ('a, Equal_error.t) Result.t
 
-    val join :
-      join:(string -> int -> 'ty -> 'ty -> 'ty)
-      -> 'ty t
-      -> 'ty t
-      -> 'ty t
+    val compose : 'ty t -> 'ty t -> 'ty t
 
-    module Action : sig
-
-      type rename =
-        { tag : int;
-          depth : int; }
-
-      type t =
-        { renames : rename option list;
-          shift : int; }
-
-    end
-
-    val fold_actions : ('a -> Action.t -> 'a) -> 'a -> 'ty t -> 'a
+    val right_residual : 'ty1 t -> 'ty2 t -> 'ty1 t
 
     val reify : 'ty t -> 'ty adjustment
 
@@ -144,62 +128,6 @@ module Mode : sig
 
   type ('ty, 'lcl) t
 
-  module Usage : sig
-
-    type ('ty, 'lcl) t
-
-    module Adjusted_match_error : sig
-
-      type ('ty, 'lcl) t =
-        | Escaping
-        | Adjusted of 'ty Adjustment.Simplified.t * Adjustment.Equal_error.t
-
-    end
-
-    val matches_adjusted :
-      equal:(string -> int -> 'ty -> 'ty -> unit)
-      -> is_local:('lcl -> unit)
-      -> 'ty Adjustment.Simplified.t
-      -> ('ty, 'lcl) t
-       -> (unit, ('ty, 'lcl) Adjusted_match_error.t) Result.t
-
-    module Unadjusted_match_error : sig
-
-      type ('ty, 'lcl) t =
-        | Adjusted of 'ty Adjustment.Simplified.t
-
-    end
-
-    val matches_unadjusted :
-      submode:('lcl -> 'lcl -> unit)
-      -> is_global:('lcl -> unit)
-      -> ('ty, 'lcl) t
-      -> 'lcl
-      -> (unit, ('ty, 'lcl) Unadjusted_match_error.t) Result.t
-
-  end
-
-  module Var : sig
-
-    type ('ty, 'lcl) mode := ('ty, 'lcl) t
-
-    type ('ty, 'lcl) t
-
-    val fresh : unit -> ('ty, 'lcl) t
-
-    val pressure : ('ty, 'lcl) t -> (('ty, 'lcl) Usage.t * Location.t) list
-    (** [pressure t] returns the uses on [t]. Attempts to add
-        uses to a variable after it has been pressured will fail
-        with an exception. *)
-
-    val use : ('ty, 'lcl) t -> ('ty, 'lcl) mode -> Location.t -> unit
-    (** [add_use t m] adds a uses of [t] at mode [m].  Note that
-        pressuring [t] will now pressure [m] as well. *)
-
-  end
-
-  val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
-
   val escaping : ('ty, 'lcl) t
 
   val unused : ('ty, 'lcl) t
@@ -210,6 +138,80 @@ module Mode : sig
 
   val adjusted : 'ty Adjustment.t -> ('ty, 'lcl) t
 
-  val times : ('ty, 'lcl) t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  val join : ('ty, 'lcl) t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
+  val right_residual : ('ty1, 'lcl) t -> ('ty2, 'lcl) t -> ('ty1, 'lcl) t
+
+  module Factor : sig
+    (** Effect modes do not in general have a left residual. Instead we
+        provide a restricted form: we restrict the compose and left
+        residual operations to work with a [Factor.t] type that behaves
+        as a resource (i.e. each call to the [create] functions creates
+        a fresh factor not equal to any other). Composition by a factor
+        is not defined on the left residuals of other factors. Since we
+        only need to use left residuals and composition according to a
+        stack discipline, this is sufficient for our needs. *)
+
+    type ('ty, 'lcl) mode := ('ty, 'lcl) t
+
+    type ('ty, 'lcl) t
+
+    module Var : sig
+
+      type ('ty, 'lcl) t
+
+      val create : unit -> ('ty, 'lcl) t
+
+      val consume : ('ty, 'lcl) t -> ('ty, 'lcl) mode
+      (** [consumes t] returns the value of [t] and marks it as
+          consumed. Any further attempts to constraint it with
+          [submode] will fail with an exception *)
+
+    end
+
+    module Adjustment : sig
+
+      type ('ty, 'lcl) t
+
+      val create : 'ty Adjustment.Simplified.t -> ('ty, 'lcl) t
+
+    end
+
+    val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
+
+    val adjustment : ('ty, 'lcl) Adjustment.t -> ('ty, 'lcl) t
+
+  end
+
+  val left_residual : ('ty, 'lcl) Factor.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
+  val compose : ('ty, 'lcl) Factor.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
+  module Submode_error : sig
+
+    type t =
+      | Escaping
+      | Adjusted of Adjustment.Equal_error.t
+
+    val swap_position : t -> t
+
+  end
+
+  val submode :
+    equal:(string -> int -> 'ty1 -> 'ty2 -> unit)
+    -> sublocal:('lcl1 -> 'lcl2 -> unit)
+    -> escaping:'lcl2
+    -> ('ty1, 'lcl1) t
+    -> ('ty2, 'lcl2) t
+    -> (unit, Submode_error.t) Result.t
+
+  val iter : ('ty -> unit) -> 'ty t -> unit
+
+  val fold : ('a -> 'ty -> 'a) -> 'a -> 'ty t -> 'a
+
+  val copy : ('ty -> 'ty) -> 'ty t -> 'ty t
+
+  val copy_fold :
+    ('a -> 'ty -> 'a * 'ty) -> 'a -> 'ty t -> 'a * 'ty t
 
 end

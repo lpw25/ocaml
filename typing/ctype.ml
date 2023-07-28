@@ -3621,20 +3621,21 @@ let apply_adjustment env adj eff =
 
 exception Escaped
 
-let match_effect_usage_adjusted env usg expected_adj =
+let submode_effect_mode env effect_mode1 effect_mode2 =
   match
-    Effect_mode.Mode.Usage.matches_adjusted
+    Effect_mode.Mode.submode
       ~equal:(fun name _ ty1 ty2 ->
          match unify env ty1 ty2 with
          | () -> ()
          | exception Unify trace ->
              let err = Trace.incompatible_effects name ty1 ty2 in
              raise (Unify (err :: trace)))
-      ~is_local:(fun lcl ->
-         match Btype.Alloc_mode.submode Btype.Alloc_mode.local lcl with
+      ~sublocal:(fun lcl1 lcl2 ->
+        match Btype.Alloc_mode.submode Btype.Alloc_mode.local lcl with
          | Ok () -> ()
          | Error () -> raise Escaped)
-      usg expected_adj
+      ~escaping:Btype.Alloc_mode.global
+      effect_mode1 effect_mode2
   with
   | Ok eff -> eff
   | Error Escaping -> raise Escaped

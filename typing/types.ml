@@ -72,9 +72,7 @@ and effect_modality =
 
 and effect_mode = (type_expr, alloc_mode) Effect_mode.Mode.t
 
-and effect_mode_var = (type_expr, alloc_mode) Effect_mode.Mode.Var.t
-
-and effect_mode_usage = (type_expr, alloc_mode) Effect_mode.Mode.Usage.t
+and effect_mode_factor = (type_expr, alloc_mode) Effect_mode.Mode.Factor.t
 
 and row_desc =
     { row_fields: (label * row_field) list;
@@ -557,4 +555,5 @@ type delayed_effect_context =
 
 type expr_effect_context =
   { current : effect_context;
-    delayed : delayed_effect_context; }
+    delayed : delayed_effect_context;
+    mode : effect_mode; }

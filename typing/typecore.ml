@@ -152,9 +152,6 @@ type error =
   | Operation_arity_mismatch of Longident.t * int * int
   | Unmatched_effect_renaming_binding
   | Unused_effect_renaming_binding
-  | Usage_mismatch of Ctype.Unification_trace.t
-  | Local_effect_escaped
-  | Unexpected_adjustment of effect_adjustment
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -238,8 +235,7 @@ type expected_mode =
     mode : Value_mode.t;
     tuple_modes : Value_mode.t list;
     (* for t in tuple_modes, t <= regional_to_global mode *)
-    effect_mode : effect_mode;
-    tuple_effect_modes : effect_mode list; }
+  }
 
 let apply_position env (expected_mode : expected_mode) sexp : apply_position =
   let fail err =
@@ -255,45 +251,35 @@ let apply_position env (expected_mode : expected_mode) sexp : apply_position =
   | Ok (Some `Tail), Nontail -> fail `Not_a_tailcall
   | Error `Conflict, _ -> fail `Conflict
 
-let mode_return mode effect_mode =
+let mode_return mode =
   { position = Tail;
     escaping_context = Some Return;
     mode;
-    tuple_modes = []
-    effect_mode;
-    tuple_effect_modes = []; }
+    tuple_modes = []}
 
-let mode_uncalled_var () =
+let mode_var () =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.newvar ();
-    tuple_modes = [];
-    effect_mode = Effect_mode.Mode.unused;
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
-let mode_local expected_mode =
+let mode_local =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.local;
-    tuple_modes = [];
-    effect_mode = expected_mode.effect_mode;
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
-let mode_escaping =
+let mode_global =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.global;
-    tuple_modes = [];
-    effect_mode = Effect_mode.Mode.escaping;
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
 let mode_subcomponent expected_mode =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.regional_to_global expected_mode.mode;
-    tuple_modes = [];
-    effect_mode = expected_mode.effect_mode;
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
 let mode_nonlocal expected_mode =
   let mode =
@@ -304,75 +290,65 @@ let mode_nonlocal expected_mode =
   { position = Nontail;
     escaping_context = None;
     mode;
-    tuple_modes = [];
-    effect_mode = Effect_mode.Mode.escaping;
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
-let mode_tailcall_function mode effect_mode =
+let mode_tailcall_function mode =
   { position = Nontail;
     escaping_context = Some Tailcall_function;
     mode;
-    tuple_modes = [];
-    effect_mode = effect_mode; }
+    tuple_modes = [] }
 
-let mode_tailcall_argument mode effect_mode =
+let mode_tailcall_argument mode =
   { position = Nontail;
     escaping_context = Some Tailcall_argument;
     mode;
-    tuple_modes = [];
-    effect_mode;
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
 let mode_partial_application expected_mode =
   { position = Nontail;
     escaping_context = Some Partial_application;
     mode = Value_mode.regional_to_global expected_mode.mode;
-    tuple_modes = [];
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
 let mode_trywith expected_mode =
   { expected_mode with position = Nontail }
 
-let mode_nontail mode expected_mode =
+let mode_nontail mode =
   { position = Nontail;
     escaping_context = None;
     mode;
-    tuple_modes = [];
-    tuple_effect_modes = []; }
+    tuple_modes = [] }
 
-let mode_tuple mode tuple_modes effect_mode tuple_effect_modes =
+let mode_tuple mode tuple_modes =
   { position = Nontail;
     escaping_context = None;
     mode;
-    tuple_modes;
-    effect_mode;
-    tuple_effect_modes; }
+    tuple_modes }
 
-let mode_argument ~funct ~index ~position ~partial_app alloc_mode effect_mode =
+let mode_argument ~funct ~index ~position ~partial_app alloc_mode =
   let vmode = Value_mode.of_alloc alloc_mode in
-  if partial_app then mode_nontail vmode effect_mode
+  if partial_app then mode_nontail vmode
   else match funct.exp_desc, index, (position : apply_position) with
   | Texp_ident (_, _, {val_kind =
       Val_prim {Primitive.prim_name = ("%sequor"|"%sequand")}},
                 Id_prim _), 1, Tail ->
      (* The second argument to (&&) and (||) is in
         tail position if the call is *)
-     mode_return (Value_mode.local_to_regional vmode) effect_mode
+     mode_return (Value_mode.local_to_regional vmode)
   | Texp_ident (_, _, _, Id_prim _), _, _ ->
      (* Other primitives cannot be tail-called *)
-     mode_nontail vmode effect_mode
+     mode_nontail vmode
   | _, _, (Nontail | Default) ->
-     mode_nontail vmode effect_mode
+     mode_nontail vmode
   | _, _, Tail ->
-     mode_tailcall_argument (Value_mode.local_to_regional vmode) effect_mode
+     mode_tailcall_argument (Value_mode.local_to_regional vmode)
 
 let mode_lazy =
   let position = Tail in
   let escaping_context = None in
   let mode = Value_mode.global in
   let tuple_modes = [] in
-  let tuple_effect_modes = [] in
-  { position; escaping_context; mode; tuple_modes; tuple_effect_modes; }
+  { position; escaping_context; mode; tuple_modes }
 
 let submode ~loc ~env mode expected_mode =
   let res =
@@ -387,7 +363,7 @@ let submode ~loc ~env mode expected_mode =
       raise (Error(loc, env, Local_value_escapes(reason, context)))
 
 let escape ~loc ~env m =
-  submode ~loc ~env m mode_escaping
+  submode ~loc ~env m mode_global
 
 let eqmode ~loc ~env m1 m2 err =
   match Btype.Alloc_mode.equate m1 m2 with
@@ -396,15 +372,13 @@ let eqmode ~loc ~env m1 m2 err =
 
 type expected_pat_mode =
   { mode : Value_mode.t;
-    tuple_modes : Value_mode.t list;
-    effect_mode : effect_mode;
-    effect_tuple_modes : effect_mode list; }
+    tuple_modes : Value_mode.t list; }
 
-let simple_pat_mode mode effect_mode =
-  { mode; tuple_modes = []; effect_mode; tuple_effect_modes = []; }
+let simple_pat_mode mode =
+  { mode; tuple_modes = [] }
 
-let tuple_pat_mode mode tuple_modes effect_mode tuple_effect_modes =
-  { mode; tuple_modes; effect_mode; tuple_effect_modes }
+let tuple_pat_mode mode tuple_modes =
+  { mode; tuple_modes }
 
 let allocations : Alloc_mode.t list ref = Local_store.s_ref []
 
@@ -471,82 +445,6 @@ let constant_or_raise env loc cst =
   match constant cst with
   | Ok c -> c
   | Error err -> raise (Error (loc, env, err))
-
-(* Effect mode constraints *)
-
-type effect_mode_constraint =
-  | Unadjusted of effect_mode_var * alloc_mode
-  | Adjusted of effect_mode_var * effect_mode_adjustment
-
-let current_effect_mode_scope = ref []
-
-let push_effect_mode_scope () =
-  current_effect_mode_scope := ref [] :: !current_effect_mode_scope;
-
-let match_effect_usage_adjusted loc env usage adj =
-  match Ctype.match_effect_usage_adjusted env usage adj with
-  | () -> ()
-  | exception Unify trace ->
-      raise (Error(loc, env, Usage_mismatch(trace)))
-  | exception Escaped ->
-      raise (Error(loc, env, Local_effect_escaped))
-
-let match_effect_usage_unadjusted loc env usage adj =
-  match 
-    Effect_mode.Mode.Usage.matches_unadjusted
-      ~submode:(fun lcl1 lcl2 ->
-         match Alloc_mode.submode lcl1 ty2 with
-         | Ok () -> ()
-         | Error () ->
-             raise (Error(loc, env, Local_effect_escaped)))
-      ~is_global:(fun lcl ->
-         match Alloc_mode.submode lcl1 Alloc_mode.global with
-         | Ok () -> ()
-         | Error () -> raise (Error(loc, env, Local_effect_escaped)))
-      usg expected_adj
-  with
-  | Ok () -> ()
-  | Error (Adjusted adj) ->
-      let adj = Effect_mode.Adjustment.Simplified.reify adj in
-      raise (Error(loc, env, Unexpected_adjustment adj))
-
-let pop_effect_mode_scope env =
-  (* TODO *)
-  (* CR lwhite: This environment is not the right one.
-     We probably need to manage these constraints in a way
-     that takes into account levels *)
-  match !current_effect_mode_scope with
-  | [] -> assert false
-  | scope :: rest ->
-      current_effect_mode_scope := rest :: !current_effect_mode_scope;
-      let constraints = !scope in
-      List.iter
-        (fun (var, constr) ->
-          let usages = Effect_mode.Mode.Var.pressure var in
-          match constr with
-          | Unadjusted mode ->
-              List.iter
-                (fun (usage, loc) ->
-                  match_effect_usage_unadjusted loc env usage mode)
-                usages
-          | Adjusted adj ->
-              let adj = Effect_mode.Adjustment.simplify adj in
-              List.iter
-                (fun (usage, loc) ->
-                  match_effect_usage_adjusted loc env usage adj)
-                usages)
-        constraints
-
-let add_effect_mode_constraint var constr =
-    match !current_effect_mode_scope with
-  | [] -> assert false
-  | scope :: _ -> scope := (var, constr) :: !scope
-
-let add_effect_mode_adjusted_constraint var adj =
-  add_effect_mode_constraint var (Adjusted adj)
-
-let add_effect_mode_unadjusted_constraint var lcl =
-  add_effect_mode_constraint var (Unadjusted lcl)
 
 (* Expression effect contexts *)
 
@@ -710,14 +608,6 @@ let apply_adjustment env adj exp =
 
 let global_eff eff =
   { eff with delayed = Single empty_effect_context }
-
-let poly_effect_mode eff effect_mode =
-  match eff with
-  | Enone -> effect_mode
-  | Econtext _ -> Effect_mode.Mode.escaping
-  | Eadjustment adj ->
-      Effect_mode.Mode.times
-        effect_mode (Effect_mode.Mode.adjusted adj)
 
 let poly_eff env exp eff =
   match eff with
@@ -3000,7 +2890,6 @@ let type_pattern_list
 
 let type_class_arg_pattern cl_num val_env met_env l spat =
   if !Clflags.principal then Ctype.begin_def ();
-  push_effect_mode_scope ();
   reset_pattern false;
   let nv = newvar () in
   let alloc_mode = simple_pat_mode Value_mode.global in
@@ -3054,11 +2943,9 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
          ((id', pv_id)::pv, val_env, met_env))
       pvs ([], val_env, met_env)
   in
-  pop_effect_mode_scope env;
   (pat, pv, val_env, met_env)
 
 let type_self_pattern cl_num privty val_env met_env par_env spat =
-  push_effect_mode_scope ();
   let open Ast_helper in
   let spat =
     Pat.mk (Ppat_alias (Pat.mk(Ppat_alias (spat, mknoloc "selfpat-*")),
@@ -3098,7 +2985,6 @@ let type_self_pattern cl_num privty val_env met_env par_env spat =
           Env.enter_unbound_value name Val_unbound_self par_env))
       pv (val_env, met_env, par_env)
   in
-  pop_effect_mode_scope env;
   (pat, meths, vars, val_env, met_env, par_env)
 
 type pat_tuple_arity =
@@ -4327,8 +4213,8 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         raise (Typetexp.Error (loc, Env.empty, Local_not_enabled));
       submode ~loc ~env Value_mode.local expected_mode;
       let exp =
-        type_expect ?in_function ~recarg env (mode_local expected_mode)
-          sbody ty_expected_explained
+        type_expect ?in_function ~recarg env mode_local sbody
+          ty_expected_explained
       in
       { exp with exp_loc = loc }
   | Pexp_apply
@@ -4336,15 +4222,15 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
  [Nolabel, sbody]) ->
       submode ~loc ~env Value_mode.local expected_mode;
       let exp =
-        type_expect ?in_function ~recarg env (mode_local expected_mode)
-          sbody ty_expected_explained
+        type_expect ?in_function ~recarg env mode_local sbody
+          ty_expected_explained
       in
       { exp with exp_loc = loc }
   | Pexp_apply
 ({ pexp_desc = Pexp_extension({txt = "extension.escape"}, PStr []) },
  [Nolabel, sbody]) ->
       let exp =
-        type_expect ?in_function ~recarg env mode_escaping sbody
+        type_expect ?in_function ~recarg env mode_global sbody
           ty_expected_explained
       in
       submode_effs exp.exp_loc env exp.exp_eff Alloc_mode.global;
@@ -4381,7 +4267,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       let args =
         List.map2
           (fun sarg ty_arg ->
-            type_expect env mode_escaping sarg (mk_expected ty_arg))
+            type_expect env mode_global sarg (mk_expected ty_arg))
           sargs ty_args
       in
       let ty_res =
@@ -4412,7 +4298,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       in
       let renaming = type_renaming env outer inner in
       let newenv = Env.add_lock Value_mode.global env in
-      let arg = type_expect newenv mode_escaping arg ty_expected_explained in
+      let arg = type_expect newenv mode_global arg ty_expected_explained in
       let eff = rename_effect env arg renaming.ea_type in
       rue {
           exp_desc = Texp_rename_effects(renaming, arg);
@@ -4425,18 +4311,14 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
   | Pexp_apply(sfunct, sargs) ->
       assert (sargs <> []);
       let position = apply_position env expected_mode sexp in
-      let funct_effect_mode =
-        (* TODO *)
-        (* CR lwhite: This is not correct for known partial applications *)
-        Effect_mode.Mode.var funct_effect_mode_var in
       let funct_mode, funct_expected_mode =
         match position with
         | Tail ->
             let mode = Value_mode.local_to_regional (Value_mode.newvar ()) in
-            mode, mode_tailcall_function mode funct_effect_mode
+            mode, mode_tailcall_function mode
         | Nontail | Default ->
             let mode = Value_mode.newvar () in
-            mode, mode_nontail mode funct_effect_mode
+            mode, mode_nontail mode
       in
       let rec lower_args seen ty_fun =
         let ty = expand_head env ty_fun in
@@ -4485,8 +4367,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       in
       begin_def ();
       let (args, ty_res, position, eff) =
-        type_application env loc expected_mode position funct
-          funct_mode sargs
+        type_application env loc expected_mode position funct funct_mode sargs
       in
       end_def ();
       unify_var env (newvar()) funct.exp_type;
@@ -4898,7 +4779,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           exp_env = env }
   | Pexp_ifthenelse(scond, sifso, sifnot) ->
       let cond =
-        type_expect env (mode_uncalled_var ()) scond
+        type_expect env (mode_var ()) scond
           (mk_expected ~explanation:If_conditional Predef.type_bool)
       in
       let eff = global_eff cond.exp_eff in
@@ -4957,7 +4838,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         else Env.add_region_lock env, true
       in
       let wh_cond =
-        type_expect cond_env (mode_uncalled_var ()) scond
+        type_expect cond_env (mode_var ()) scond
           (mk_expected ~explanation:While_loop_conditional Predef.type_bool)
       in
       let cond_eff = global_eff wh_cond.exp_eff in
@@ -4981,12 +4862,12 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           exp_env = env }
   | Pexp_for(param, slow, shigh, dir, sbody) ->
       let for_from =
-        type_expect env (mode_uncalled_var ()) slow
+        type_expect env (mode_var ()) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
       in
       let eff = global_eff for_from.exp_eff in
       let for_to =
-        type_expect env (mode_uncalled_var ()) shigh
+        type_expect env (mode_var ()) shigh
           (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
       in
       let eff =
@@ -5125,7 +5006,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         }
   | Pexp_send (e, {txt=met}) ->
       if !Clflags.principal then begin_def ();
-      let obj = type_exp env mode_escaping e in
+      let obj = type_exp env mode_global e in
       let obj_meths = ref None in
       let ap_pos = apply_position env expected_mode sexp in
       begin try
@@ -5292,7 +5173,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       match mut with
       | Mutable ->
           let newval =
-            type_expect env mode_escaping snewval
+            type_expect env mode_global snewval
               (mk_expected (instance ty))
           in
           submode_effs newval.exp_loc env newval.exp_eff Alloc_mode.global;
@@ -5333,7 +5214,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
             begin try
                 let (id, _, _, ty) = Vars.find lab.txt !vars in
                 let newval =
-                  type_expect env mode_escaping snewval (mk_expected (instance ty))
+                  type_expect env mode_global snewval (mk_expected (instance ty))
                 in
                 submode_effs newval.exp_loc env newval.exp_eff Alloc_mode.global;
                 (Path.Pident id, lab, newval)
@@ -5421,7 +5302,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
 
   | Pexp_assert (e) ->
       let cond =
-        type_expect env (mode_uncalled_var ()) e
+        type_expect env (mode_var ()) e
           (mk_expected ~explanation:Assert_condition Predef.type_bool)
       in
       let exp_type =
@@ -5670,7 +5551,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       let cases, partial, body_eff =
         type_cases Value body_env
           (simple_pat_mode Value_mode.global)
-          (mode_return Value_mode.global Effect_mode.Mode.escaping)
+          (mode_return Value_mode.global)
           ty_params arg_eff None
           (mk_expected ty_func_result) true loc [scase]
       in
@@ -5746,7 +5627,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           check_probe_name name name_loc env;
           let env = Env.add_lock Value_mode.global env in
           Env.add_probe name;
-          let exp = type_expect env mode_escaping arg
+          let exp = type_expect env mode_global arg
                       (mk_expected Predef.type_unit) in
           let eff = global_eff exp.exp_eff in
           rue {
@@ -5840,7 +5721,7 @@ and type_binding_op_ident env s =
   let loc = s.loc in
   let lid = Location.mkloc (Longident.Lident s.txt) loc in
   let path, mode, desc, kind = type_ident env lid in
-  submode ~env ~loc:lid.loc mode mode_escaping;
+  submode ~env ~loc:lid.loc mode mode_global;
   submode_effect_context lid.loc env desc.val_eff Alloc_mode.global;
   let path =
     match desc.val_kind with
@@ -5859,7 +5740,6 @@ and type_binding_op_ident env s =
 
 and type_function ?in_function loc attrs env (expected_mode : expected_mode)
 ty_expected_explained l ~has_local ~has_poly caselist =
-  push_effect_mode_scope ();
   let { ty = ty_expected; explanation } = ty_expected_explained in
   register_allocation expected_mode;
   let alloc_mode = Value_mode.regional_to_global_alloc expected_mode.mode in
@@ -5950,15 +5830,14 @@ ty_expected_explained l ~has_local ~has_poly caselist =
   in
   let cases_expected_mode =
     if uncurried_function then
-      mode_call_function (Value_mode.of_alloc ret_mode)
+      mode_nontail (Value_mode.of_alloc ret_mode)
     else begin
         let ret_value_mode = Value_mode.of_alloc ret_mode in
         let ret_value_mode =
           if region_locked then Value_mode.local_to_regional ret_value_mode
           else ret_value_mode
         in
-        let ret_effect_mode = Effect_mode.Mode.unadjusted ret_value_mode in
-        mode_return ret_value_mode ret_effect_mode
+        mode_return ret_value_mode
       end
   in
   let in_function =
@@ -6005,7 +5884,6 @@ ty_expected_explained l ~has_local ~has_poly caselist =
   let param = name_cases "param" cases in
   let region = region_locked && not uncurried_function in
   let warnings = Warnings.backup () in
-  pop_effect_mode_scope env;
   re {
       exp_desc =
         Texp_function
@@ -6329,7 +6207,7 @@ and type_label_exp create env (expected_mode : expected_mode) loc ty_expected
     let arg_mode =
       match label.lbl_global with
       | Global ->
-          mode_escaping
+          mode_global
       | Nonlocal ->
           mode_nonlocal rmode
       | Unrestricted ->
@@ -6495,17 +6373,11 @@ ty_expected' ty_expected =
         texp
 
 and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) =
-  let arg_effect_mode =
-    (* TODO *)
-    (* CR lwhite: This is not correct for known partial applications *)
-    Effect_mode.Mode.local
-  in
   match arg with
   | Arg (Unknown_arg { sarg; ty_arg_mono; mode_arg }) ->
       let mode, _ = Alloc_mode.newvar_below mode_arg in
       let expected_mode =
-        mode_argument ~funct ~index ~position ~partial_app mode arg_effect_mode
-      in
+        mode_argument ~funct ~index ~position ~partial_app mode in
       let arg =
         type_expect env expected_mode sarg (mk_expected ty_arg_mono)
       in
@@ -6516,11 +6388,9 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
   | Arg (Known_arg { sarg; ty_arg; ty_arg0;
                      mode_arg; wrapped_in_some }) ->
       let mode, _ = Alloc_mode.newvar_below mode_arg in
-      let ty_arg', vars, eff = get_poly ty_arg in
-      let arg_effect_mode = poly_effect_mode eff arg_effect_mode in
       let expected_mode =
-        mode_argument ~funct ~index ~position ~partial_app mode
-      in
+        mode_argument ~funct ~index ~position ~partial_app mode in
+      let ty_arg', vars, eff = get_poly ty_arg in
       let arg =
         if vars = [] then begin
             let ty_arg0' = get_mono ty_arg0 in
@@ -6769,7 +6639,7 @@ ty_expected_explained attrs =
 
 and type_statement ?explanation env sexp =
   begin_def();
-  let exp = type_exp env (mode_uncalled_var ()) sexp in
+  let exp = type_exp env (mode_var ()) sexp in
   end_def();
   let ty = expand_head env exp.exp_type and tv = newvar() in
   if is_Tvar ty && ty.level > tv.level then
@@ -7000,7 +6870,7 @@ and type_cases
           | None -> None
           | Some scond ->
               Some
-                (type_unpacks ext_env (mode_uncalled_var ()) unpacks scond
+                (type_unpacks ext_env (mode_var ()) unpacks scond
                    (mk_expected ~explanation:When_guard Predef.type_bool))
         in
         let exp =
@@ -7452,7 +7322,7 @@ and type_andops env sarg sands expected_ty =
     match rev_sands with
     | [] ->
         let exp =
-          type_expect env mode_escaping let_sarg
+          type_expect env mode_global let_sarg
             (mk_expected expected_ty)
         in
         submode_effs exp.exp_loc env exp.exp_eff Alloc_mode.global;
@@ -7485,7 +7355,7 @@ and type_andops env sarg sands expected_ty =
         end;
         let let_arg, rest, eff = loop env let_sarg rest ty_rest in
         let exp =
-          type_expect env mode_escaping sexp (mk_expected ty_arg)
+          type_expect env mode_global sexp (mk_expected ty_arg)
         in
         submode_effs exp.exp_loc env exp.exp_eff Alloc_mode.global;
         let eff = join_effs exp.exp_loc env (global_eff exp.exp_eff) eff in
@@ -7534,7 +7404,7 @@ and type_andops env sarg sands expected_ty =
     let comp_type, new_env, comp_eff =
       type_comprehension_list ~loc ~env ~container_type ~comp_typell
     in
-    let body = type_expect new_env mode_escaping sbody (mk_expected without_arr_ty) in
+    let body = type_expect new_env mode_global sbody (mk_expected without_arr_ty) in
     let eff = join_effs body.exp_loc new_env body.exp_eff comp_eff in
     re {
       exp_desc = build body comp_type;
@@ -7551,11 +7421,11 @@ and type_andops env sarg sands expected_ty =
       match comp_type with
       | From_to (param, slow, shigh, dir) ->
           let low =
-            type_expect env mode_escaping slow
+            type_expect env mode_global slow
               (mk_expected ~explanation:For_loop_start_index Predef.type_int)
           in
           let high =
-            type_expect env mode_escaping shigh
+            type_expect env mode_global shigh
               (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
           in
           let eff = join_effs high.exp_loc env high.exp_eff low.exp_eff in
@@ -7567,7 +7437,7 @@ and type_andops env sarg sands expected_ty =
         let item_ty = newvar() in
         let iter_ty = instance (container_type item_ty) in
         let iter =
-          type_expect env mode_escaping siter
+          type_expect env mode_global siter
             (mk_expected ~explanation:In_comprehension_argument iter_ty)
         in
         let arg_eff, eff = match_eff iter.exp_eff in
@@ -7621,7 +7491,7 @@ and type_andops env sarg sands expected_ty =
       | None -> None, new_eff
       | Some guard ->
           let exp =
-            type_expect new_env mode_escaping guard
+            type_expect new_env mode_global guard
               (mk_expected ~explanation:When_guard Predef.type_bool)
           in
           let new_eff = join_effs exp.exp_loc new_env exp.exp_eff new_eff in
@@ -7647,7 +7517,6 @@ and type_andops env sarg sands expected_ty =
 
 let type_binding env rec_flag spat_sexp_list =
   Typetexp.reset_type_variables();
-  push_effect_mode_scope ();
   let (pat_exp_list, new_env, _unpacks, _) =
     type_let
       ~check:(fun s -> Warnings.Unused_value_declaration s)
@@ -7656,16 +7525,13 @@ let type_binding env rec_flag spat_sexp_list =
       ~allow_effects:false
       env rec_flag spat_sexp_list false
   in
-  pop_effect_mode_scope env;
   (pat_exp_list, new_env)
 
 let type_let existential_ctx env rec_flag spat_sexp_list =
-  push_effect_mode_scope ();
   let (pat_exp_list, new_env, _unpacks, _) =
     type_let existential_ctx ~allow_effects:false
       env rec_flag spat_sexp_list false
   in
-  pop_effect_mode_scope env;
   (pat_exp_list, new_env)
 
 (* Typing of toplevel expressions *)
@@ -7673,11 +7539,9 @@ let type_let existential_ctx env rec_flag spat_sexp_list =
 let type_expression env sexp =
   Typetexp.reset_type_variables();
   begin_def();
-  push_effect_mode_scope ();
-  let exp = type_exp env mode_escaping sexp in
+  let exp = type_exp env mode_global sexp in
   subeffect_effs exp.exp_loc env
     true exp.exp_eff.current empty_effect_context;
-  pop_effect_mode_scope env;
   end_def();
   if maybe_expansive exp then begin
     lower_contravariant env exp.exp_type;
@@ -8272,20 +8136,6 @@ let report_error ~loc env = function
   | Unused_effect_renaming_binding ->
       Location.errorf ~loc
         "@[This effect binding is unused: it should be replaced with \".\".@]"
-  | Usage_mismatch trace ->
-      Location.error_of_printer ~loc (fun ppf () ->
-        Printtyp.report_unification_error ppf env trace
-          (function ppf -> fprintf ppf "This expression expected adjustment")
-          (function ppf -> fprintf ppf "but is used at adjustment"))
-        ()
-  | Local_effect_escaped ->
-      Location.errorf ~loc
-        "@[This expression has local effects that will escape their scope.@]"
-  | Unexpected_adjustment adj ->
-      Location.errorf ~loc
-        "@[This expression expected no adjustment,@ \
-           but is used at adjustment:@ \ %a.@]"
-        Printtyp.effect_adjustment adj
 
 let report_error ~loc env err =
   Printtyp.wrap_printing_env ~error:true env
@@ -8308,20 +8158,6 @@ let () =
   ()
 
 (* drop unnecessary arguments from the external API *)
-let type_expect env e ty =
-  push_effect_mode_scope ();
-  let exp = type_expect env mode_escaping e ty in
-  pop_effect_mode_scope env;
-  exp
-
-let type_exp env e =
-  push_effect_mode_scope ();
-  let exp = type_exp env mode_escaping e in
-  pop_effect_mode_scope env;
-  exp
-  
-let type_argument env e t1 t2 =
-  push_effect_mode_scope ();
-  let exp = type_argument env mode_escaping e t1 t2 in
-  pop_effect_mode_scope env;
-  exp
+let type_expect env e ty = type_expect env mode_global e ty
+let type_exp env e = type_exp env mode_global e
+let type_argument env e t1 t2 = type_argument env mode_global e t1 t2

@@ -203,9 +203,8 @@ val lookup_error: Location.t -> t -> lookup_error -> 'a
    emitted the wrong number of times. *)
 
 val lookup_value:
-  ?use:bool -> ?effect_mode:Types.effect_mode ->
-  loc:Location.t -> Longident.t -> t ->
-  Path.t * value_description * Types.value_mode
+  ?use:bool -> loc:Location.t -> Longident.t -> t ->
+  Path.t * value_description * Types.value_mode * Types.effect_mode
 val lookup_type:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * type_declaration
@@ -290,7 +289,7 @@ val make_copy_of_types: t -> (t -> t)
 val add_value:
     ?check:(string -> Warnings.t) ->
     ?mode:Types.value_mode -> ?delayed:bool ->
-    ?effect_mode:Types.effect_mode_var ->
+    ?effect_mode:Types.effect_mode ->
     Ident.t -> value_description -> t -> t
 val add_type: check:bool -> Ident.t -> type_declaration -> t -> t
 val add_extension:
@@ -375,10 +374,10 @@ val enter_unbound_module : string -> module_unbound_reason -> t -> t
 (* Lock the environment *)
 
 val add_closure_lock :
-  ?escaping_context:escaping_context -> Types.value_mode -> Types.effect_mode
-  -> t -> t
+  ?escaping_context:escaping_context -> Types.value_mode
+  -> Types.effect_mode_factor -> t -> t
 val add_region_lock : t -> t
-val add_adjustment_lock : Types.effect_adjustment -> t -> t
+val add_adjustment_lock : Types.effect_mode_factor -> t -> t
 
 (* Initialize the cache of in-core module interfaces. *)
 val reset_cache: preserve_persistent_env:bool -> unit
