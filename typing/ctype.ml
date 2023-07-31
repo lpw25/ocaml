@@ -3599,27 +3599,39 @@ let subeffect env eff1 eff2 =
       undo_compress snap;
       raise (Unify (expand_trace !env trace))
 
-let apply_adjustment env adj eff =
-  match
-    Effect_mode.Adjustment.apply
-      ~equal:(fun name _ ty1 ty2 ->
-         match unify env ty1 ty2 with
-         | () -> ()
-         | exception Unify trace ->
-             let err = Trace.incompatible_effects name ty1 ty2 in
-             raise (Unify (err :: trace)))
-      eff1 eff2
-  with
-  | Ok eff -> eff
-  | Error err ->
-      let trace = Trace.[Eff (Cannot_apply_adjustment err)] in
-      let expected_eff = Effect_mode.Adjustment.expected_context newvar adj in
-      raise (Unify (Trace.effect_context_diff eff expected_eff :: trace))
-  | exception Unify trace ->
-      let expected_eff = Effect_mode.Adjustment.expected_context newvar adj in
-      raise (Unify (Trace.effect_context_diff eff expected_eff :: trace))
-
 exception Escaped
+
+let apply_effect_modality env eff1 mode1 eff2 =
+  match eff1 with
+  | Enone ->
+      if not (Effect_context.is_empty eff2) then begin
+        match Btype.Alloc_mode.submode Btype.Alloc_mode.local mode1 with
+        | Ok () -> ()
+        | Error () -> raise Escaped
+      end;
+      eff2
+  | Econtext eff1 ->
+      subeffect env eff1 eff2;
+      Effect_context.empty
+  | Eadjustment adj1 ->
+      match
+        Effect_mode.Adjustment.apply
+          ~equal:(fun name _ ty1 ty2 ->
+            match unify env ty1 ty2 with
+            | () -> ()
+            | exception Unify trace ->
+                let err = Trace.incompatible_effects name ty1 ty2 in
+                raise (Unify (err :: trace)))
+          eff1 eff2
+      with
+      | Ok eff -> eff
+      | Error err ->
+          let trace = Trace.[Eff (Cannot_apply_adjustment err)] in
+          let expected_eff = Effect_mode.Adjustment.expected_context newvar adj in
+          raise (Unify (Trace.effect_context_diff eff expected_eff :: trace))
+      | exception Unify trace ->
+          let expected_eff = Effect_mode.Adjustment.expected_context newvar adj in
+          raise (Unify (Trace.effect_context_diff eff expected_eff :: trace))
 
 let submode_effect_mode env effect_mode1 effect_mode2 =
   match

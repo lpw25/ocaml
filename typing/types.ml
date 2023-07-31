@@ -550,10 +550,9 @@ type value_mode =
     r_as_g : alloc_mode; }
 
 type delayed_effect_context =
-  | Tuple of effect_context list * effect_context
-  | Single of effect_context
+  | Tuple of (effect_context * effect_mode) list * effect_context * effect_mode
+  | Single of effect_context * effect_mode
 
 type expr_effect_context =
   { current : effect_context;
-    delayed : delayed_effect_context;
-    mode : effect_mode; }
+    delayed : delayed_effect_context; }

@@ -26,7 +26,7 @@ module Adjustment : sig
     -> inner:(string * 'ty inner) list
     -> ('ty t, Parse_error.t) Result.t
 
-  val handler : 'ty Effect_context.t -> 'ty t
+  val handler : (string * 'ty) list -> 'ty t
 
   module Desc : sig
 
@@ -190,7 +190,7 @@ module Mode : sig
   module Submode_error : sig
 
     type t =
-      | Escaping
+      | Escaping 
       | Adjusted of Adjustment.Equal_error.t
 
     val swap_position : t -> t

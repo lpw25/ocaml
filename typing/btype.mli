@@ -99,13 +99,15 @@ val proxy: type_expr -> type_expr
 (* Effect contexts *)
 
 val effect_context_of_delayed_effect_context :
-  delayed_effect_context -> effect_context
+  delayed_effect_context -> effect_context * effect_mode
 
 val no_effect : expr_effect_context
 
-val delayed_eff : effect_context -> expr_effect_context
+val delayed_eff : effect_context -> effect_mode -> expr_effect_context
 
 val current_eff : effect_context -> expr_effect_context
+
+val effect_modality_mode : effect_modality -> alloc_mode -> effect_mode
 
 (* Poly types. *)
 

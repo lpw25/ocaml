@@ -322,7 +322,9 @@ val join_effect_contexts:
 val unify_effect_modality:
         Env.t -> effect_modality -> effect_modality -> unit
 val subeffect : Env.t -> effect_context -> effect_context -> unit
-val apply_adjustment : Env.t -> effect_adjustment -> effect_context -> effect_context
+val apply_effect_modaliy :
+        Env.t -> effect_modality -> alloc_mode
+        -> effect_context -> effect_context
 val submode_effect_mode : Env.t -> effect_mode -> effect_mode -> unit
 val filter_arrow: Env.t -> type_expr -> arg_label -> bool ->
                   alloc_mode * type_expr * alloc_mode * type_expr

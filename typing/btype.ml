@@ -777,20 +777,26 @@ let extract_label l ls = extract_label_aux [] l ls
                   (********************************************)
 
 let effect_context_of_delayed_effect_context = function
-  | Tuple(_, eff) -> eff
-  | Single eff -> eff
+  | Tuple(_, eff, em) -> eff, em
+  | Single(eff, em) -> eff, em
 
 let no_effect =
-  { delayed = Single Effect_context.empty;
+  { delayed = Single(Effect_context.empty, Effect_mode.Mode.escaping);
     current = Effect_context.empty; }
 
-let delayed_eff eff =
-  { delayed = Single eff;
+let delayed_eff eff em =
+  { delayed = Single(eff, em);
     current = Effect_context.empty; }
 
 let current_eff eff =
-  { delayed = Single Effect_context.empty;
+  { delayed = Single(Effect_context.empty, Effect_mode.Mode.escaping);
     current = eff; }
+
+let effect_modality_mode eff mode =
+  match eff with
+  | Enone -> Effect_mode.Mode.unadjusted mode
+  | Econtext _ -> Effect_mode.Mode.escaping
+  | Eadjustment adj -> Effect_mode.Mode.adjusted adj
 
                   (********************************)
                   (*  Utilities for poly types    *)
