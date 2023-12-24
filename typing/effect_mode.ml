@@ -1,52 +1,159 @@
-type empty = |
-
 type position = First | Second
 
 module Adjustment = struct
 
-  type 'ty adjust =
-    | Rename of
-        { to_hash : int;
-          to_index : int; }
+  type outer = string option
+
+  type 'ty inner =
+    | Rename of string
     | Bind of 'ty option
 
-  type 'ty gen =
+  type functional = private Functional
+  type relational = private Relational
+
+  type ('ty, 'knd) adjust =
+    | Rename :
+        { to_hash : int;
+          to_index : int; } -> ('ty, 'knd) adjust
+    | Bind : 'ty -> ('ty, 'knd) adjust
+    | Meet : ('ty, _) adjust * ('ty, _) adjust -> ('ty, relational) adjust
+    | Top : ('ty, 'knd) adjust
+
+  type ('ty, 'knd) gen =
     { image : string array Int.Map.t;
       adjustments : (string * 'ty adjust) array Int.Map.t }
 
-  type 'ty t = 'ty option gen
+  type 'ty t = ('ty, functional) gen
 
-  let identity =
-    let image = Int.Map.empty in
-    let adjustments = Int.Map.empty in
-    { image; adjustments }
+  let map f t =
+    let adjustments =
+      Int.Map.map
+        (Array.map
+           (fun (name, adjust) ->
+             match adjust with
+             | Rename _ as adjust -> adjust
+             | Bind ty -> Bind (f ty)))
+        adjustments
+    in
+    { t with adjustments }
+
+  let get_image t hash =
+    Option.default ~default:[||]
+      (Int.Map.find_opt hash t.image) 
+
+  let get_adjustments t hash =
+    Option.default ~default:[||]
+      (Int.Map.find_opt hash t.adjustments)
+
+  let get_idx_adjustment image adjustments hash idx =
+    let adjustments_length = Array.length adjustments in
+    if idx < adjustments_length then adjustments.(idx)
+    else begin
+      let image_length = Array.length image in
+      let to_idx = (idx - adjustments_length) + image_length in
+      let to_hash = hash in
+      Rename { to_hash; to_idx }
+    end
+
+  let merge f array_map1 array_map2 =
+    Int.Map.merge
+      (fun key array1 array2 ->
+         let array1 = Option.value ~default:[||] array1 in
+         let array2 = Option.value ~default:[||] array2 in
+         f key array1 array2)
+
+  let iter2 f array_map1 array_map2 =
+    merge
+      (fun key array1 array2 ->
+        f key array1 array2;
+        None)
+      array_map1 array_map2
 
   module Parse_error = struct
 
     type t =
       | Multiple_outer_uses of string
       | No_outer_uses of string
-      | Multiple_inner_uses of string
       | No_inner_uses of string
 
     let print ppf = function
-      | Multiple_outer_uses name ->
+      | Multiple_outer_uses var ->
           Format.fprintf ppf
             "%s appears multiple times in the outer context"
-            name
-      | No_outer_uses name ->
+            var
+      | No_outer_uses var ->
           Format.fprintf ppf
             "%s does not appear in the outer context"
-            name
-      | Multiple_inner_uses name ->
-          Format.fprintf ppf
-            "%s appears multiple times in the inner context"
-            name
-      | No_inner_uses name ->
+            var
+      | No_inner_uses var ->
           Format.fprintf ppf
             "%s does not appear in the inner context"
-            name
+            var
   end
+
+  exception Parse_error of Parse_error.t
+
+  let parse ~outer ~inner =
+    let image, bindings =
+      List.fold_left
+        (fun (image, bindings) (name, var) ->
+          let hash = hash_name name in
+          let prev, index =
+            match Int.Map.find_opt hash image with
+            | None -> [], 0
+            | Some (prev, length) -> prev, length
+          in
+          let image = Int.Map.add hash (name :: prev, index + 1) image in
+          let bindings =
+            match var with
+            | None -> bindings
+            | Some var ->
+                match String.Map.find_opt var bindings with
+                | Some _ -> raise (Parse_error (Multiple_outer_uses var))
+                | None -> Strint.Map.add var (hash, index, ref false)
+          in
+          image, bindings)
+        (Int.Map.empty, String.Map.empty) outer
+    in
+    let adjustments =
+      List.fold_left
+        (fun adjustments (name, (inner : _ inner)) ->
+          let hash = hash_name name in
+          let prev =
+            match Int.Map.find_opt hash adjustments with
+            | None -> []
+            | Some prev -> prev
+          in
+          let adjust =
+            match inner with
+            | Bind ty -> Bind ty
+            | Rename var ->
+                match String.Map.find_opt var bindings with
+                | None -> raise (Parse_error (No_outer_uses var))
+                | Some (to_hash, to_index, used) ->
+                    used := true;
+                    Rename { to_hash; to_index }
+          in
+          Int.Map.add hash name adjustments)
+        Int.Map.empty inner
+    in
+    Int.Map.iteri
+      (fun var (_, _, used) ->
+        if not !used then raise (Parse_error (No_inner_uses var)))
+      bindings;
+    let image = Int.Map.map (fun (l, _) -> Array.of_list l) image in
+    let adjustments = Int.Map.map Array.of_list adjustments in
+    { image; adjustments }    
+
+  let parse ~outer ~inner =
+    match parse ~outer ~inner with
+    | t -> Ok t
+    | exception Parse_error err -> Error err
+
+  let identity =
+    let image = Int.Map.empty in
+    let adjustments = Int.Map.empty in
+    { image; adjustments }
 
   let handler ctx =
     let image = Int.Map.empty in
@@ -60,7 +167,7 @@ module Adjustment = struct
                (name, Bind tyo) :: prev)
             rev_adjustments)
         Int.Map.empty ctx
-    in
+
     let adjustments =
       Int.Map.map
         (fun rev_adjusts -> Array.of_list (List.rev rev_adjusts))
@@ -68,7 +175,7 @@ module Adjustment = struct
     in
     { image; adjustments }
 
-  let expected_context newvar t =
+  let expected_context ~newvar t =
     let vars_tbl = Int.Tbl.create 3 in
     Int.Map.iter
       (fun hash names ->
@@ -77,7 +184,7 @@ module Adjustment = struct
       t.image;
     let effects =
       Int.Map.fold
-        (fun eff _ renames ->
+        (fun eff _ adjustments ->
           Array.fold_left
             (fun eff (name, adjustment) ->
               match adjustment with
@@ -87,8 +194,8 @@ module Adjustment = struct
                   (name, Some var)
               | Bind tyo ->
                   (name, tyo))
-           eff renames)
-        [] t.renames
+           eff adjustments)
+        [] t.adjustments
     in
     { effects }
 
@@ -106,7 +213,7 @@ module Adjustment = struct
       t.image;
     let eff =
       Int.Map.fold
-        (fun eff hash renames ->
+        (fun eff hash adjustments ->
           Array.fold_left
             (fun (eff, i) (name, adjustment) ->
               let eff =
@@ -131,8 +238,8 @@ module Adjustment = struct
                   end
               in
               eff, i + 1)
-            (eff, 0) renames)
-        eff t.renames
+            (eff, 0) adjustments)
+        eff t.adjustments
     in
     let outer_effs =
       Int.Tbl.fold
@@ -157,11 +264,7 @@ module Adjustment = struct
 
   let apply_name t name index =
     let hash = hash_name name in
-    let adjusts =
-      match Int.Map.find_opt hash t.adjustments  with
-      | None -> [||]
-      | Some adjusts -> adjusts
-    in
+    let adjusts = get_adjustments t hash in
     let matched = Array.length adjusts in
     if index < matched then begin
       match adjusts.(index) with
@@ -177,17 +280,13 @@ module Adjustment = struct
     end
 
   let first_transparent t hash =
-    match Int.Map.find_opt hash t.adjustments with
-    | None -> 0
-    | Some adjusts -> Array.length adjusts
+    Array.length (get_adjustments t hash)
 
   let equal consumed ~different_input_names ~different_output_names
         ~different_at t1 t2 =
     let _ =
-      Int.Map.merge
+      iter2
         (fun from_hash adjusts1 adjusts2 ->
-          let adjusts1 = Option.value ~default:[||] adjusts1 in
-          let adjusts2 = Option.value ~default:[||] adjusts2 in
           let len1 = Array.length adjusts1 in
           let len2 = Array.length adjusts2 in
           if len1 < len2 then begin
@@ -225,15 +324,12 @@ module Adjustment = struct
                     ~second_destination:to_name2
                     ~destination_index:to_index
                 end
-          done;
-          None)
+          done)
         t1.adjustments t2.adjustments
     in
     let _ =
-      Int.Map.merge
+      iter2
         (fun to_hash images1 images2 ->
-          let images1 = Option.value ~default:[||] images1 in
-          let images2 = Option.value ~default:[||] images2 in
           let len1 = Array.length images1 in
           let len2 = Array.length images2 in
           if len1 < len2 then begin
@@ -245,8 +341,7 @@ module Adjustment = struct
             let name = images1.(len2) in
             let index = first_transparent t2 to_hash in
             different_at name index
-          end;
-          None)
+          end)
         t1.image t2.image
     in
     ()
@@ -310,94 +405,6 @@ module Adjustment = struct
       let image = !image_ref in
       { adjustments; image }
 
-    let shift to_hash to_index t =
-      match Int.Map.find_opt to_hash t.image with
-      | None -> to_index
-      | Some image -> to_index + Array.length image
-
-    let apply_adjust t (name, adjust) image =
-      let adjust =
-        match adjust with
-        | Bind _ -> adjust
-        | Rename { to_hash; to_index } -> begin
-            match Int.Map.find_opt to_hash t.adjustments  with
-            | None ->
-                let to_index = shift to_hash to_index t in
-                Rename { to_hash; to_index }
-            | Some adjusts ->
-                let matched = Array.length adjusts in
-                if to_index < matched then begin
-                  let _, match_adjust = adjusts.(to_index) in
-                  match_adjust
-                end else begin
-                  let to_index = to_index - matched in
-                  let to_index = shift to_hash to_index t in
-                  Rename { to_hash; to_index }
-                end
-          end
-      in
-      (name, adjust)
-
-    let compose t1 t2 =
-      if is_identity t1 then t2
-      else if is_identity t2 then t1
-      else begin
-        let adjustments =
-          Int.Map.map
-            (fun _ adjusts2 -> Array.map (apply_adjust t1) adjusts2)
-            t2.adjustments
-        in
-        let image = t1.image in
-        let diff =
-          Int.Map.merge
-            (fun hash adjusts1 image2 ->
-              match adjusts1, image2 with
-              | None, None -> None
-              | Some adjusts1, None -> Some (adjusts1, [||])
-              | None, Some image2 -> Some ([||], image2)
-              | Some adjusts1, Some image2 ->
-                  let length1 = Array.length adjusts1 in
-                  let length2 = Array.length image2 in
-                  let shared = min length1 length2 in
-                  let extra1 = length1 - shared in
-                  let extra2 = length2 - shared in
-                  let adjusts = Array.sub adjusts1 shared extra1 in
-                  let image = Array.sub image2 shared extra2 in
-                  adjusts, image)
-            t1.adjustments t2.image
-        in
-        let t = { adjustments; image } in
-        let t =
-          Int.Map.fold
-            (fun hash (adjusts1, image2) t ->
-              let adjustments =
-                if Array.length adjusts1 = 0 then t.adjustments
-                else begin
-                    Int.Map.update hash
-                      (function
-                       | None -> Some adjusts1
-                       | Some adjusts2 ->
-                           Some (Array.append adjusts2 adjusts1))
-                      t.adjustments
-                end
-              in
-              let image =
-                if Array.length image2 = 0 then t.image
-                else begin
-                    Int.Map.update hash
-                      (function
-                       | None -> Some image2
-                       | Some image1 ->
-                           Some (Array.append image1 image2))
-                      t.image
-                end
-              in
-              { image; adjustments })
-            diff t
-        in
-        normalize t
-      end
-
     type equal_error =
       | Different_effect_names of string * string
       | Missing_bind of string * int * position
@@ -444,6 +451,244 @@ module Adjustment = struct
               ~different_output_names ~different_at t1 t2 with
       | () -> Ok ()
       | exception Equal_error err -> Error err
+
+    let shift to_hash to_index t =
+      Array.length (get_image t to_hash) + to_index
+
+    let apply_adjust t (name, adjust) =
+      let adjust =
+        match adjust with
+        | Bind _ -> adjust
+        | Rename { to_hash; to_index } -> begin
+            let adjustments = get_adjustments t to_hash in
+            let matched = Array.length adjustments in
+            if to_index < matched then begin
+              let _, match_adjust = adjustments.(to_index) in
+              match_adjust
+            end else begin
+              let to_index = to_index - matched in
+              let to_index = shift to_hash to_index t in
+              Rename { to_hash; to_index }
+            end
+          end
+      in
+      (name, adjust)
+
+    let compose t1 t2 =
+      if is_identity t1 then t2
+      else if is_identity t2 then t1
+      else begin
+        let adjustments =
+          Int.Map.map
+            (fun _ adjusts2 -> Array.map (apply_adjust t1) adjusts2)
+            t2.adjustments
+        in
+        let image = t1.image in
+        let diff =
+          merge
+            (fun hash adjusts1 image2 ->
+              let length1 = Array.length adjusts1 in
+              let length2 = Array.length image2 in
+              let shared = min length1 length2 in
+              if shared = 0 then adjusts1, image2
+              else begin
+                let extra1 = length1 - shared in
+                let extra2 = length2 - shared in
+                let adjusts = Array.sub adjusts1 shared extra1 in
+                let image = Array.sub image2 shared extra2 in
+                adjusts, image
+              end)
+            t1.adjustments t2.image
+        in
+        let t = { adjustments; image } in
+        let t =
+          Int.Map.fold
+            (fun hash (adjusts1, image2) t ->
+              let adjustments =
+                if Array.length adjusts1 = 0 then t.adjustments
+                else begin
+                    Int.Map.update hash
+                      (function
+                       | None -> Some adjusts1
+                       | Some adjusts2 ->
+                           Some (Array.append adjusts2 adjusts1))
+                      t.adjustments
+                end
+              in
+              let image =
+                if Array.length image2 = 0 then t.image
+                else begin
+                    Int.Map.update hash
+                      (function
+                       | None -> Some image2
+                       | Some image1 ->
+                           Some (Array.append image1 image2))
+                      t.image
+                end
+              in
+              { image; adjustments })
+            diff t
+        in
+        normalize t
+      end
+
+    module Residual_error : sig
+
+      type t =
+        | Unexpected_bind of string * int
+        | Unexpected_contraction of
+            { first_origin_name : string;
+              first_origin_index : int;
+              second_origin_name : string;
+              second_origin_index : int; }
+
+    end
+
+    exception Residual_error of Residual_error.t
+
+    let meet_adjustment ~meet ~check_top
+          name1 idx1 adjustment1 name2 idx2 adjustment2 =
+      match adjustment1, adjustment2 with
+      | Bind ty1, Bind ty2 ->
+          let ty =
+            meet prev_name prev_index prev_ty
+              name2 idx ty1
+          in
+          Bind ty
+      | Rename _, Bind ty2 ->
+          check_top name2 idx2 ty2 name1 idx1;
+          adjustment1
+      | Bind ty1, Rename _ ->
+          check_top name1 idx1 ty1 name2 idx2;
+          adjustment2
+      | Rename
+          { to_hash = to_hash1;
+            to_index = to_index1 },
+        Rename
+          { to_hash = to_hash2;
+            to_index = to_index2 } ->
+          if Int.equal to_hash1 to_hash2
+             && Int.equal to_index1 to_index2 then adjustment1
+          else begin
+            raise Residual_error
+              (Unexpected_contraction
+                 { first_origin_name = name1;
+                   first_origin_index = idx1;
+                   second_origin_name = name2;
+                   second_origin_index = idx2; })
+          end
+
+    let left_residual_gen ~subtype ~meet ~top ~check_top t1 t2 =
+      if is_identity t2 then t1
+      else begin
+        let image1 = ref t1.image in
+        let image2 = ref t2.image in
+        let union =
+          merge
+            (fun hash adjusts1 adjusts2 ->
+               let length1 = Array.length adjusts1 in               
+               let length2 = Array.length adjusts2 in
+               let length = max length1 length2 in
+               let img1 = get_image t1 hash in
+               let img2 = get_image t2 hash in
+               if length > length1 then begin
+                   let extra = Array.sub adjusts2 length1 (length - length1) in
+                   let extra = Array.map (fun (name, _) -> name) in
+                   let new_img1 = Array.append img1 extra in
+                   image1 := Int.Map.add hash new_img1;
+               end;
+               if length > length2 then begin
+                   let extra = Array.sub adjusts1 length2 (length - length2) in
+                   let extra = Array.map (fun (name, _) -> name) in
+                   let new_img2 = Array.append img2 extra in
+                   image2 := Int.Map.add hash new_img2;
+               end;
+               Array.init length
+                 (fun idx ->
+                   get_idx_adjustment img1 adjusts1 hash idx,
+                   get_idx_adjustment img2 adjusts2 hash idx))
+            t1.adjustments t2.adjustments
+        in
+        let image = !image1 in
+        let adjustments =
+          Int.Map.map
+            (fun hash images ->
+              Array.map (fun name -> (name, None)) images)
+            !image2
+        in
+        Int.Map.iter
+          (fun hash (shared, _, _) ->
+            Array.iteri
+              (fun idx ((name1, adjustment1), (name2, adjustment2)) ->
+                match adjustment2 with
+                | Bind ty2 -> begin
+                    match adjustment1 with
+                    | Rename _ -> raise (Residual_error (Unexpected_bind(name2, idx)))
+                    | Bind ty1 -> subtype name2 idx ty2 ty1
+                  end
+                | Rename { to_hash; to_index } ->
+                    let adjustments = Int.Map.find to_hash adjustments in
+                    let previous = adjustments.(to_index) in
+                    let adjustment =
+                      match previous with
+                      | None -> adjustment1
+                      | Some(prev_name, prev_index, prev_adjustment) ->
+                          meet_adjustment ~meet ~check_top
+                            prev_name prev_index prev_adjustment
+                            name2 idx adjustment1
+                    in
+                    adjustments.(to_index) <- Some (name2, idx, adjustment))
+              t shared)
+          union;
+        let adjustments =
+          Int.Map.map
+            (fun adjustments ->
+              Array.map
+                (fun (name, adjustment) ->
+                  let adjustment =
+                    match adjustment with
+                    | None -> Bind top
+                    | Some(_, _, adjustment) -> adjustment
+                  in
+                  (name, adjustment))
+                adjustments)
+            adjustments
+        in
+        { image; adjustments }
+      end
+
+    let left_residual ~equal ~meet t1 t2 =
+      let subtype name idx ty1 ty2 =
+        match ty1, ty2 with
+        | (None | Some _), None -> ()
+        | None, Some _ ->
+            raise Residual_error (Unexpected_bind(name, idx))
+        | Some ty1, Some ty2 -> equal name idx ty1 ty2
+      in
+      let meet name1 idx1 ty1 name2 idx2 ty2 =
+        match ty1, ty2 with
+        | None, None -> None
+        | None, Some _ -> ty2
+        | Some _, None -> ty1
+        | Some ty1, Some ty2 -> meet name1 idx1 ty1 name2 idx2 ty2
+      in
+      let top = None in
+      let check_top name1 idx1 ty1 name2 idx2 =
+        match ty1 with
+        | None -> ()
+        | Some _ ->
+            raise Residual_error
+              (Unexpected_contraction
+                 { first_origin_name = name1;
+                   first_origin_index = idx1;
+                   second_origin_name = name2;
+                   second_origin_index = idx2; })
+      in
+      match
+        left_residual_gen ~subtype ~meet ~top ~check_top t1 t2
+      with
+      | t -> Ok t
+      | exception Residual_error err -> Error err
 
     let reify t = t
 
@@ -517,182 +762,231 @@ end
 
 module Mode = struct
 
-  module Usage = struct
+(* 
+   Modes are expressions from the grammar:
 
-    type 'ty bind =
-      | Different_renames of
-          { first_destination : string;
-            first_destination_index : int;
-            second_destination : string;
-            second_destination_index : int; }
-      | Missing_bind
-      | Bind of 'ty option list
+   {v
+     M ::= adjustment A | escape | unused | unadjusted L
+         | M & M | M / A | M . A | F \ M | A . M
 
-    type ('ty, 'lcl) t =
-      | Escaping
-      | Used of
-          { adjustment : 'ty bind Adjustment.Simplified.gen;
-            localities : 'lcl list; }
-      | Used_unequal of
-          { first_adjustment : 'ty bind Adjustment.Simplified.gen;
-            second_adjustment : 'ty bind Adjustment.Simplified.gen;
-            localities : 'lcl list; }
+     F ::= var X | adj A
+   v}
 
-    let escaping = Escaping
+   where A is an adjustment, X is a mode variable for a
+   closure, and L is a locality.
 
-    let unadujusted lcl =
-      let adjustment = Adjustment.Simplified.identity in
-      let localities = [lcl] in
-      Used { adjustment; localities }
+   Note that [A . M] is a partial operation that is only defined when
+   [M] is equal to one of the form [S & (adj A \ M')] for the same A, where
+   S is a mode without any right residuals:
 
-    let adjusted adjustment =
-      let localities = [] in
-      Used { adjustment; localities }
+   {v
+       S ::= adjustment A | escape | unused | unadjusted L
+           | S & S | S / A | S . A
+   v}
 
-    let zero = Unused
+   Similarly, [M1 & M2] is only defined if there is some [F] for
+   which [M1] is equal to one of the form [S1 & (F \ M1')] and
+   [M2] is equal to one of the form [S2 & (F \ M2')] and the same
+   property holds recursively between [M1'] and [M2'].
 
-    let one =
-      let adjustment = Adjustment.Simplified.identity in
-      let localities = [] in
-      Used { adjustment; localities }
+   We simplify these terms to ones of the form:
 
-    let times t1 t2 =
-      match t1, t2 with
-      | Unused, _ | _, Unused -> Unused
-      | Escaping, _ | _, Escaping -> Escaping
-      | 
+     N ::= escape | unused | O
 
-    let meet to1 t2 =
-      match to1 with
-      | None -> t2
-      | Some t1 ->
-          match t1, t2 with
-          | ....
+     O ::= B | B & (F \ O) | F \ O
 
-  end
+     B ::= adjustment A | unadjusted L | B & B | B . A | B / A
+
+   and represent [B] using [Adjustment.Simplified.gen]. This limits the
+   size of our terms to the nesting depth of closures and rewritings,
+   which is expected to be small.
+
+   This simplification relies on the following equations holding:
+
+     1. (F \ M1) & (F \ M2) = F \ (M1 & M2)
+     2. (M1 & M2) / A = (M1 / A) & (M2 / A)
+     3. (F \ M) / A = F \ (M / A)
+     4. (M1 & M2) . A = (M1 . A) & (M2 . A)
+     5. (F \ M) . A = F \ (M . A)
+     6. A . (M1 & M2) = (adj A . M1) & (adj A . M1)
+     7. A1 . (M / A2) = (adj A1 . M) / A2
+
+   Equations 1, 2 and 3 hold in any residuated lattice
+   
+*)
+
+
+  type ('ty, 'lcl) desc =
+    | Unadjusted of 'lcl
+    | Adjusted of 'ty list Adjustment.Simplified.gen
+    | Escaping (* equivalent to Unadjusted global *)
+
+  type ('ty, 'lcl) constraint_ =
+    | Global of 'lcl
+    | Meet of string * int * 'ty * 'ty
+    | Left_residual
+
+  type ('ty, 'lcl) factor_var =
+    { mutable desc : ('ty, 'lcl) desc;
+      mutable global_constraints : 'lcl list;
+      mutable consumed : bool; }
+
+  type 'ty factor_adjustment =
+    { mutable adjustment : 'ty Adjustment.Simplified.t }
+
+  type ('ty, 'lcl) factor =
+    | Var of ('ty, 'lcl) factor_var
+    | Adjustment of 'ty factor_adjustment
+
+  type reason =
+    | Meet_error of Adjustment.Meet_error.t
+    | Residual_error of Adjustment.Residual_error.t
 
   type ('ty, 'lcl) t =
-    | Var of ('ty, 'lcl) var
-    | Escaping
-    | Unadjusted of 'lcl
-    | Adjusted of 'ty Adjustment.Simplified.t
-    | Zero
-    | One
-    | Times of ('ty, 'lcl) t * ('ty, 'lcl) t
+    | Used of
+        { desc : ('ty, 'lcl) desc;
+          global_constraints : 'lcl list;
+          factors : ('ty, 'lcl) factor list; }
+    | Unused of reason list
 
-  and ('ty, 'lcl) var =
-    { mutable state : ('ty, 'lcl) state }
+  let used desc =
+    let constraints = [] in
+    Used { desc; constraints; }
 
-  and ('ty, 'lcl) state =
-    | Forced of
-        { uses : (('ty, 'lcl) Usage.t * Location.t) list;
-          usage : ('ty, 'lcl) Usage.t; }
-    | Pressured of (('ty, 'lcl) Usage.t * Location.t) list
-    | Escaped of Location.t
-    | Relaxed of
-        { mutable uses : (('ty, 'lcl) t * Location.t) list }
+  let escaping = used Escaping
 
-  let var v = Var v
+  let unused = Unused []
 
-  let escaping = Escaping
+  let adjusted adj =
+    let adj = Adjustment.map Option.to_list adj in
+    let adj = Adjustment.simplified adj in
+    used (Adjusted adj)
 
-  let unadjusted lcl = Unadjusted lcl
+  let local = used (Adjusted Adjustment.Simplified.identity)
 
-  let adjusted adj = Adjusted adj
+  let unadjusted lcl = used (Unadjusted lcl)
 
-  let local = One
+  let meet_desc constraints desc1 desc2 =
+    match desc1, desc2 with
+    | Escape, desc | desc, Escape ->
+        Ok (desc, constraints)
+    | Unadjusted lcl1, Unadjusted lcl2 ->
+        let desc = Unadjustment (join lcl1 lcl2) in
+        Ok (desc, constraints)
+    | Unadjusted lcl, Adjusted adj | Adjusted adj, Unadjusted lcl ->
+        if Adjustment.Simplified.is_identity adj then begin
+          let desc = Adjusted adj in
+            Ok (desc, constraints)
+        end else begin
+          let desc = Adjusted adj in
+            let constraints = Global lcl :: constraints in
+            Ok (desc, constraints)
+        end
+    | Adjusted adj1, Adjusted adj2 ->
+        let meet constraints name idx tys1 tys2 =
+          match tys1, tys2 with
+          | None, tys | tys, None -> tys
+          | Some tys1, Some tys2 -> Some (tys @
+        in
+        match Adjustment.Simplified.meet_gen ~meet constraints adj1 adj2 with
+        | Ok(adj, constraints) ->
+            let desc = Adjusted adj in
+            Ok (desc, constraints)
+        | Error err -> Error err
 
-  let unused = Zero
-
-  let times t1 t2 =
+  let meet ~join t1 t2 =
     match t1, t2 with
-    | Zero, _ | _, Zero -> Zero
-    | One, t -> t
-    | t, One -> t
-    | _, _ -> Times (t1, t2)
+    | Unused reason, _ | _, Unused reason -> Unused reason
+    | Used u1, Used u2 ->
+        let constraints = u1.constraints @ u2.constraints in
+        match meet_desc u1.desc u2.desc with
+        | Ok (desc, constraints) -> Used { desc; constraints }
+        | Error err -> Unused (Meet_error err)
 
-  module Var = struct
+  let left_residual_desc constraints desc1 desc2 =
+    
 
-    type ('ty, 'lcl) t = ('ty, 'lcl) var
+  val left_residual : ('ty1, 'lcl) t -> 'ty2 Adjustment.t -> ('ty1, 'lcl) t
+  (** We can take left residuals with respect to adjustments. Unlike for adjustments
+      this operation is total due to the existence of [unused].  *)
 
-    let fresh () =
-      let constraints = [] in
-      let state = Relaxed { constraints } in
-      { state }
+  val left_residual_not_unused :
+    equal:(string -> int -> 'ty1 -> 'ty2 -> unit)
+    -> meet:(string -> int -> 'ty1 -> string -> int -> 'ty1 -> 'ty1)
+    -> ('ty1, 'lcl) t
+    -> 'ty2 Adjustment.t
+    -> (('ty1, 'lcl) t, Residual_error.t) Result.t
+  (** This is the same as [left_residual], unless the resulting mode
+      would be [unused], in which case it gives an error describing why
+      that is the case. Raises if the original mode is already
+      [unused]. *)
 
-    let usage_of_mode = function
-      | Var var -> force var
-      | Escaped -> Usage.escaped
-      | Unadjusted lcl -> Usage.unadjusted lcl
-      | Adjusted adj -> Usage.adjusted adj
-      | Zero -> Usage.zero
-      | One -> Usage.one
-      | Times(t1, t2) -> Usage.times t1 t2
+  module Factor = struct
 
-    and pressure var =
-      match var.state with
-      | Forced { uses; _ } -> uses
-      | Pressured uses -> uses
-      | Escaped loc ->
-          let uses = [Escaped, loc] in
-          var.state <- Pressured uses;
-          uses
-      | Relaxed { uses } ->
-          let uses =
-            List.map
-              (fun (t, loc) ->
-                let usage = usage_of_mode loc t in
-                usage, loc)
-              uses
-          in
-          var.state <- Pressured uses;
-          uses
+    type ('ty, 'lcl) t
 
-    and force var =
-      match var.state with
-      | Forced { usage; _ } -> usage
-      | _ ->
-          let uses = pressure var in
-          let usage =
-            List.fold_left
-              (fun acc (usage, _) -> Usage.meet acc usage)
-              None uses
-          in
-          var.state <- Forced { uses; usage };
-          usage
+    module Var : sig
 
-    let is_unused = function
-      | Unused -> true
-      | _ -> false
+      (* Reference holds the current upper bound *)
+      type ('ty, 'lcl) t = ('ty, 'lcl) var
 
-    let is_escaping = function
-      | Escaping -> true
-      | _ -> false
+      let create =
+        { desc = Escaping;
+          constraints = [];
+          consumed = false; }
 
-    let is_identical t1 t2 =
-      match ts1, ts2 with
-      | [], [] -> true
-      | t1 :: ts1, t2 :: ts2 ->
-          t1 == t2 && is_identical ts1 ts2
-      | [], _ :: _ | _ :: _, [] -> false    
+      let consume t =
+        t.consumed <- true;
+        Used { desc = t.desc; constraints = t.constraints }
 
-    let use var t loc =
-      if is_unused t then ()
-      else begin
-        match var.state with
-        | Forced _ | Pressured _ ->
-            failwith "Adding use to pressured effect mode variable"
-        | Escaped _ -> ()
-        | Relaxed r ->
-            if is_escaping t then begin
-              var.state <- Escaped loc
-            end else begin
-              match r.uses with
-              | first :: _ when is_identical ts first -> ()
-              | prev -> r.uses <- (ts, loc) :: prev
-            end
-      end
+    end
+
+    module Adjustment : sig
+
+      type ('ty, 'lcl) t
+
+      val create : 'ty Adjustment.Simplified.t -> ('ty, 'lcl) t
+
+    end
+
+    val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
+
+    val adjustment : ('ty, 'lcl) Adjustment.t -> ('ty, 'lcl) t
 
   end
+
+  val compose_right : ('ty, 'lcl) t -> 'ty Adjustment.t -> ('ty, 'lcl) t
+  (** We can compose with adjustments on the right. *)
+ 
+  val right_residual : ('ty, 'lcl) Factor.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
+  val compose_left : ('ty, 'lcl) Factor.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
+  module Submode_error : sig
+
+    type t =
+      | Escaping 
+      | Adjusted of Adjustment.Equal_error.t
+
+    val swap_position : t -> t
+
+  end
+
+  val submode :
+    equal:(string -> int -> 'ty1 -> 'ty2 -> unit)
+    -> sublocal:('lcl1 -> 'lcl2 -> unit)
+    -> escaping:'lcl2
+    -> ('ty1, 'lcl1) t
+    -> 'ty2 Adjustment.t
+    -> (unit, Submode_error.t) Result.t
+
+  val iter : ('ty -> unit) -> 'ty t -> unit
+
+  val fold : ('a -> 'ty -> 'a) -> 'a -> 'ty t -> 'a
+
+  val copy : ('ty -> 'ty) -> 'ty t -> 'ty t
+
+  val copy_fold :
+    ('a -> 'ty -> 'a * 'ty) -> 'a -> 'ty t -> 'a * 'ty t
 
 end
