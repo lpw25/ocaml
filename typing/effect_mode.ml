@@ -126,7 +126,8 @@ module Adjustment = struct
           in
           let adjust =
             match inner with
-            | Bind ty -> Bind ty
+            | Bind (Some ty) -> Bind ty
+            | Bind None -> Top
             | Rename var ->
                 match String.Map.find_opt var bindings with
                 | None -> raise (Parse_error (No_outer_uses var))
@@ -186,14 +187,16 @@ module Adjustment = struct
       Int.Map.fold
         (fun eff _ adjustments ->
           Array.fold_left
-            (fun eff (name, adjustment) ->
+            (fun eff (name, (adjustment : (_, functional) adjust) ->
               match adjustment with
               | Rename { to_hash; to_index } ->
                   let vars = Int.Tbl.find vars_tbl to_hash in
                   let var = vars.(to_index) in
                   (name, Some var)
-              | Bind tyo ->
-                  (name, tyo))
+              | Bind ty ->
+                  (name, Some ty)
+              | Top ->
+                  (name, None))
            eff adjustments)
         [] t.adjustments
     in
@@ -215,7 +218,7 @@ module Adjustment = struct
       Int.Map.fold
         (fun eff hash adjustments ->
           Array.fold_left
-            (fun (eff, i) (name, adjustment) ->
+            (fun (eff, i) (name, (adjustment : (_, functional) adjust) ->
               let eff =
                 match Effect_context.handle name eff with
                 | Error err -> raise (Apply_error err)
@@ -233,7 +236,10 @@ module Adjustment = struct
                         outer.(to_index) <- (outer_name, Some outer_ty);
                         eff
                     | Bind a ->
-                        consume name i ty a;
+                        consume name i ty (Some a);
+                        eff
+                    | Top ->
+                        consume name i ty None;
                         eff
                   end
               in
@@ -303,9 +309,12 @@ module Adjustment = struct
             if not (String.equal name1 name2) then
               different_input_names name1 name2 i;
             match adjust1, adjust2 with
-            | Rename _, Bind _ | Bind _, Rename _ ->
+            | Rename _, (Bind _ | Top)| (Top | Bind _), Rename _ ->
                 different_at name1 i
-            | Bind c1, Bind c2 -> consumed name1 i c1 c2
+            | Bind c1, Bind c2 -> consumed name1 i (Some c1) (Some c2)
+            | Bind c1, Top -> consumed name1 i (Some c1) None
+            | Top, Bind c2 -> consumed name1 i None (Some c2)
+            | Top, Top -> consumed name1 i None None
             | Rename { to_hash = to_hash1;
                        to_index = to_index1; },
               Rename { to_hash = to_hash2;
@@ -356,15 +365,19 @@ module Adjustment = struct
       Int.Map.is_empty t.image
       && Int.Map.is_empty t.adjustments
 
-    let is_transparent hash from_rev_index adjust images =
-      match adjust with
-      | Bind _ -> false
-      | Rename { to_hash; to_index } ->
-          if not (Int.equal hash to_hash) then false
-          else begin
-            let to_rev_index = (Array.length images - 1) - to_index in
-            Int.equal from_rev_index to_rev_index
-          end
+    let rec is_transparent : type k. _ -> _ -> (_, k) adjust -> _ -> _ =
+      fun hash from_rev_index adjust images ->
+        match adjust with
+        | Bind _ | Top -> false
+        | Rename { to_hash; to_index } ->
+            if not (Int.equal hash to_hash) then false
+            else begin
+              let to_rev_index = (Array.length images - 1) - to_index in
+              Int.equal from_rev_index to_rev_index
+            end
+        | Meet(adjust1, adjust2) ->
+            is_transparent hash from_rev_index adjust1 images
+            && is_transparent hash from_rev_index adjust2 images
 
     let count_transparent hash adjusts images =
       let rec loop from_rev_index =
