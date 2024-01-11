@@ -125,7 +125,7 @@ and type_desc =
   | Tpoly of
       type_expr
       * type_expr list
-      * effect_modality
+      * effect_mode
   (** [Tpoly (ty,tyl,eff)] ==> ['a1... 'an. ty [eff]],
       where 'a1 ... 'an are names given to types in tyl
       and occurrences of those types in ty. *)
@@ -150,18 +150,15 @@ and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
 
-and effect_context = type_expr Effect_context.t
+and effect_mode = (type_expr, alloc_mode) Effect.Mode.t
 
-and effect_adjustment = type_expr Effect_mode.Adjustment.t
+and effect_lower_bound = (type_expr, alloc_mode) Effect.Lower_bound.t
 
-and effect_modality =
-  | Enone
-  | Eadjustment of effect_adjustment
-  | Econtext of effect_context
+and effect_upper_bound = (type_expr, alloc_mode) Effect.Upper_bound.t
 
-and effect_mode = (type_expr, alloc_mode) Effect_mode.Mode.t
+and effect_factor = (type_expr, alloc_mode) Effect.Factor.t
 
-and effect_mode_factor = (type_expr, alloc_mode) Effect_mode.Mode.Factor.t
+and effect_env = (type_expr, alloc_mode) Effect.Env.t
 
 (** [  `X | `Y ]       (row_closed = true)
     [< `X | `Y ]       (row_closed = true)
@@ -300,7 +297,7 @@ module Vars  : Map.S with type key = string
 
 type value_description =
   { val_type: type_expr;                (* Type of the value *)
-    val_eff : effect_context;
+    val_eff : effect_mode;
     val_kind: value_kind;
     val_loc: Location.t;
     val_attributes: Parsetree.attributes;
@@ -308,15 +305,15 @@ type value_description =
   }
 
 and value_kind =
-    Val_reg                             (* Regular value *)
-  | Val_prim of Primitive.description   (* Primitive *)
-  | Val_ivar of mutable_flag * string   (* Instance variable (mutable ?) *)
-  | Val_self of (Ident.t * type_expr) Meths.t ref *
+  Val_reg                             (* Regular value *)
+| Val_prim of Primitive.description   (* Primitive *)
+| Val_ivar of mutable_flag * string   (* Instance variable (mutable ?) *)
+| Val_self of (Ident.t * type_expr) Meths.t ref *
                 (Ident.t * mutable_flag * virtual_flag * type_expr) Vars.t ref *
-                string * type_expr
-                                        (* Self *)
-  | Val_anc of (string * Ident.t) list * string
-                                        (* Ancestor *)
+                  string * type_expr
+(* Self *)
+| Val_anc of (string * Ident.t) list * string
+(* Ancestor *)
 
 (* Variance *)
 
@@ -657,11 +654,3 @@ type value_mode =
   (* See Btype.Value_mode *)
   { r_as_l : alloc_mode;
     r_as_g : alloc_mode; }
-
-type delayed_effect_context =
-  | Tuple of (effect_context * effect_mode) list * effect_context * effect_mode
-  | Single of effect_context * effect_mode
-
-type expr_effect_context =
-  { current : effect_context;
-    delayed : delayed_effect_context; }

@@ -93,7 +93,6 @@ and expression =
     exp_extra: (exp_extra * Location.t * attribute list) list;
     exp_type: type_expr;
     exp_mode: value_mode;
-    exp_eff : expr_effect_context;
     exp_env: Env.t;
     exp_attributes: attribute list;
    }
@@ -237,7 +236,7 @@ and apply_position =
 and effect_renaming =
   { er_outer : (string Location.loc * string Location.loc option) list;
     er_inner : (string Location.loc * string Location.loc option) list;
-    er_adjustment : Types.effect_adjustment; }
+    er_mode : Types.effect_mode;  }
 
 (* Value expressions for the class language *)
 
@@ -515,7 +514,7 @@ and core_type_desc =
   | Ttyp_alias of core_type * string
   | Ttyp_variant of row_field list * closed_flag * label list option
   | Ttyp_poly of
-      string list * core_type * effect_modality option
+      string list * core_type * effect_mode option
   | Ttyp_package of package_type
 
 and package_type = {
@@ -547,7 +546,6 @@ and object_field_desc =
 
 and effect_context = {
     ec_effects : (string loc * core_type option) list;
-    ec_type : Types.effect_context;
   }
 
 and effect_adjustment_inner =
@@ -557,18 +555,23 @@ and effect_adjustment_inner =
 and effect_adjustment = {
     ea_outer : (string loc * string loc option) list;
     ea_inner : (string loc * effect_adjustment_inner) list;
-    ea_type : Types.effect_adjustment;
   }
 
-and effect_modality =
-  | Em_adjustment of effect_adjustment
-  | Em_context of effect_context
+and effect_mode_desc =
+  | Em_relative of effect_adjustment
+  | Em_absolute of effect_context
+  | Em_unused
+
+and effect_mode = {
+    em_desc : effect_mode_desc;
+    em_type : Types.effect_mode;
+  }
 
 and value_description =
   { val_id: Ident.t;
     val_name: string loc;
     val_desc: core_type;
-    val_eff: effect_context option;
+    val_eff: effect_mode option;
     val_val: Types.value_description;
     val_prim: string list;
     val_loc: Location.t;
@@ -968,14 +971,3 @@ let split_pattern pat =
         combine_map (into cpat) effs1 effs2
   in
   split_pattern pat
-
-let effect_context_type teff =
-  match teff with
-  | None -> Effect_context.empty
-  | Some teff -> teff.ec_type
-
-let effect_modality_type teff =
-  match teff with
-  | None -> Enone
-  | Some (Em_context teff) -> Econtext teff.ec_type
-  | Some (Em_adjustment tadj) -> Eadjustment tadj.ea_type

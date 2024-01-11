@@ -369,8 +369,7 @@ and apply_position =
 
 and effect_renaming =
   { er_outer : (string Location.loc * string Location.loc option) list;
-    er_inner : (string Location.loc * string Location.loc option) list;
-    er_adjustment : Types.effect_adjustment; }
+    er_inner : (string Location.loc * string Location.loc option) list; }
 
 (* Value expressions for the class language *)
 
@@ -655,7 +654,7 @@ and core_type_desc =
   | Ttyp_class of Path.t * Longident.t loc * core_type list
   | Ttyp_alias of core_type * string
   | Ttyp_variant of row_field list * closed_flag * label list option
-  | Ttyp_poly of string list * core_type * effect_modality option
+  | Ttyp_poly of string list * core_type * effect_mode option
   | Ttyp_package of package_type
 
 and package_type = {
@@ -687,7 +686,6 @@ and object_field_desc =
 
 and effect_context = {
     ec_effects : (string loc * core_type option) list;
-    ec_type : Types.effect_context;
   }
 
 and effect_adjustment_inner =
@@ -697,12 +695,17 @@ and effect_adjustment_inner =
 and effect_adjustment = {
     ea_outer : (string loc * string loc option) list;
     ea_inner : (string loc * effect_adjustment_inner) list;
-    ea_type : Types.effect_adjustment;
   }
 
-and effect_modality =
-  | Em_adjustment of effect_adjustment
-  | Em_context of effect_context
+and effect_mode_desc =
+  | Em_relative of effect_adjustment
+  | Em_absolute of effect_context
+  | Em_unused
+
+and effect_mode = {
+    em_desc : effect_mode_desc;
+    em_type : Types.effect_mode;
+  }
 
 and value_description =
   { val_id: Ident.t;
@@ -915,5 +918,5 @@ val split_pattern:
 val effect_context_type :
   effect_context option -> Types.effect_context
 
-val effect_modality_type :
-  effect_modality option -> Types.effect_modality
+val effect_mode_type :
+  effect_mode option -> Types.effect_mode option

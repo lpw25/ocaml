@@ -235,6 +235,7 @@ type expected_mode =
   { position : mode_position;
     escaping_context : Env.escaping_context option;
     mode : Value_mode.t;
+    effect_factor : effect_factor;
     tuple_modes : Value_mode.t list;
     (* for t in tuple_modes, t <= regional_to_global mode *)
   }
