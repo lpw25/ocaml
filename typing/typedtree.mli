@@ -158,7 +158,6 @@ and expression =
     exp_extra: (exp_extra * Location.t * attributes) list;
     exp_type: Types.type_expr;
     exp_mode: Types.value_mode;
-    exp_eff : Types.expr_effect_context;
     exp_env: Env.t;
     exp_attributes: attributes;
    }
@@ -369,7 +368,8 @@ and apply_position =
 
 and effect_renaming =
   { er_outer : (string Location.loc * string Location.loc option) list;
-    er_inner : (string Location.loc * string Location.loc option) list; }
+    er_inner : (string Location.loc * string Location.loc option) list;
+    er_mode : Types.effect_mode; }
 
 (* Value expressions for the class language *)
 
@@ -686,6 +686,7 @@ and object_field_desc =
 
 and effect_context = {
     ec_effects : (string loc * core_type option) list;
+    ec_type : Types.effect_mode;
   }
 
 and effect_adjustment_inner =
@@ -916,7 +917,7 @@ val split_pattern:
   pattern option * pattern option * pattern Misc.Stdlib.String.Map.t
 
 val effect_context_type :
-  effect_context option -> Types.effect_context
+  effect_context option -> Types.effect_mode option
 
 val effect_mode_type :
   effect_mode option -> Types.effect_mode option

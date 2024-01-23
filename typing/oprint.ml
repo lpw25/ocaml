@@ -274,9 +274,9 @@ let rec print_out_type_0 mode ppf =
       fprintf ppf "@[<hov 2>%a.@ %a@]"
         pr_vars sl
         (print_out_type_0 mode) ty
-  | Otyp_effect_modality(t, eff) ->
+  | Otyp_effect_mode(t, eff) ->
       fprintf ppf "@[<1>%a %a@]"
-        (print_out_type_0 Oam_local) t print_out_effect_modality eff
+        (print_out_type_0 Oam_local) t print_out_effect_mode eff
   | ty ->
       print_out_type_1 mode ppf ty
 
@@ -364,7 +364,7 @@ and print_out_type_3 mode ppf =
         print_fields row_fields
         print_present tags
   | Otyp_alias _ | Otyp_poly _
-  | Otyp_effect_modality _
+  | Otyp_effect_mode _
   | Otyp_arrow _ | Otyp_tuple _ as ty ->
       pp_open_box ppf 1;
       pp_print_char ppf '(';
@@ -448,41 +448,45 @@ and print_out_label ppf (name, mut_or_gbl, arg) =
     | Ogom_immutable -> ""
   in
   fprintf ppf "@[<2>%s%s :@ %a@];" flag name print_out_type arg
-and print_out_effect ppf (s, tyo) =
-  match tyo with
-  | None -> fprintf ppf "%s: ." s
-  | Some ty -> fprintf ppf "%s:@ %a" s print_out_type ty 
+
+and print_out_effect_binding ppf bnd =
+  match (bnd : _ Effect.Binding.t) with
+  | Unknown -> fprintf ppf ": ."
+  | Handled ty -> fprintf ppf ":@ %a" print_out_type ty
+  | Unused -> fprintf ppf ": *"
 
 and print_out_effect_context ppf eff =
+  let print_item ppf (s, bnd) =
+    fprintf ppf "%s%a" s print_out_effect_binding bnd
+  in
   fprintf ppf "@[<2>[%a]@]"
-    (print_list print_out_effect (fun ppf -> fprintf ppf ";@ "))
+    (print_list print_item (fun ppf -> fprintf ppf ";@ "))
     eff
 
 and print_out_effect_adjustment_outer ppf (s, outer) =
-  match outer with
-  | None -> fprintf ppf "%s: ." s
-  | Some var -> fprintf ppf "%s as %s" s var
+  match (outer : Effect.Adjustment.Desc.Outer.t) with
+  | Rename var -> fprintf ppf "%s as %s" s var
+  | Unknown -> fprintf ppf "%s: ." s
 
 and print_out_effect_adjustment_inner ppf (s, inner) =
-  match (inner : _ Effect_mode.Adjustment.Desc.inner) with
+  match (inner : _ Effect.Adjustment.Desc.Inner.t) with
   | Rename var -> fprintf ppf "%s as %s" s var
-  | Bind None -> fprintf ppf "%s: ." s
-  | Bind (Some ty) -> fprintf ppf "%s:@ %a" s print_out_type ty
+  | Bind bnd -> fprintf ppf "%s%a" s print_out_effect_binding bnd
 
-and print_out_effect_adjustment ppf (adj : _ Effect_mode.Adjustment.Desc.t) =
+and print_out_effect_adjustment ppf (adj : _ Effect.Adjustment.Desc.t) =
   fprintf ppf "@[<2>[+ %a@ /@ %a]@]"
     (print_list print_out_effect_adjustment_outer (fun ppf -> fprintf ppf ";@ "))
     adj.outer
     (print_list print_out_effect_adjustment_inner (fun ppf -> fprintf ppf ";@ "))
     adj.inner
 
-and print_out_effect_modality ppf = function
-  | Oem_context eff -> print_out_effect_context ppf eff
-  | Oem_adjustment adj -> print_out_effect_adjustment ppf adj
+and print_out_effect_mode ppf (m : _ Effect.Mode.Desc.t) =
+  match m with
+  | Absolute ctx -> print_out_effect_context ppf ctx
+  | Relative adj -> print_out_effect_adjustment ppf adj
+  | Unused -> fprintf ppf "[*]"
 
-let out_effect_context = ref print_out_effect_context
-
-let out_effect_modality = ref print_out_effect_modality
+let out_effect_mode = ref print_out_effect_mode
 
 let out_label = ref print_out_label
 

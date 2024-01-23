@@ -41,7 +41,7 @@ and type_desc =
   | Tpoly of
       type_expr
       * type_expr list
-      * effect_mode
+      * effect_mode option
   | Tpackage of Path.t * Longident.t list * type_expr list
 
 and arrow_desc =

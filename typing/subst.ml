@@ -251,8 +251,8 @@ let rec typexp copy_scope s ty =
       end;
     ty'
 
-let effect_context copy_scope s eff =
-  copy_effect_context (typexp copy_scope s) eff
+let effect_mode copy_scope s eff =
+  copy_effect_mode (typexp copy_scope s) eff
 
 (*
    Always make a copy of the type. If this is not done, type levels
@@ -265,27 +265,8 @@ let type_scheme s sch eff =
   For_copy.with_scope
     (fun copy_scope ->
       let sch = typexp copy_scope s sch in
-      let eff = effect_context copy_scope s eff in
+      let eff = effect_mode copy_scope s eff in
       sch, eff)
-
-let delayed_effect_context copy_scope s = function
-  | Tuple(effs, eff) ->
-      let effs = List.map (effect_context copy_scope s) effs in
-      let eff = effect_context copy_scope s eff in
-      Tuple(effs, eff)
-  | Single eff -> Single (effect_context copy_scope s eff)
-
-let expr_effect_context copy_scope s { current; delayed } =
-  let current = effect_context copy_scope s current in
-  let delayed = delayed_effect_context copy_scope s delayed in
-  { current; delayed }
-
-let expression_type s ty eff =
-  For_copy.with_scope
-    (fun copy_scope ->
-      let ty = typexp copy_scope s ty in
-      let eff = expr_effect_context copy_scope s eff in
-      ty, eff)
 
 let label_declaration copy_scope s l =
   {
@@ -418,7 +399,7 @@ let class_type s cty =
 
 let value_description' copy_scope s descr =
   { val_type = typexp copy_scope s descr.val_type;
-    val_eff = effect_context copy_scope s descr.val_eff;
+    val_eff = effect_mode copy_scope s descr.val_eff;
     val_kind = descr.val_kind;
     val_loc = loc s descr.val_loc;
     val_attributes = attrs s descr.val_attributes;

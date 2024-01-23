@@ -303,35 +303,25 @@ let rec fold_row f init row =
 let iter_row f row =
   fold_row (fun () v -> f v) () row
 
-let fold_effect_context f init eff =
-  Effect_context.fold f init eff
+let fold_effect_mode f init eff =
+  Effect.Mode.fold_types f init eff
 
-let fold_effect_context_option f init = function
+let fold_effect_mode_option f init = function
   | None -> init
-  | Some eff -> fold_effect_context f init eff
+  | Some eff -> fold_effect_mode f init eff
 
-let iter_effect_context f eff =
-  Effect_context.iter f eff
+let fold_effect_upper_bound f init eff =
+  Effect.Upper_bound.fold_types f init eff
 
-let iter_effect_context_option f = function
+let iter_effect_mode f eff =
+  Effect.Mode.iter_types f eff
+
+let iter_effect_mode_option f = function
   | None -> ()
-  | Some eff -> iter_effect_context f eff
+  | Some eff -> iter_effect_mode f eff
 
-let fold_effect_adjustment f init adj =
-  Effect_mode.Adjustment.fold f init adj
-
-let iter_effect_adjustment f eff =
-  Effect_mode.Adjustment.iter f eff
-
-let fold_effect_modality f init = function
-  | Enone -> init
-  | Eadjustment adj -> fold_effect_adjustment f init adj
-  | Econtext eff -> fold_effect_context f init eff
-
-let iter_effect_modality f = function
-  | Enone -> ()
-  | Eadjustment adj -> iter_effect_adjustment f adj
-  | Econtext eff -> iter_effect_context f eff
+let iter_effect_upper_bound f eff =
+  Effect.Upper_bound.iter_types f eff
 
 let fold_type_expr f init ty =
   match ty.desc with
@@ -359,7 +349,7 @@ let fold_type_expr f init ty =
   | Tpoly (ty, tyl, eff)     ->
     let result = f init ty in
     let result = List.fold_left f result tyl in
-    fold_effect_modality f result eff
+    fold_effect_mode_option f result eff
   | Tpackage (_, _, l)  -> List.fold_left f init l
 
 let iter_type_expr f ty =
@@ -535,20 +525,12 @@ let rec norm_univar ty =
   | Ttuple (ty :: _)   -> norm_univar ty
   | _                  -> assert false
 
-let copy_effect_context f eff =
-  Effect_context.copy f eff
+let copy_effect_mode f eff =
+  Effect.Mode.copy_types f eff
 
-let copy_effect_context_option f = function
+let copy_effect_mode_option f = function
   | None -> None
-  | Some eff -> Some (copy_effect_context f eff)
-
-let copy_effect_adjustment f adj =
-  Effect_mode.Adjustment.copy f adj
-
-let copy_effect_modality f = function
-  | Enone -> Enone
-  | Eadjustment adj -> Eadjustment (copy_effect_adjustment f adj)
-  | Econtext eff -> Econtext (copy_effect_context f eff)
+  | Some eff -> Some (copy_effect_mode f eff)
 
 let rec copy_type_desc ?(keep_names=false) f = function
     Tvar _ as ty        -> if keep_names then ty else Tvar None
@@ -567,7 +549,7 @@ let rec copy_type_desc ?(keep_names=false) f = function
   | Tunivar _ as ty     -> ty (* always keep the name *)
   | Tpoly (ty, tyl, eff)     ->
       let tyl = List.map (fun x -> norm_univar (f x)) tyl in
-      let eff = copy_effect_modality f eff in
+      let eff = copy_effect_mode_option f eff in
       Tpoly (f ty, tyl, eff)
   | Tpackage (p, n, l)  -> Tpackage (p, n, List.map f l)
 
@@ -772,41 +754,15 @@ let rec extract_label_aux hd l = function
 let extract_label l ls = extract_label_aux [] l ls
 
 
-                  (********************************************)
-                  (*  Utilities for expression effect bounds  *)
-                  (********************************************)
-
-let effect_context_of_delayed_effect_context = function
-  | Tuple(_, eff, em) -> eff, em
-  | Single(eff, em) -> eff, em
-
-let no_effect =
-  { delayed = Single(Effect_context.empty, Effect_mode.Mode.escaping);
-    current = Effect_context.empty; }
-
-let delayed_eff eff em =
-  { delayed = Single(eff, em);
-    current = Effect_context.empty; }
-
-let current_eff eff =
-  { delayed = Single(Effect_context.empty, Effect_mode.Mode.escaping);
-    current = eff; }
-
-let effect_modality_mode eff mode =
-  match eff with
-  | Enone -> Effect_mode.Mode.unadjusted mode
-  | Econtext _ -> Effect_mode.Mode.escaping
-  | Eadjustment adj -> Effect_mode.Mode.adjusted adj
-
                   (********************************)
                   (*  Utilities for poly types    *)
                   (********************************)
 
 let is_mono ty =
   match (repr ty).desc with
-  | Tpoly(_, [], Enone) -> true
+  | Tpoly(_, [], None) -> true
   | Tpoly(_, _ :: _, _)
-  | Tpoly(_, _, (Eadjustment _ | Econtext _)) -> false
+  | Tpoly(_, _, Some _) -> false
   | _ -> assert false
 
 let get_poly ty =
@@ -816,7 +772,7 @@ let get_poly ty =
 
 let get_mono ty =
   match (repr ty).desc with
-  | Tpoly(ty, [], Enone) -> ty
+  | Tpoly(ty, [], None) -> ty
   | _ -> assert false
 
                   (**********************************)

@@ -224,8 +224,8 @@ type value_lock =
   | Closure_lock of
       { mode : Value_mode.t;
         escaping_context : escaping_context option;
-        effect_mode_factor : effect_mode_factor; }
-  | Adjustment_lock of effect_mode_factor
+        effect_factor : effect_factor; }
+  | Adjustment_lock of effect_factor
   | Region_lock
 
 module IdTbl =
@@ -449,6 +449,7 @@ type t = {
   summary: summary;
   local_constraints: type_declaration Path.Map.t;
   flags: int;
+  effect_env: effect_env;
 }
 
 and module_components =
@@ -507,7 +508,7 @@ and value_data =
   { vda_description : value_description;
     vda_address : address_lazy;
     vda_mode : value_mode;
-    vda_effect_mode : effect_mode; }
+    vda_eff : effect_upper_bound; }
 
 and value_mode =
   | Ordinary of Value_mode.t
@@ -646,6 +647,7 @@ let empty = {
   summary = Env_empty; local_constraints = Path.Map.empty;
   flags = 0;
   functor_args = Ident.empty;
+  effect_env = Effect.Env.empty
  }
 
 let in_signature b env =
@@ -1331,7 +1333,7 @@ let make_copy_of_types env0 =
     | Val_bound vda ->
         let desc = vda.vda_description in
         let val_type = copy desc.val_type in
-        let val_eff = copy_effect_context copy desc.val_eff in
+        let val_eff = copy_effect_mode copy desc.val_eff in
         let desc = { desc with val_type; val_eff } in
         Val_bound { vda with vda_description = desc }
   in
@@ -1617,7 +1619,7 @@ let rec components_of_module_maker
               { vda_description = decl';
                 vda_address = addr;
                 vda_mode = Ordinary Value_mode.global;
-                vda_effect_mode = Effect_mode.Mode.escaping; }
+                vda_eff = Effect.Upper_bound.global }
             in
             c.comp_values <- NameMap.add (Ident.name id) vda c.comp_values;
         | SigL_type(id, decl, _, _) ->
@@ -1764,7 +1766,7 @@ and check_value_name name loc =
         error (Illegal_value_name(loc, name))
     done
 
-and store_value ?check ~delayed mode effect_mode id addr decl env =
+and store_value ?check ~delayed mode eff id addr decl env =
   check_value_name (Ident.name id) decl.val_loc;
   Option.iter
     (fun f -> check_usage decl.val_loc id decl.val_uid f !value_declarations)
@@ -1772,7 +1774,7 @@ and store_value ?check ~delayed mode effect_mode id addr decl env =
   let mode = if delayed then Delayed mode else Ordinary mode in
   let vda =
     { vda_description = decl; vda_address = addr;
-      vda_mode = mode; vda_effect_mode = effect_mode; }
+      vda_mode = mode; vda_eff = eff; }
   in
   { env with
     values = IdTbl.add id (Val_bound vda) env.values;
@@ -1966,9 +1968,9 @@ let add_functor_arg id env =
 
 let add_value
       ?check ?(mode = Value_mode.global) ?(delayed=false)
-      ?(effect_mode = Effect_mode.Mode.escaping) id desc env =
+      ?(eff = Effect.Upper_bound.global) id desc env =
   let addr = value_declaration_address env id desc in
-  store_value ?check ~delayed mode effect_mode id addr desc env
+  store_value ?check ~delayed mode eff id addr desc env
 
 let add_type ~check id info env =
   store_type ~check id info env
@@ -2026,7 +2028,8 @@ let enter_value ?check name desc env =
   let id = Ident.create_local name in
   let addr = value_declaration_address env id desc in
   let env =
-    store_value ?check Value_mode.global None ~delayed:false id addr desc env
+    store_value ?check Value_mode.global Effect.Upper_bound.global
+      ~delayed:false id addr desc env
   in
   (id, env)
 
@@ -2064,16 +2067,22 @@ let enter_cltype ~scope name desc env =
 let enter_module ~scope ?arg s presence mty env =
   enter_module_declaration ~scope ?arg s presence (md mty) env
 
-let add_closure_lock ?escaping_context mode effect_mode_factor env =
-  let lock = Closure_lock { mode; escaping_context; effect_mode_factor } in
-  { env with values = IdTbl.add_lock lock env.values }
+let add_closure_lock ?escaping_context mode effect_factor env =
+  let lock = Closure_lock { mode; escaping_context; effect_factor } in
+  let values = IdTbl.add_lock lock env.values in
+  let effect_env = Effect.Env.extend env.effect_env effect_factor in
+  { env with values; effect_env }
 
-let add_adjustment_lock effect_mode_factor env =
-  let lock = Adjustment_lock effect_mode_factor in
-  { env with values = IdTbl.add_lock lock env.values }
+let add_adjustment_lock effect_factor env =
+  let lock = Adjustment_lock effect_factor in
+  let values = IdTbl.add_lock lock env.values in
+  let effect_env = Effect.Env.extend env.effect_env effect_factor in
+  { env with values; effect_env }
 
 let add_region_lock env =
   { env with values = IdTbl.add_lock Region_lock env.values }
+
+let effect_env env = env.effect_env
 
 (* Insertion of all components of a signature *)
 
@@ -2495,50 +2504,48 @@ let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
         end
     end
 
-let lock_mode ~errors ~loc env id vmode effect_mode locks =
-  let vmode, effect_mode =
+let lock_mode ~errors ~loc env id vmode eff locks =
+  let vmode, eff =
     List.fold_left
-      (fun (vmode, effect_mode) lock ->
+      (fun (vmode, eff) lock ->
         match vmode, lock with
         | Ordinary vmode, Region_lock ->
-            Ordinary (Value_mode.local_to_regional vmode), effect_mode
+            Ordinary (Value_mode.local_to_regional vmode), eff
         | Ordinary vmode,
-          Closure_lock {mode; escaping_context; effect_mode_factor} -> begin
+          Closure_lock {mode; escaping_context; effect_factor} -> begin
             match Value_mode.submode vmode mode with
             | Ok () ->
                 let vmode = Ordinary vmode in
-                let effect_mode =
-                  Effect_mode.Mode.left_residual
-                    effect_mode_factor effect_mode
+                let eff =
+                  Effect.Upper_bound.right_residual effect_factor eff
                 in
-                vmode, effect_mode
+                vmode, eff
             | Error _ ->
                 may_lookup_error errors loc env
                   (Local_value_used_in_closure (id, escaping_context))
             end
-        | Ordinary _, Adjustment_lock effect_mode ->
-            let effect_mode = 
-              Effect_mode.Mode.left_residual
-                effect_mode_factor effect_mode
+        | Ordinary _, Adjustment_lock effect_factor ->
+            let eff = 
+              Effect.Upper_bound.right_residual effect_factor eff
             in
-            vmode, effect_mode
-        | Delayed vmode, Closure_lock _ -> Ordinary vmode, effect_mode
+            vmode, eff
+        | Delayed vmode, Closure_lock _ -> Ordinary vmode, eff
         | Delayed _, Region_lock -> assert false
         | Delayed _, Adjustment_lock _ -> assert false)
-      (vmode, effect_mode) locks
+      (vmode, eff) locks
   in
   match vmode with
   | Delayed _ -> assert false
-  | Ordinary mode -> mode, effect_mode
+  | Ordinary mode -> mode, eff
 
 let lookup_ident_value ~errors ~use ~loc name env =
   match IdTbl.find_name_and_modes wrap_value ~mark:use name env.values with
   | (path, locks, Val_bound vda) ->
-      let mode, effect_mode =
-        lock_mode ~errors ~loc env (Lident name) vda.vda_mode locks
+      let mode, eff =
+        lock_mode ~errors ~loc env (Lident name) vda.vda_mode vda.vda_eff locks
       in
       use_value ~use ~loc path vda;
-      path, vda.vda_description, mode, effect_mode
+      path, vda.vda_description, mode, eff
   | (_, _, Val_unbound reason) ->
       report_value_unbound ~errors ~loc env reason (Lident name)
   | exception Not_found ->
@@ -2789,8 +2796,8 @@ let lookup_value ~errors ~use ~loc lid env =
   | Ldot(l, s) ->
     let path, desc = lookup_dot_value ~errors ~use ~loc l s env in
     let mode = Value_mode.global in
-    let effect_mode = Effect_mode.Mode.escaping in
-    path, desc, mode, effect_mode
+    let eff = Effect.Upper_bound.global in
+    path, desc, mode, eff
   | Lapply _ -> assert false
 
 let lookup_type_full ~errors ~use ~loc lid env =

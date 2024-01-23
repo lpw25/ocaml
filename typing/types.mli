@@ -125,7 +125,7 @@ and type_desc =
   | Tpoly of
       type_expr
       * type_expr list
-      * effect_mode
+      * effect_mode option
   (** [Tpoly (ty,tyl,eff)] ==> ['a1... 'an. ty [eff]],
       where 'a1 ... 'an are names given to types in tyl
       and occurrences of those types in ty. *)

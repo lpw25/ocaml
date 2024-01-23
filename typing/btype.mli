@@ -96,26 +96,13 @@ val proxy: type_expr -> type_expr
         (* Return the proxy representative of the type: either itself
            or a row variable *)
 
-(* Effect contexts *)
-
-val effect_context_of_delayed_effect_context :
-  delayed_effect_context -> effect_context * effect_mode
-
-val no_effect : expr_effect_context
-
-val delayed_eff : effect_context -> effect_mode -> expr_effect_context
-
-val current_eff : effect_context -> expr_effect_context
-
-val effect_modality_mode : effect_modality -> alloc_mode -> effect_mode
-
 (* Poly types. *)
 
 (* These three functions can only be called on [Tpoly] nodes. *)
 val is_mono : type_expr -> bool
 val get_mono : type_expr -> type_expr
 val get_poly :
-  type_expr -> type_expr * type_expr list * effect_modality
+  type_expr -> type_expr * type_expr list * effect_mode option
 
 (**** Utilities for private abbreviations with fixed rows ****)
 val row_of_type: type_expr -> type_expr
@@ -133,14 +120,15 @@ val iter_row: (type_expr -> unit) -> row_desc -> unit
 val fold_row: ('a -> type_expr -> 'a) -> 'a -> row_desc -> 'a
 val iter_abbrev: (type_expr -> unit) -> abbrev_memo -> unit
         (* Iteration on types in an abbreviation list *)
-val iter_effect_context: (type_expr -> unit) -> effect_context -> unit
-val fold_effect_context: ('a -> type_expr -> 'a) -> 'a -> effect_context -> 'a
-val iter_effect_context_option:
-  (type_expr -> unit) -> effect_context option -> unit
-val fold_effect_context_option:
-  ('a -> type_expr -> 'a) -> 'a -> effect_context option -> 'a
-val iter_effect_modality: (type_expr -> unit) -> effect_modality -> unit
-val fold_effect_modality: ('a -> type_expr -> 'a) -> 'a -> effect_modality -> 'a
+val iter_effect_mode: (type_expr -> unit) -> effect_mode -> unit
+val fold_effect_mode: ('a -> type_expr -> 'a) -> 'a -> effect_mode -> 'a
+val iter_effect_mode_option:
+  (type_expr -> unit) -> effect_mode option -> unit
+val fold_effect_mode_option:
+  ('a -> type_expr -> 'a) -> 'a -> effect_mode option -> 'a
+val iter_effect_upper_bound: (type_expr -> unit) -> effect_upper_bound -> unit
+val fold_effect_upper_bound:
+  ('a -> type_expr -> 'a) -> 'a -> effect_upper_bound -> 'a
 
 type type_iterators =
   { it_signature: type_iterators -> signature -> unit;
@@ -172,12 +160,11 @@ val copy_row:
     (type_expr -> type_expr) ->
     bool -> row_desc -> bool -> type_expr -> row_desc
 val copy_kind: field_kind -> field_kind
-val copy_effect_context:
-  (type_expr -> type_expr) -> effect_context -> effect_context
-val copy_effect_context_option:
-  (type_expr -> type_expr) -> effect_context option -> effect_context option
-val copy_effect_modality:
-  (type_expr -> type_expr) -> effect_modality -> effect_modality
+val copy_effect_mode:
+  (type_expr -> type_expr) -> effect_mode -> effect_mode
+val copy_effect_mode_option:
+  (type_expr -> type_expr) -> effect_mode option -> effect_mode option
+
 
 module For_copy : sig
 

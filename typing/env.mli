@@ -204,7 +204,7 @@ val lookup_error: Location.t -> t -> lookup_error -> 'a
 
 val lookup_value:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
-  Path.t * value_description * Types.value_mode * Types.effect_mode
+  Path.t * value_description * Types.value_mode * Types.effect_upper_bound
 val lookup_type:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * type_declaration
@@ -289,7 +289,7 @@ val make_copy_of_types: t -> (t -> t)
 val add_value:
     ?check:(string -> Warnings.t) ->
     ?mode:Types.value_mode -> ?delayed:bool ->
-    ?effect_mode:Types.effect_mode ->
+    ?eff:Types.effect_upper_bound ->
     Ident.t -> value_description -> t -> t
 val add_type: check:bool -> Ident.t -> type_declaration -> t -> t
 val add_extension:
@@ -375,9 +375,11 @@ val enter_unbound_module : string -> module_unbound_reason -> t -> t
 
 val add_closure_lock :
   ?escaping_context:escaping_context -> Types.value_mode
-  -> Types.effect_mode_factor -> t -> t
+  -> Types.effect_factor -> t -> t
 val add_region_lock : t -> t
-val add_adjustment_lock : Types.effect_mode_factor -> t -> t
+val add_adjustment_lock : Types.effect_factor -> t -> t
+
+val effect_env : t -> Types.effect_env
 
 (* Initialize the cache of in-core module interfaces. *)
 val reset_cache: preserve_persistent_env:bool -> unit

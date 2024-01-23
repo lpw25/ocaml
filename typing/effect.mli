@@ -6,13 +6,14 @@ module Position : sig
   type t =
     { name : string;
       index : int; }
-  (** A (shifted) effect name. The [index] must be a natural number. *)
+  (** A shiftable effect name. The [index] must be a natural number. *)
 
 end
 
 module Binding : sig
 
   type 'ty t =
+    | Unused
     | Handled of 'ty
     | Unknown
 
@@ -40,6 +41,22 @@ module Context : sig
   val empty : 'ty t
   (** [empty] is [mk []] *)
 
+  module Desc : sig
+
+    type 'ty t = (string * 'ty Binding.t) list
+
+  end
+
+  val desc : 'ty t -> 'ty Desc.t
+
+end
+
+module Handler : sig
+
+  type 'ty t = (string * 'ty) list
+  (** An individual handler can be represented by the list of effects it
+      handles and the types at which it handles them. *)
+
 end
 
 module Mapping : sig
@@ -47,6 +64,12 @@ module Mapping : sig
   type 'ty t =
     | Rename of Position.t
     | Bind of 'ty Binding.t
+
+  val unused : 'ty t
+  (** [unused] is [Bind Unused] *)
+
+  val unknown : 'ty t
+  (** [unknown] is [Bind Unknown] *)
 
 end
 
@@ -63,7 +86,9 @@ module Adjustment : sig
 
     module Outer : sig
 
-      type t = string option
+      type t =
+        | Rename of string
+        | Unused
 
     end
 
@@ -71,7 +96,7 @@ module Adjustment : sig
 
       type 'ty t =
         | Rename of string
-        | Bind of 'ty option
+        | Bind of 'ty Binding.t
 
     end
 
@@ -91,7 +116,7 @@ module Adjustment : sig
   val parse :
     outer:(string * Parse.Outer.t) list
     -> inner:(string * 'ty Parse.Inner.t) list
-    -> ('ty t, Parse_error.t) Result.t
+    -> ('ty t, Parse.Error.t) Result.t
   (** [parse ~outer ~inner] constructs an adjustment where [outer] is
       essentially a pattern matching the input stack of handlers and
       [inner] is a description of the resulting stack of handlers.
@@ -101,13 +126,14 @@ module Adjustment : sig
       For example,
       {[
           parse
-            ~outer:["A", None; "B", Some "x"]
-            ~inner:["C", Rename "x"; "D", Bind (Some "t")]
+            ~outer:["A", Unused; "B", Rename "x"]
+            ~inner:["C", Rename "x"; "D", Bind (Handled "t")]
       ]}
-      represents a transformation that removes the top-most "A" handler, renames the
-      top-most "B" handler to a "C" handler, and adds a new top-most "D" handler. *)
+      represents a transformation that removes the top-most "A" handler,
+      renames the top-most "B" handler to a "C" handler, and adds a new
+      top-most "D" handler. *)
 
-  val handler : (string * 'ty) list -> 'ty t
+  val handler : 'ty Handler.t -> 'ty t
   (** [handler ["n1", t1; ...]] is [parse ~outer:[]
       ~inner:["n1", Bind t1; ...]]. Since this doesn't do any renaming
       there is no possibility of a parse error. *)
@@ -115,6 +141,47 @@ module Adjustment : sig
   val identity : 'ty t
   (** [identity] is [parse ~outer:[] ~inner:[]]. Since this doesn't do any
       renaming there is no possibility of a parse error. *)
+
+  module Desc : sig
+
+    module Outer : sig
+
+      type t =
+        | Rename of string
+        | Unknown
+
+    end
+
+    module Inner : sig
+
+      type 'ty t =
+        | Rename of string
+        | Bind of 'ty Binding.t
+
+    end
+
+    type 'ty t =
+      { outer : (string * Outer.t) list;
+        inner : (string * 'ty Inner.t) list; }
+
+  end
+
+  val desc : 'ty t -> 'ty Desc.t
+
+end
+
+module Renaming : sig
+
+  type empty = |
+
+  type t = empty Adjustment.t
+  (** A renaming is an adjustment that does not bind any effects *)
+
+  val to_adjustment : t -> 'ty Adjustment.t
+
+  val identity : t
+  (** [identity] is [Adjustment.identity] *)
+
 end
 
 module Mode : sig
@@ -138,22 +205,22 @@ module Mode : sig
       handlers. *)
 
   val unused : ('ty, 'lcl) t
-  (** [unused] is a special relative effect mode, which represents that
-      a value will not be used at all. *)
+  (** [unused] is an effect mode that represents that a value will not
+      be used at all. *)
 
   val unadjusted : 'lcl -> ('ty, 'lcl) t
   (** [unadjusted l] is [relative Adjustment.identity] if [l] is the
       local mode and [absolute Context.empty] if [l] is the global mode. *)
 
-  val is_unused : ('ty, 'lcl) t -> bool
-  (** [is_unused t] is [true] if [t] is [unused] and [false] otherwise. *)
+  val is_usable : ('ty, 'lcl) t -> bool
+  (** [is_usable t] is [false] if [t] is [unused] or if it contains any
+      [Unused] bindings, and [true] otherwise. *)
 
   module Apply : sig
 
     module Error : sig
 
       type t =
-        | Unused
         | Different_effect_names of string * string
 
     end
@@ -170,7 +237,7 @@ module Mode : sig
         [b] is the binding to which [ctx] maps [pos].
       - If [t] is [relative adj] then it will return [Ok m] where
         [m] is the mapping to which [adj] maps [pos].
-      - If [t] is [unused] then it will return [Error Unused]. *)
+      - If [t] is [unused] then it will return [Ok (Bind Unused)]. *)
 
   val compose : ('ty, 'lcl) t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
   (** [compose e1 e2] is the effect mode such that [apply (compose e1 e2) pos]
@@ -188,6 +255,14 @@ module Mode : sig
   val local : ('ty, 'lcl) t
   (** Equivalent to [relative Identity.empty]. A value at effect mode
       [local] may only be used in the current effect context. *)
+
+  val identity : ('ty, 'lcl) t
+  (** An alias for [local]: it behaves as the identity with respect to
+      [compose]. *)
+
+  val is_adjusted : ('ty, 'lcl) t -> bool
+  (** [is_adjusted t] is [false] if [t] is equal to [unadjusted l] for
+      some [l] and is [true] otherwise. *)
 
   module Equal : sig
 
@@ -231,8 +306,8 @@ module Mode : sig
     module Error : sig
 
       type t =
-        | Escaping 
-        | Adjusted of Adjustment.Equal_error.t
+        | Escaping
+        | Adjusted of Equal.Error.t
 
       val swap_position : t -> t
 
@@ -280,27 +355,59 @@ module Mode : sig
       If that equation holds for any [t] then the left residual exists
       and is unique. *)
 
-  val iter_types : ('ty -> unit) -> 'ty t -> unit
+  val build_less_than :
+    local_newvar_above:('lcl -> 'lcl * bool)
+    -> ('ty, 'lcl) t
+    -> ('ty, 'lcl) t * bool
+  (** [build_less_than ~local_newvar_above t] is some mode less than
+      [t]. It is created by replacing localities with fresh locality
+      variables bounded above by the original locality.
 
-  val fold_types : ('a -> 'ty -> 'a) -> 'a -> 'ty t -> 'a
+      It also returns a bool that is the logical or of the bools
+      returned by calls to [local_newvar_above]. This can be used to
+      determine if the new mode is equal to [t]. *)
 
-  val copy_types : ('ty -> 'ty) -> 'ty t -> 'ty t
+  val build_greater_than :
+    local_newvar_below:('lcl -> 'lcl * bool)
+    -> ('ty, 'lcl) t
+    -> ('ty, 'lcl) t * bool
+  (** [build_greater_than ~local_newvar_below t] is some mode greater
+      than [t]. It is created by replacing localities with fresh
+      locality variables bounded below by the original locality.
+
+      It also returns a bool that is the logical or of the bools
+      returned by calls to [local_newvar_below]. This can be used to
+      determine if the new mode is equal to [t].*)
+
+  val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
+
+  val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
+
+  val copy_types : ('ty -> 'ty) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
 
   val copy_fold_types :
-    ('a -> 'ty -> 'a * 'ty) -> 'a -> 'ty t -> 'a * 'ty t
+    ('a -> 'ty -> 'a * 'ty) -> 'a -> ('ty, 'lcl) t -> 'a * ('ty, 'lcl) t
 
   module Desc : sig
 
+    module Direction : sig
+
+      type t =
+        | Positive
+        | Negative
+
+    end
+
     type 'ty t =
-      | Absolute of 'ty Context.t
-      | Relative of 'ty Adjustment.t
+      | Absolute of 'ty Context.Desc.t
+      | Relative of 'ty Adjustment.Desc.t
       | Unused
 
     val map : ('a -> 'b) -> 'a t -> 'b t
 
   end
 
-  val desc : ('ty, 'lcl) t -> 'ty Desc.t
+  val desc : Desc.Direction.t -> ('ty, 'lcl) t -> 'ty Desc.t
 
 end
 
@@ -344,9 +451,13 @@ and Factor : sig
 
     type ('ty, 'lcl) t
     (** A variable factor stands for a mode that is yet to be
-        determined. Variables always stand for a mode strictly greater
-        than [unused]. This allows us to ensure that all function
-        expressions are potentially callable. *)
+        determined.
+
+        These are used for closures with no expected effect mode.
+
+        Variables always stand for a mode strictly greater than
+        [unused]. This allows us to ensure that all function expressions
+        are potentially callable. *)
 
     val create : unit -> ('ty, 'lcl) t
     (** [create ()] makes a fresh variable factor *)
@@ -361,16 +472,48 @@ and Factor : sig
   module Mode : sig
 
     type ('ty, 'lcl) t
-    (** A mode factor stands for a specific mode. *)
+    (** A mode factor stands for a specific mode.
+
+        These are used for closures with an expected effect mode. *)
 
     val create : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
     (** [create m] makes a fresh mode factor for mode [m] *)
 
   end
 
+  module Renaming : sig
+
+    type ('ty, 'lcl) t
+    (** A mode factor stands for a specific renaming. These factors
+        support the [Mode.compose_left] operation.
+
+        These are used for runtime renamings. *)
+
+    val create : Renaming.t -> ('ty, 'lcl) t
+    (** [create r] makes a fresh renaming factor for renaming [r] *)
+
+  end
+
+  module Handler : sig
+
+    type ('ty, 'lcl) t
+    (** A mode factor stands for a specific handler. These factors
+        support the [Mode.weak_compose_left] operation.
+
+        These are used for handlers. *)
+
+    val create : 'ty Handler.t -> ('ty, 'lcl) t
+    (** [create h] makes a fresh handler factor for handler [h] *)
+
+  end
+
   val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
 
   val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+
+  val renaming : ('ty, 'lcl) Renaming.t -> ('ty, 'lcl) t
+
+  val handler : ('ty, 'lcl) Handler.t -> ('ty, 'lcl) t
 
 end
 
@@ -380,14 +523,34 @@ and Upper_bound : sig
   
   val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
 
+  val absolute : 'ty Context.t -> ('ty, 'lcl) t
+  (** [absolute ctx] is [mode (Mode.absolute ctx)]. *)
+
+  val relative : 'ty Adjustment.t -> ('ty, 'lcl) t
+  (** [relative adj] is [mode (Mode.relative adj)]. *)
+
+  val unused : ('ty, 'lcl) t
+  (** [unused] is [mode Mode.unused]. *)
+
+  val unadjusted : 'lcl -> ('ty, 'lcl) t
+  (** [unadjusted l] is [mode (Mode.unadjusted l)]. *)
+
+  val global : ('ty, 'lcl) t
+  (** [global] is [mode Mode.global] *)
+
+  val local : ('ty, 'lcl) t
+  (** [local] is [mode Mode.local] *)
+
   val meet :
     join_local:('lcl -> 'lcl -> 'lcl)
-    -> local:'lcl
+    -> top_local:'lcl
     -> ('ty, 'lcl) t
     -> ('ty, 'lcl) t
     -> ('ty, 'lcl) t
   (** A value at effect mode [meet ~join_local ~local t1 t2] will be
       used only under adjustments permitted by both [t1] and [t2]. *)
+
+  module Less_than = Mode.Less_than
 
   val less_than :
     type_sub:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
@@ -432,13 +595,31 @@ and Upper_bound : sig
       field with effect mode [t2] then the resulting record needs effect
       mode [left_residual ~type_sub ~type_meet t1 t2]. *)
 
-  val compose_left : ('ty, 'lcl) Factor.Mode.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  val compose_left :
+    ('ty, 'lcl) Factor.Renaming.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
   (** [compose_left f t] lifts {!Mode.compose} to composing a factor to
       the left of an upper bound.
 
       If a value needs effect mode [t] and it escapes from a runtime
       renaming with effect mode factor [f] then it now needs effect mode
       [compose_left f t]. *)
+
+  val weak_compose_left :
+    ('ty, 'lcl) Factor.Handler.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** [weak_compose_left f t] is a weaker version of
+      [compose_left]. Rather that composing with [f] on the left we take
+      a right-residual with the right inverse of [f]. Obviously this can
+      only work for factors which have a right inverse, and we restrict
+      it to handler factors.
+
+      If a value needs effect mode [t] and it escapes from a handler
+      renaming with effect mode factor [f] then it now needs effect mode
+      [weak_compose_left f t]. By using the weaker form of composition
+      we ensure that [local] values are genuinely executed using the
+      current set of handlers: otherwise a local value could leave the
+      current handler and enter a different handler with the same
+      type. (Allowing that would also cause principality issues related
+      to [unadjusted] modes). *)
 
   val right_residual : ('ty, 'lcl) Factor.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
   (** [right_residual f1 t2] is the greatest effect mode [t] such that,
@@ -454,13 +635,32 @@ and Upper_bound : sig
       ]}
 
       If a value in a context with effect mode [em1] is used inside a
-      runtime renaming with effect mode [em2] then the value must be used within further
-      adjustment [right_residual em2 em1].
+      runtime renaming with effect mode [em2] then the value must be
+      used within further adjustment [right_residual em2 em1].
 
       If a value in a context with effect mode [em1] is used within a
       closure that is used within [em2] then the value must be used
       within the function at [right_residual em2 em1]. *)
 
+  module Usable_absolute : sig
+
+    module Error : sig
+
+      type t =
+        | Unused
+        | Unused_binding of Position.t
+        | Relative
+
+    end
+
+  end
+
+  val usable_absolute :
+    ('ty, 'lcl) t -> (('ty, 'lcl) Mode.t, Usable_absolute.Error.t) result
+
+  val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
+
+  val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
 
 end
 

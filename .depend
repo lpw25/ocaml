@@ -490,8 +490,8 @@ typing/btype.cmo : \
     utils/misc.cmi \
     utils/local_store.cmi \
     typing/ident.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     parsing/asttypes.cmi \
     typing/btype.cmi
 typing/btype.cmx : \
@@ -500,8 +500,8 @@ typing/btype.cmx : \
     utils/misc.cmx \
     utils/local_store.cmx \
     typing/ident.cmx \
-    typing/effect_mode.cmx \
-    typing/effect_context.cmx \
+    typing/effect.cmx \
+    typing/effect.cmx \
     parsing/asttypes.cmi \
     typing/btype.cmi
 typing/btype.cmi : \
@@ -549,8 +549,8 @@ typing/ctype.cmo : \
     utils/local_store.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     utils/clflags.cmi \
     typing/btype.cmi \
     parsing/asttypes.cmi \
@@ -568,8 +568,8 @@ typing/ctype.cmx : \
     utils/local_store.cmx \
     typing/ident.cmx \
     typing/env.cmx \
-    typing/effect_mode.cmx \
-    typing/effect_context.cmx \
+    typing/effect.cmx \
+    typing/effect.cmx \
     utils/clflags.cmx \
     typing/btype.cmx \
     parsing/asttypes.cmi \
@@ -582,8 +582,8 @@ typing/ctype.cmi : \
     parsing/longident.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     parsing/asttypes.cmi
 typing/datarepr.cmo : \
     typing/types.cmi \
@@ -605,25 +605,25 @@ typing/datarepr.cmi : \
     typing/types.cmi \
     typing/path.cmi \
     typing/ident.cmi
-typing/effect_context.cmo : \
+typing/effect.cmo : \
     utils/misc.cmi \
-    typing/effect_context.cmi
-typing/effect_context.cmx : \
+    typing/effect.cmi
+typing/effect.cmx : \
     utils/misc.cmx \
-    typing/effect_context.cmi
-typing/effect_context.cmi : \
+    typing/effect.cmi
+typing/effect.cmi : \
     utils/misc.cmi
-typing/effect_mode.cmo : \
+typing/effect.cmo : \
     parsing/location.cmi \
-    typing/effect_context.cmi \
-    typing/effect_mode.cmi
-typing/effect_mode.cmx : \
+    typing/effect.cmi \
+    typing/effect.cmi
+typing/effect.cmx : \
     parsing/location.cmx \
-    typing/effect_context.cmx \
-    typing/effect_mode.cmi
-typing/effect_mode.cmi : \
+    typing/effect.cmx \
+    typing/effect.cmi
+typing/effect.cmi : \
     parsing/location.cmi \
-    typing/effect_context.cmi
+    typing/effect.cmi
 typing/env.cmo : \
     utils/warnings.cmi \
     typing/types.cmi \
@@ -853,14 +853,14 @@ typing/mtype.cmi : \
 typing/oprint.cmo : \
     parsing/pprintast.cmi \
     typing/outcometree.cmi \
-    typing/effect_mode.cmi \
+    typing/effect.cmi \
     utils/clflags.cmi \
     parsing/asttypes.cmi \
     typing/oprint.cmi
 typing/oprint.cmx : \
     parsing/pprintast.cmx \
     typing/outcometree.cmi \
-    typing/effect_mode.cmx \
+    typing/effect.cmx \
     utils/clflags.cmx \
     parsing/asttypes.cmi \
     typing/oprint.cmi
@@ -868,8 +868,8 @@ typing/oprint.cmi : \
     typing/outcometree.cmi
 typing/outcometree.cmi : \
     typing/type_immediacy.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     parsing/asttypes.cmi
 typing/parmatch.cmo : \
     utils/warnings.cmi \
@@ -1060,8 +1060,8 @@ typing/printtyp.cmo : \
     parsing/location.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     typing/ctype.cmi \
     utils/clflags.cmi \
     typing/btype.cmi \
@@ -1082,8 +1082,8 @@ typing/printtyp.cmx : \
     parsing/location.cmx \
     typing/ident.cmx \
     typing/env.cmx \
-    typing/effect_mode.cmx \
-    typing/effect_context.cmx \
+    typing/effect.cmx \
+    typing/effect.cmx \
     typing/ctype.cmx \
     utils/clflags.cmx \
     typing/btype.cmx \
@@ -1584,7 +1584,7 @@ typing/typedtree.cmo : \
     parsing/location.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_mode.cmi \
+    typing/effect.cmi \
     parsing/asttypes.cmi \
     typing/typedtree.cmi
 typing/typedtree.cmx : \
@@ -1598,7 +1598,7 @@ typing/typedtree.cmx : \
     parsing/location.cmx \
     typing/ident.cmx \
     typing/env.cmx \
-    typing/effect_mode.cmx \
+    typing/effect.cmx \
     parsing/asttypes.cmi \
     typing/typedtree.cmi
 typing/typedtree.cmi : \
@@ -1612,7 +1612,7 @@ typing/typedtree.cmi : \
     parsing/location.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_mode.cmi \
+    typing/effect.cmi \
     parsing/asttypes.cmi
 typing/typemod.cmo : \
     utils/warnings.cmi \
@@ -1741,8 +1741,8 @@ typing/types.cmo : \
     parsing/location.cmi \
     utils/identifiable.cmi \
     typing/ident.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     utils/config.cmi \
     parsing/asttypes.cmi \
     typing/types.cmi
@@ -1756,8 +1756,8 @@ typing/types.cmx : \
     parsing/location.cmx \
     utils/identifiable.cmx \
     typing/ident.cmx \
-    typing/effect_mode.cmx \
-    typing/effect_context.cmx \
+    typing/effect.cmx \
+    typing/effect.cmx \
     utils/config.cmx \
     parsing/asttypes.cmi \
     typing/types.cmi
@@ -1770,8 +1770,8 @@ typing/types.cmi : \
     parsing/location.cmi \
     utils/identifiable.cmi \
     typing/ident.cmi \
-    typing/effect_mode.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
+    typing/effect.cmi \
     parsing/asttypes.cmi
 typing/typetexp.cmo : \
     typing/types.cmi \
@@ -3451,7 +3451,7 @@ lambda/matching.cmo : \
     lambda/lambda.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
     lambda/debuginfo.cmi \
     utils/clflags.cmi \
     typing/btype.cmi \
@@ -3474,7 +3474,7 @@ lambda/matching.cmx : \
     lambda/lambda.cmx \
     typing/ident.cmx \
     typing/env.cmx \
-    typing/effect_context.cmx \
+    typing/effect.cmx \
     lambda/debuginfo.cmx \
     utils/clflags.cmx \
     typing/btype.cmx \
@@ -3656,7 +3656,7 @@ lambda/translcore.cmo : \
     lambda/lambda.cmi \
     typing/ident.cmi \
     typing/env.cmi \
-    typing/effect_context.cmi \
+    typing/effect.cmi \
     lambda/debuginfo.cmi \
     typing/ctype.cmi \
     utils/config.cmi \
@@ -3687,7 +3687,7 @@ lambda/translcore.cmx : \
     lambda/lambda.cmx \
     typing/ident.cmx \
     typing/env.cmx \
-    typing/effect_context.cmx \
+    typing/effect.cmx \
     lambda/debuginfo.cmx \
     typing/ctype.cmx \
     utils/config.cmx \

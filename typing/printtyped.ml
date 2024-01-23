@@ -218,7 +218,7 @@ let rec core_type i ppf x =
       line i ppf "Ttyp_poly%a\n"
         (fun ppf -> List.iter (fun x -> fprintf ppf " '%s" x)) sl;
       core_type i ppf ct;
-      option i effect_modality ppf eff
+      option i effect_mode ppf eff
   | Ttyp_package { pack_path = s; pack_fields = l } ->
       line i ppf "Ttyp_package %a\n" fmt_path s;
       list i package_with ppf l;
@@ -259,9 +259,12 @@ and effect_adjustment i ppf adj =
   line i ppf "inner";
   list (i+1) effect_adjustment_inner_item ppf adj.ea_inner
 
-and effect_modality i ppf = function
-  | Em_adjustment adj -> effect_adjustment i ppf adj
-  | Em_context eff -> effect_context i ppf eff
+and effect_mode i ppf em =
+  match em.em_desc with
+  | Em_absolute eff -> effect_context i ppf eff
+  | Em_relative adj -> effect_adjustment i ppf adj
+  | Em_unused -> line i ppf "effect_unused";
+
 
 and pattern : type k . _ -> _ -> k general_pattern -> unit = fun i ppf x ->
   line i ppf "pattern %a\n" fmt_location x.pat_loc;

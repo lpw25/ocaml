@@ -83,20 +83,14 @@ type out_type =
   | Otyp_poly of string list * out_type
   | Otyp_module of out_ident * string list * out_type list
   | Otyp_attribute of out_type * out_attribute
-  | Otyp_effect_modality of out_type * out_effect_modality
+  | Otyp_effect_mode of out_type * out_effect_mode
   | Otyp_effect of (string * out_type list * out_type option) list
    
 and out_variant =
   | Ovar_fields of (string * bool * out_type list) list
   | Ovar_typ of out_type
 
-and out_effect_context = out_type Effect_context.Desc.t
-
-and out_effect_adjustment = out_type Effect_mode.Adjustment.Desc.t
-
-and out_effect_modality =
-  | Oem_context of out_effect_context
-  | Oem_adjustment of out_effect_adjustment
+and out_effect_mode = out_type Effect.Mode.Desc.t
 
 and out_alloc_mode =
   | Oam_local

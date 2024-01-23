@@ -546,6 +546,7 @@ and object_field_desc =
 
 and effect_context = {
     ec_effects : (string loc * core_type option) list;
+    ec_type : Types.effect_mode;
   }
 
 and effect_adjustment_inner =
@@ -571,7 +572,7 @@ and value_description =
   { val_id: Ident.t;
     val_name: string loc;
     val_desc: core_type;
-    val_eff: effect_mode option;
+    val_eff: effect_context option;
     val_val: Types.value_description;
     val_prim: string list;
     val_loc: Location.t;
@@ -971,3 +972,11 @@ let split_pattern pat =
         combine_map (into cpat) effs1 effs2
   in
   split_pattern pat
+
+let effect_context_type = function
+  | None -> None
+  | Some ec -> Some ec.ec_type
+
+let effect_mode_type = function
+  | None -> None
+  | Some em -> Some em.em_type

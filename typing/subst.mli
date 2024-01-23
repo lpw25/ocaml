@@ -48,10 +48,7 @@ val type_path: t -> Path.t -> Path.t
 val modtype_path: t -> Path.t -> Path.t
 
 val type_expr: t -> type_expr -> type_expr
-val type_scheme: t -> type_expr -> effect_context -> type_expr * effect_context
-val expression_type:
-  t -> type_expr -> expr_effect_context ->
-  type_expr * expr_effect_context
+val type_scheme: t -> type_expr -> effect_mode -> type_expr * effect_mode
 val class_type: t -> class_type -> class_type
 val value_description: t -> value_description -> value_description
 val type_declaration: t -> type_declaration -> type_declaration
