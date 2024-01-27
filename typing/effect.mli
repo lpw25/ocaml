@@ -27,14 +27,14 @@ module Context : sig
       Equivalently, they are functions that map {!Position.t}s
       to {!Binding.t}s. *)
 
-  val mk : (string * 'ty option) list -> 'ty t
+  val mk : (string * 'ty Binding.t) list -> 'ty t
   (** [mk alist] represents a stack of handlers which binds the listed
-      names to the given types. Names not listed, or mapped to [None]
+      names to the given types. Names not listed, or mapped to [Unknown]
       are unspecified: they may or may not have handlers in the stack.
 
-      For example, [mk ["n", Some ty]] represents a stack of handlers
+      For example, [mk ["n", Handled ty]] represents a stack of handlers
       where the top-most handler named [n] has effect type [ty]. Whilst,
-      [mk ["n", None; "n", Some ty]] represents a stack of handlers
+      [mk ["n", Unknown; "n", Handled ty]] represents a stack of handlers
       where the top-most handler named [n] has an unknown type and the
       second handler named [n] has effect type [ty]. *)
 
@@ -61,14 +61,14 @@ end
 
 module Mapping : sig
 
-  type 'ty t =
-    | Rename of Position.t
+  type ('ty, 'pos) t =
+    | Rename of 'pos
     | Bind of 'ty Binding.t
 
-  val unused : 'ty t
+  val unused : ('ty, 'pos) t
   (** [unused] is [Bind Unused] *)
 
-  val unknown : 'ty t
+  val unknown : ('ty, 'pos) t
   (** [unknown] is [Bind Unknown] *)
 
 end
@@ -94,9 +94,7 @@ module Adjustment : sig
 
     module Inner : sig
 
-      type 'ty t =
-        | Rename of string
-        | Bind of 'ty Binding.t
+      type 'ty t = ('ty, string) Mapping.t
 
     end
 
@@ -154,19 +152,19 @@ module Adjustment : sig
 
     module Inner : sig
 
-      type 'ty t =
-        | Rename of string
+      type ('ty, 'pos) t = ('ty, 'pos) Mapping.t =
+        | Rename of 'pos
         | Bind of 'ty Binding.t
 
     end
 
-    type 'ty t =
+    type ('ty, 'pos) t =
       { outer : (string * Outer.t) list;
-        inner : (string * 'ty Inner.t) list; }
+        inner : (string * ('ty, 'pos) Inner.t) list; }
 
   end
 
-  val desc : 'ty t -> 'ty Desc.t
+  val desc : 'ty t -> ('ty, string) Desc.t
 
 end
 
@@ -227,7 +225,10 @@ module Mode : sig
 
   end
 
-  val apply : ('ty, 'lcl) t -> Position.t -> ('ty Mapping.t, Apply.Error.t) result
+  val apply :
+    ('ty, 'lcl) t
+    -> Position.t
+    -> (('ty, Position.t) Mapping.t, Apply.Error.t) result
   (** [apply t pos] treats the mode as a function from {!Position.t}
       to {!Mapping.t}.
 
@@ -269,6 +270,7 @@ module Mode : sig
     module Error : sig
 
       type t =
+        | Not_absolute of Misc.position
         | Different_input_names of string * string * int
         | Missing_bind of string * int * Misc.position
         | Missing_rename of string * int * Misc.position
@@ -306,8 +308,7 @@ module Mode : sig
     module Error : sig
 
       type t =
-        | Escaping
-        | Adjusted of Equal.Error.t
+        | Difference of Equal.Error.t
 
       val swap_position : t -> t
 
@@ -316,8 +317,8 @@ module Mode : sig
   end
 
   val less_than :
-    type_sub:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
-    -> local_sub:('lcl1 -> 'lcl2 -> unit)
+    type_greater_than:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
+    -> local_greater_than:('lcl1 -> 'lcl2 -> unit)
     -> local_top:'lcl2
     -> 'a
     -> ('ty1, 'lcl1) t
@@ -329,9 +330,10 @@ module Mode : sig
       : t; B : s]] < [[A : t]]. [unused] is the bottom element of this
       partial order.
 
-      [less_than ~type_sub ~local_sub ~local_top t1 t2] checks that [t1] is less
-      than [t2] according to this partial order. Using [type_sub] and [local_sub]
-      for the ordering on types and localities respectively.
+      [less_than ~type_greater_than ~local_greater_than ~local_top t1
+      t2] checks that [t1] is less than [t2] according to this partial
+      order. Using [type_greater_than] and [local_greater_than] for the
+      ordering on types and localities respectively.
 
       An accumulator is threaded through all calls to [type_equal] and
       [local_equal], allowing them to collect constraints if needed.
@@ -340,15 +342,16 @@ module Mode : sig
       this ordering. *)
 
   val left_residual :
-    type_sub:(string -> int -> 'ty1 -> 'ty2 -> unit)
-    -> type_meet:(string -> int -> 'ty1 -> string -> int -> 'ty1 -> 'ty1)
+    type_less_than:(string -> int -> 'ty1 -> 'ty2 -> unit)
+    -> type_join:(string -> int -> 'ty1 -> string -> int -> 'ty1 -> 'ty1)
     -> ('ty1, 'lcl1) t
     -> ('ty2, 'lcl2) t
     -> (('ty1, 'lcl) t, Less_than.Error.t) Result.t
-  (** [left_residual ~type_sub ~type_meet t1 t2] is the greatest effect
+  (** [left_residual ~type_less_than ~type_join t1 t2] is the greatest effect
       mode [t] such that
       {[
-        less_than ~type_sub ~local_sub ~local_top (compose t t2) t1
+        less_than ~type_greater_than ~local_greater_than ~local_top
+          (compose t t2) t1
       ]}
       holds.
 
@@ -356,27 +359,27 @@ module Mode : sig
       and is unique. *)
 
   val build_less_than :
-    local_newvar_above:('lcl -> 'lcl * bool)
-    -> ('ty, 'lcl) t
-    -> ('ty, 'lcl) t * bool
-  (** [build_less_than ~local_newvar_above t] is some mode less than
-      [t]. It is created by replacing localities with fresh locality
-      variables bounded above by the original locality.
-
-      It also returns a bool that is the logical or of the bools
-      returned by calls to [local_newvar_above]. This can be used to
-      determine if the new mode is equal to [t]. *)
-
-  val build_greater_than :
     local_newvar_below:('lcl -> 'lcl * bool)
     -> ('ty, 'lcl) t
     -> ('ty, 'lcl) t * bool
-  (** [build_greater_than ~local_newvar_below t] is some mode greater
-      than [t]. It is created by replacing localities with fresh
-      locality variables bounded below by the original locality.
+  (** [build_less_than ~local_newvar_below t] is some mode less than
+      [t]. It is created by replacing localities with fresh locality
+      variables bounded below by the original locality.
 
       It also returns a bool that is the logical or of the bools
       returned by calls to [local_newvar_below]. This can be used to
+      determine if the new mode is equal to [t]. *)
+
+  val build_greater_than :
+    local_newvar_above:('lcl -> 'lcl * bool)
+    -> ('ty, 'lcl) t
+    -> ('ty, 'lcl) t * bool
+  (** [build_greater_than ~local_newvar_above t] is some mode greater
+      than [t]. It is created by replacing localities with fresh
+      locality variables bounded above by the original locality.
+
+      It also returns a bool that is the logical or of the bools
+      returned by calls to [local_newvar_above]. This can be used to
       determine if the new mode is equal to [t].*)
 
   val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
@@ -400,10 +403,12 @@ module Mode : sig
 
     type 'ty t =
       | Absolute of 'ty Context.Desc.t
-      | Relative of 'ty Adjustment.Desc.t
+      | Relative of ('ty, string) Adjustment.Desc.t
       | Unused
 
     val map : ('a -> 'b) -> 'a t -> 'b t
+
+    val is_global : 'ty t -> bool
 
   end
 
@@ -431,6 +436,12 @@ module rec Lower_bound : sig
   val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
 
   val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+
+  val desc : ('ty, 'lcl) t -> 'ty Mode.Desc.t
+
+  val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
+
+  val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
 
 end
 
@@ -553,17 +564,18 @@ and Upper_bound : sig
   module Less_than = Mode.Less_than
 
   val less_than :
-    type_sub:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
-    -> local_sub:('lcl1 -> 'lcl2 -> unit)
+    type_greater_than:('a -> string -> int -> 'ty1 -> 'ty2 -> 'a)
+    -> local_greater_than:('lcl1 -> 'lcl2 -> unit)
     -> local_top:'lcl2
     -> ('ty1, 'lcl1) Env.t
     -> ('ty1, 'lcl1) Lower_bound.t
     -> ('ty2, 'lcl2) t
     -> (unit, Less_than.Error.t) Result.t
-  (** [less_than ~type_sub ~local_sub ~local_top env l1 t2] lifts {!Mode.less_than}
-      to work on a lower bound and an upper bound, and extends it so that
-      absolute modes are less than equivalent relative modes, based on [env]
-      describing the current stack of handlers.*)
+  (** [less_than ~type_greater_than ~local_greater_than ~local_top env
+      l1 t2] lifts {!Mode.less_than} to work on a lower bound and an
+      upper bound, and extends it so that absolute modes are less than
+      equivalent relative modes, based on [env] describing the current
+      stack of handlers.*)
 
   val compose_right : ('ty, 'lcl) t -> ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
   (** [compose_right t m] lifts {!Mode.compose} to composing a mode to
@@ -574,26 +586,26 @@ and Upper_bound : sig
       [compose_right t m]. *)
 
   val left_residual :
-    equal:(string -> int -> 'ty1 -> 'ty2 -> unit)
-    -> meet:(string -> int -> 'ty1 -> string -> int -> 'ty1 -> 'ty1)
+    type_less_than:(string -> int -> 'ty1 -> 'ty2 -> unit)
+    -> type_join:(string -> int -> 'ty1 -> string -> int -> 'ty1 -> 'ty1)
     -> ('ty1, 'lcl) t
     -> ('ty2, 'lcl) Mode.t
     -> ('ty1, 'lcl) t
   (** [left_residual ~type_sub ~type_meet t1 m2] is the greatest effect
       mode [t] such that, for all [m]:
       {[
-        less_than ~type_sub ~local_sub ~local_top
+        less_than ~type_greater_than ~local_greater_than ~local_top
           (Lower_bound.mode m) t
       ]}
       is equivalent to:
       {[
-        less_than ~type_sub ~local_sub ~local_top
+        less_than ~type_greater_than ~local_greater_than ~local_top
           (Lower_bound.mode (Mode.compose m m2)) t1
       ]}
 
       If a value needs effect mode [t1] and is being written into a
       field with effect mode [t2] then the resulting record needs effect
-      mode [left_residual ~type_sub ~type_meet t1 t2]. *)
+      mode [left_residual ~type_less_than ~type_join t1 t2]. *)
 
   val compose_left :
     ('ty, 'lcl) Factor.Renaming.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
@@ -625,12 +637,12 @@ and Upper_bound : sig
   (** [right_residual f1 t2] is the greatest effect mode [t] such that,
       for all [m]:
       {[
-        less_than ~type_sub ~local_sub ~local_top
+        less_than ~type_greater_than ~local_greater_than ~local_top
           (Lower_bound.mode m) t
       ]}
       is equivalent to:
       {[
-        less_than ~type_sub ~local_sub ~local_top
+        less_than ~type_greater_than ~local_greater_than ~local_top
           (Lower_bound.mode (Mode.compose m m2)) t1
       ]}
 
@@ -658,9 +670,36 @@ and Upper_bound : sig
   val usable_absolute :
     ('ty, 'lcl) t -> (('ty, 'lcl) Mode.t, Usable_absolute.Error.t) result
 
+  val zap_to_mode : ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** Try to make the upper bound equivalent to a single mode to improve
+      printing.  This may force types to be equal or localities to be
+      global. *)
+
+  module Desc : sig
+
+    type 'ty t =
+      | Absolute of 'ty list Context.Desc.t
+      | Relative of ('ty list, string list) Adjustment.Desc.t
+      | Unused
+
+    val of_mode : 'ty Mode.Desc.t -> 'ty t
+
+    val map : ('a -> 'b) -> 'a t -> 'b t
+
+    val is_global : 'ty t -> bool
+
+  end
+
+  val desc : ('ty, 'lcl) t -> 'ty Desc.t
+
   val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
 
   val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
+
+  val copy_types : ('ty -> 'ty) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
+  val copy_fold_types :
+    ('a -> 'ty -> 'a * 'ty) -> 'a -> ('ty, 'lcl) t -> 'a * ('ty, 'lcl) t
 
 end
 

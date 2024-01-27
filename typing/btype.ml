@@ -313,6 +313,9 @@ let fold_effect_mode_option f init = function
 let fold_effect_upper_bound f init eff =
   Effect.Upper_bound.fold_types f init eff
 
+let fold_effect_lower_bound f init eff =
+  Effect.Lower_bound.fold_types f init eff
+
 let iter_effect_mode f eff =
   Effect.Mode.iter_types f eff
 
@@ -322,6 +325,9 @@ let iter_effect_mode_option f = function
 
 let iter_effect_upper_bound f eff =
   Effect.Upper_bound.iter_types f eff
+
+let iter_effect_lower_bound f eff =
+  Effect.Lower_bound.iter_types f eff
 
 let fold_type_expr f init ty =
   match ty.desc with
@@ -531,6 +537,9 @@ let copy_effect_mode f eff =
 let copy_effect_mode_option f = function
   | None -> None
   | Some eff -> Some (copy_effect_mode f eff)
+
+let copy_effect_upper_bound f eff =
+  Effect.Upper_bound.copy_types f eff
 
 let rec copy_type_desc ?(keep_names=false) f = function
     Tvar _ as ty        -> if keep_names then ty else Tvar None

@@ -47,7 +47,7 @@ val strings_of_paths: namespace -> Path.t list -> string list
         avoid name collisions *)
 
 val raw_type_expr: formatter -> type_expr -> unit
-val raw_type_scheme: formatter -> (type_expr * effect_context) -> unit
+val raw_type_scheme: formatter -> (type_expr * effect_mode) -> unit
 
 val string_of_label: Asttypes.arg_label -> string
 
@@ -110,11 +110,10 @@ val marked_type_expr: formatter -> type_expr -> unit
     (see #8860 for examples).
  *)
 
-val effect_context: formatter -> effect_context -> unit
-val effect_adjustment: formatter -> effect_adjustment -> unit
+val effect_mode: formatter -> effect_mode -> unit
 
 val constructor_arguments: formatter -> constructor_arguments -> unit
-val tree_of_type_scheme: type_expr -> effect_context -> out_type
+val tree_of_type_scheme: type_expr -> effect_mode -> out_type
 val type_sch : formatter -> type_expr -> unit
 val type_scheme: formatter -> type_expr -> unit
 (* Maxence *)

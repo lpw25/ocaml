@@ -62,8 +62,7 @@ module Unification_trace = struct
   let swap_position = Misc.swap_position
 
   type desc = { t: type_expr; expanded: type_expr option }
-  type ('a, 'b) gen_diff = { got: 'a; expected: 'b}
-  type 'a diff = ('a, 'a) gen_diff
+  type 'a diff = { got: 'a; expected: 'a}
 
   type 'a escape =
     | Constructor of Path.t
@@ -93,10 +92,9 @@ module Unification_trace = struct
   type eff =
     | Not_equal_effects of Effect.Mode.Equal.Error.t
     | Not_less_than_effects of Effect.Mode.Less_than.Error.t
-    | Not_absolute_effect
+    | Not_absolute_effect of position
 
-  type eff_mode =
-    | Mode of effect_mode
+  type effect_bound =
     | Upper_bound of effect_upper_bound
     | Lower_bound of effect_lower_bound
 
@@ -112,7 +110,7 @@ module Unification_trace = struct
           index : int;
           diff : type_expr diff }
     | Eff of eff
-    | Effect_diff of eff_mode diff
+    | Effect_diff of effect_bound diff
 
   type t = desc elt list
   let short t = { t; expanded = None }
@@ -123,10 +121,6 @@ module Unification_trace = struct
     { got; expected}
   let diff got expected = Diff (map_diff short {got;expected})
   let effect_diff got expected =
-    let got = Mode got in
-    let expected = Mode expected in
-    Effect_diff {got; expected}
-  let effect_bounds_diff got expected =
     let got = Upper_bound got in
     let expected = Lower_bound expected in
     Effect_diff {got; expected}
@@ -1175,9 +1169,11 @@ let compute_univars_list tyl =
 
 let compute_univars ty = compute_univars_list [ty]
 
-let compute_univars_scheme ty eff =
+let compute_univars_scheme ty eff_bound eff_mod =
   let eff_tys =
-    fold_effect_mode (fun acc ty -> ty :: acc) [] eff 
+    fold_effect_upper_bound (fun acc ty -> ty :: acc) 
+      (fold_effect_mode (fun acc ty -> ty :: acc) [] eff_mod)
+      eff_bound
   in
   compute_univars_list (ty :: eff_tys)
 
@@ -1363,16 +1359,27 @@ let instance ?partial sch =
   in
   For_copy.with_scope (fun scope -> copy ?partial scope sch)
 
-let instance_scheme ?partial sch eff =
+let instance_scheme ?partial sch eff_bound eff_mod =
   let partial =
     match partial with
     | None -> None
-    | Some keep -> Some (compute_univars_scheme sch eff, keep)
+    | Some keep -> Some (compute_univars_scheme sch eff_bound eff_mod, keep)
   in
   For_copy.with_scope
     (fun scope ->
       let sch = copy ?partial scope sch in
-      let eff = copy_effect_mode (copy ?partial scope) eff in
+      let eff_bound =
+        copy_effect_upper_bound (copy ?partial scope) eff_bound
+      in
+      let eff_mod = copy_effect_mode (copy ?partial scope) eff_mod in
+      let eff = Effect.Upper_bound.compose_right eff_bound eff_mod in
+      sch, eff)
+
+let instance_value_scheme sch eff =
+  For_copy.with_scope
+    (fun scope ->
+      let sch = copy scope sch in
+      let eff = copy_effect_mode (copy scope) eff in
       sch, eff)
 
 let instance_poly_scheme sch eff =
@@ -2817,6 +2824,12 @@ let unify_alloc_mode a b =
   | Ok () -> ()
   | Error () -> raise (Unify [])
 
+let local_greater_than_for_effect pos lcl1 lcl2 =
+  match Btype.Alloc_mode.submode lcl2 lcl1 with
+  | Ok () -> ()
+  | Error () ->
+      raise (Unify [Trace.Eff (Not_absolute_effect pos)])
+
 (* force unification in Reither when one side has a non-conjunctive type *)
 let rigid_variants = ref false
 
@@ -3420,29 +3433,26 @@ and unify_row_field env fixed1 fixed2 rm1 rm2 l f1 f2 =
       if_not_fixed second (fun () -> set_row_field e2 f1)
   | _ -> raise (Unify [])
 
-let subeffect env eff1 eff2 =
+let greater_than_effect_mode env eff1 eff2 =
   match
     Effect.Upper_bound.less_than
-      ~type_sub:(fun () name idx ty1 ty2 ->
+      ~type_greater_than:(fun () name idx ty2 ty1 ->
         match unify env ty1 ty2 with
         | () -> ()
         | exception Unify trace ->
             let err = Trace.incompatible_effects name idx ty1 ty2 in
             raise (Unify (err :: trace)))
-      ~local_sub:(fun lcl1 lcl2 ->
-        match Btype.Alloc_mode.submode lcl1 lcl2 with
-         | Ok () -> ()
-         | Error () ->
-             raise (Unify [Trace.Eff Not_absolute_effect]))
+      ~local_greater_than:(fun lcl2 lcl1 ->
+        local_greater_than_for_effect First lcl2 lcl1)
       ~local_top:Btype.Alloc_mode.local
       (Env.effect_env !env) eff2 eff1
   with
   | Ok eff -> eff
   | Error err ->
       let trace = Trace.[Eff (Not_less_than_effects err)] in
-      raise (Unify (Trace.effect_bounds_diff eff1 eff2 :: trace))
+      raise (Unify (Trace.effect_diff eff1 eff2 :: trace))
   | exception Unify trace ->
-      raise (Unify (Trace.effect_bounds_diff eff1 eff2 :: trace))
+      raise (Unify (Trace.effect_diff eff1 eff2 :: trace))
 
 let unify env ty1 ty2 =
   let snap = Btype.snapshot () in
@@ -3502,19 +3512,19 @@ let unify_pairs env ty1 ty2 pairs =
 let unify env ty1 ty2 =
   unify_pairs (ref env) ty1 ty2 []
 
-let meet_effect_modes env eff1 eff2 =
+let meet_effect_modes eff1 eff2 =
   Effect.Upper_bound.meet
     ~join_local:(fun lcl1 lcl2 ->
       Btype.Alloc_mode.join [lcl1; lcl2])
     ~top_local:Btype.Alloc_mode.local
     eff1 eff2
 
-let subeffect env eff1 eff2 =
+let greater_than_effect_mode env eff1 eff2 =
   univar_pairs := [];
   let snap = Btype.snapshot () in
   let env = ref env in
   try
-    subeffect env eff1 eff2
+    greater_than_effect_mode env eff1 eff2
   with
     Unify trace ->
       undo_compress snap;
@@ -3851,10 +3861,10 @@ and moregen_effect_mode inst_nongen variance type_pairs env eff1 eff2 =
       match
         Effect.Mode.equal
           ~type_equal:(fun () _ _ ty1 ty2 ->
-            moregen inst_nongen (neg_variance variance)
+            moregen inst_nongen Invariant
               type_pairs env ty1 ty2)
           ~local_equal:(fun () lcl1 lcl2 ->
-            moregen_alloc_mode (neg_variance variance) lcl1 lcl2)
+            moregen_alloc_mode Invariant lcl1 lcl2)
           () eff1 eff2
       with
       | Ok () -> ()
@@ -3863,11 +3873,10 @@ and moregen_effect_mode inst_nongen variance type_pairs env eff1 eff2 =
   | Covariant -> begin
       match
         Effect.Mode.less_than
-          ~type_sub:(fun () _ _ ty1 ty2 ->
-            moregen inst_nongen (neg_variance variance)
-              type_pairs env ty1 ty2)
-          ~local_sub:(fun lcl1 lcl2 ->
-            moregen_alloc_mode (neg_variance variance) lcl1 lcl2)
+          ~type_greater_than:(fun () _ _ ty1 ty2 ->
+            moregen inst_nongen Contravariant type_pairs env ty1 ty2)
+          ~local_greater_than:(fun lcl1 lcl2 ->
+            local_greater_than_for_effect Second lcl1 lcl2)
           ~local_top:Btype.Alloc_mode.local
           () eff1 eff2
       with
@@ -3877,11 +3886,10 @@ and moregen_effect_mode inst_nongen variance type_pairs env eff1 eff2 =
   | Contravariant -> begin
       match
         Effect.Mode.less_than
-          ~type_sub:(fun () _ _ ty2 ty1 ->
-            moregen inst_nongen (neg_variance variance)
-              type_pairs env ty1 ty2)
-          ~local_sub:(fun lcl2 lcl1 ->
-            moregen_alloc_mode (neg_variance variance) lcl1 lcl2)
+          ~type_greater_than:(fun () _ _ ty2 ty1 ->
+            moregen inst_nongen Covariant type_pairs env ty1 ty2)
+          ~local_greater_than:(fun lcl2 lcl1 ->
+            local_greater_than_for_effect First lcl2 lcl1)
           ~local_top:Btype.Alloc_mode.local
           () eff2 eff1
       with
@@ -4010,11 +4018,11 @@ let moregeneral env inst_nongen pat_sch pat_eff subj_sch subj_eff =
      then copied with [duplicate_type].  That way, its levels won't be
      changed.
   *)
-  let subj_sch, subj_eff = instance_scheme subj_sch subj_eff in
+  let subj_sch, subj_eff = instance_value_scheme subj_sch subj_eff in
   let subj_sch, subj_eff = duplicate_scheme subj_sch subj_eff in
   current_level := generic_level;
   (* Duplicate generic variables *)
-  let pat_sch, pat_eff = instance_scheme pat_sch pat_eff in
+  let pat_sch, pat_eff = instance_value_scheme pat_sch pat_eff in
   let res =
     univar_pairs := [];
     let type_pairs = fresh_moregen_pairs () in
@@ -4861,11 +4869,11 @@ let rec build_subtype env visited loops posi level t =
             let eff', changed =
               if posi then
                 Effect.Mode.build_greater_than
-                  ~local_newvar_below:Alloc_mode.newvar_below
+                  ~local_newvar_above:Alloc_mode.newvar_above
                   eff'
               else
                 Effect.Mode.build_less_than
-                  ~local_newvar_above:Alloc_mode.newvar_above
+                  ~local_newvar_below:Alloc_mode.newvar_below
                   eff'
             in
             let c2 = if changed then Changed else Unchanged in
@@ -5061,11 +5069,11 @@ and subtype_effect_mode_option env trace a1 eff1 a2 eff2 cstrs =
 and subtype_effect_mode env trace eff1 eff2 cstrs =
   match
     Effect.Mode.less_than
-      ~type_sub:(fun cstrs _ _ ty1 ty2 ->
+      ~type_greater_than:(fun cstrs _ _ ty1 ty2 ->
         subtype_rec env (Trace.diff ty2 ty1::trace) ty2 ty1 cstrs)
-      ~local_sub:(fun lcl1 lcl2 ->
-        subtype_alloc_mode env trace lcl2 lcl1)
-      ~local_top:Alloc_mode.global
+      ~local_greater_than:(fun lcl1 lcl2 ->
+        local_greater_than_for_effect Second lcl1 lcl2)
+      ~local_top:Alloc_mode.local
       cstrs eff1 eff2
   with
   | Ok cstrs -> cstrs

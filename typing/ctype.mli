@@ -33,8 +33,7 @@ module Unification_trace: sig
 
   type position = Misc.position = First | Second
   type desc = { t: type_expr; expanded: type_expr option }
-  type ('a, 'b) gen_diff = { got: 'a; expected: 'b}
-  type 'a diff = ('a, 'a) gen_diff
+  type 'a diff = { got: 'a; expected: 'a}
 
    (** Scope escape related errors *)
     type 'a escape =
@@ -67,7 +66,11 @@ module Unification_trace: sig
   type eff =
     | Not_equal_effects of Effect.Mode.Equal.Error.t
     | Not_less_than_effects of Effect.Mode.Less_than.Error.t
-    | Not_absolute_effect
+    | Not_absolute_effect of position
+
+  type effect_bound =
+    | Upper_bound of effect_upper_bound
+    | Lower_bound of effect_lower_bound
 
   type 'a elt =
     | Diff of 'a diff
@@ -77,9 +80,12 @@ module Unification_trace: sig
     | Incompatible_fields of {name:string; diff:type_expr diff }
     | Rec_occur of type_expr * type_expr
     | Incompatible_effects of
-        {name:string; diff:type_expr diff }
+        { name : string;
+          index : int;
+          diff : type_expr diff }
     | Eff of eff
-    | Effect_diff of effect_mode diff
+    | Effect_diff of effect_bound diff
+
 
   type t = desc elt list
 
@@ -308,8 +314,10 @@ val unify_var: Env.t -> type_expr -> type_expr -> unit
         (* Same as [unify], but allow free univars when first type
            is a variable. *)
 val unify_alloc_mode: alloc_mode -> alloc_mode -> unit
-val subeffect : Env.t -> effect_lower_bound -> effect_upper_bound -> unit
-val meet_effect_modes : Env.t -> effect_upper_bound -> effect_upper_bound -> unit
+val greater_than_effect_mode :
+  Env.t -> effect_upper_bound -> effect_lower_bound -> unit
+val meet_effect_modes :
+  effect_upper_bound -> effect_upper_bound -> effect_upper_bound
 val usable_absolute_effect_mode : Env.t -> effect_upper_bound -> effect_mode
 val filter_arrow: Env.t -> type_expr -> arg_label -> bool ->
                   alloc_mode * type_expr * alloc_mode * type_expr

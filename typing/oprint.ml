@@ -452,7 +452,7 @@ and print_out_label ppf (name, mut_or_gbl, arg) =
 and print_out_effect_binding ppf bnd =
   match (bnd : _ Effect.Binding.t) with
   | Unknown -> fprintf ppf ": ."
-  | Handled ty -> fprintf ppf ":@ %a" print_out_type ty
+  | Handled tys -> fprintf ppf ":@ %a" (print_typlist print_out_type " &") tys
   | Unused -> fprintf ppf ": *"
 
 and print_out_effect_context ppf eff =
@@ -470,7 +470,12 @@ and print_out_effect_adjustment_outer ppf (s, outer) =
 
 and print_out_effect_adjustment_inner ppf (s, inner) =
   match (inner : _ Effect.Adjustment.Desc.Inner.t) with
-  | Rename var -> fprintf ppf "%s as %s" s var
+  | Rename vars ->
+      fprintf ppf "%s as %a" s
+        (pp_print_list
+           ~pp_sep:(fun ppf () -> fprintf ppf " & ")
+           pp_print_string)
+        vars
   | Bind bnd -> fprintf ppf "%s%a" s print_out_effect_binding bnd
 
 and print_out_effect_adjustment ppf (adj : _ Effect.Adjustment.Desc.t) =
@@ -480,7 +485,7 @@ and print_out_effect_adjustment ppf (adj : _ Effect.Adjustment.Desc.t) =
     (print_list print_out_effect_adjustment_inner (fun ppf -> fprintf ppf ";@ "))
     adj.inner
 
-and print_out_effect_mode ppf (m : _ Effect.Mode.Desc.t) =
+and print_out_effect_mode ppf (m : _ Effect.Upper_bound.Desc.t) =
   match m with
   | Absolute ctx -> print_out_effect_context ppf ctx
   | Relative adj -> print_out_effect_adjustment ppf adj

@@ -90,7 +90,7 @@ and out_variant =
   | Ovar_fields of (string * bool * out_type list) list
   | Ovar_typ of out_type
 
-and out_effect_mode = out_type Effect.Mode.Desc.t
+and out_effect_mode = out_type Effect.Upper_bound.Desc.t
 
 and out_alloc_mode =
   | Oam_local
