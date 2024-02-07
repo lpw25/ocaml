@@ -235,8 +235,8 @@ type expected_mode =
   { position : mode_position;
     escaping_context : Env.escaping_context option;
     mode : Value_mode.t;
-    effect_factor : effect_factor;
-    tuple_modes : Value_mode.t list;
+    effect_mode : effect_lower_bound;
+    tuple_modes : (Value_mode.t * effect_lower_bound) list;
     (* for t in tuple_modes, t <= regional_to_global mode *)
   }
 
@@ -254,34 +254,49 @@ let apply_position env (expected_mode : expected_mode) sexp : apply_position =
   | Ok (Some `Tail), Nontail -> fail `Not_a_tailcall
   | Error `Conflict, _ -> fail `Conflict
 
-let mode_return mode =
+let mode_return mode effect_mode =
   { position = Tail;
     escaping_context = Some Return;
     mode;
+    effect_mode;
     tuple_modes = []}
 
-let mode_var () =
+let mode_top () =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.newvar ();
+    effect_mode = Effect.Lower_bound.unused;
     tuple_modes = [] }
 
-let mode_local =
+let mode_local expected_mode =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.local;
-    tuple_modes = [] }
+    effect_mode = expected_mode.effect_mode;
+    tuple_modes =
+      List.map
+        (fun (_, eff) -> Value_mode.local, eff)
+        expected_mode.tuple_modes }
 
-let mode_global =
+let mode_global effect_mode =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.global;
+    effect_mode = effect_mode;
+    tuple_modes = [] }
+
+let mode_escaping =
+  { position = Nontail;
+    escaping_context = None;
+    mode = Value_mode.global;
+    effect_mode = Effect.Lower_bound.global;
     tuple_modes = [] }
 
 let mode_subcomponent expected_mode =
   { position = Nontail;
     escaping_context = None;
     mode = Value_mode.regional_to_global expected_mode.mode;
+    effect_mode = expected_mode.effect_mode;
     tuple_modes = [] }
 
 let mode_nonlocal expected_mode =
@@ -293,39 +308,45 @@ let mode_nonlocal expected_mode =
   { position = Nontail;
     escaping_context = None;
     mode;
+    effect_mode = expected_mode.effect_mode;
     tuple_modes = [] }
 
-let mode_tailcall_function mode =
+let mode_tailcall_function mode effect_mode =
   { position = Nontail;
     escaping_context = Some Tailcall_function;
     mode;
+    effect_mode;
     tuple_modes = [] }
 
-let mode_tailcall_argument mode =
+let mode_tailcall_argument mode effect_mode =
   { position = Nontail;
     escaping_context = Some Tailcall_argument;
     mode;
+    effect_mode;
     tuple_modes = [] }
 
 let mode_partial_application expected_mode =
   { position = Nontail;
     escaping_context = Some Partial_application;
     mode = Value_mode.regional_to_global expected_mode.mode;
+    effect_mode = expected_mode.effect_mode;
     tuple_modes = [] }
 
 let mode_trywith expected_mode =
   { expected_mode with position = Nontail }
 
-let mode_nontail mode =
+let mode_nontail mode effect_mode =
   { position = Nontail;
     escaping_context = None;
     mode;
+    effect_mode;
     tuple_modes = [] }
 
-let mode_tuple mode tuple_modes =
+let mode_tuple mode effect_mode tuple_modes =
   { position = Nontail;
     escaping_context = None;
     mode;
+    effect_mode;
     tuple_modes }
 
 let mode_argument ~funct ~index ~position ~partial_app alloc_mode =
@@ -350,14 +371,22 @@ let mode_lazy =
   let position = Tail in
   let escaping_context = None in
   let mode = Value_mode.global in
+  let effect_mode = Effect.Lower_bound.global in
   let tuple_modes = [] in
-  { position; escaping_context; mode; tuple_modes }
+  { position; escaping_context; mode; effect_mode; tuple_modes }
+
+let rec submode_meet_tuple_modes m1 = function
+  | [] -> Ok ()
+  | (m2, _) :: rest ->
+      match Btype.Value_mode.submode m1 m2 with
+      | Ok () -> submode_meet_tuple_modes m1 rest
+      | Error _ as err -> err
 
 let submode ~loc ~env mode expected_mode =
   let res =
     match expected_mode.tuple_modes with
     | [] -> Btype.Value_mode.submode mode expected_mode.mode
-    | ts -> Btype.Value_mode.submode_meet mode ts
+    | ts -> submode_meet_tuple_modes mode ts
   in
   match res with
   | Ok () -> ()
@@ -366,7 +395,7 @@ let submode ~loc ~env mode expected_mode =
       raise (Error(loc, env, Local_value_escapes(reason, context)))
 
 let escape ~loc ~env m =
-  submode ~loc ~env m mode_global
+  submode ~loc ~env m mode_escaping
 
 let eqmode ~loc ~env m1 m2 err =
   match Btype.Alloc_mode.equate m1 m2 with
@@ -448,208 +477,6 @@ let constant_or_raise env loc cst =
   match constant cst with
   | Ok c -> c
   | Error err -> raise (Error (loc, env, err))
-
-(* Expression effect contexts *)
-
-let abstract_eff loc env { delayed; current } =
-  let delayed, effect_mode =
-    effect_context_of_delayed_effect_context delayed
-  in
-  match Ctype.join_effect_contexts env delayed current with
-  | eff -> delayed_eff eff effect_mode
-  | exception Unify trace ->
-      raise (Error(loc, env, Effect_type_clash(trace, false)))
-
-let apply_eff loc env { delayed; current } effect_modality mode =
-  let delayed, effect_mode =
-    effect_context_of_delayed_effect_context delayed
-  in
-  match Ctype.apply_effect_modality env effect_modality mode delayed with
-  | exception Escaping ->
-      raise (Error(loc, env, Effect_escape delayed))
-  | exception Unify trace ->
-      raise (Error(loc, env, Effect_type_mode_clash trace))
-  | delayed ->
-    match Ctype.join_effect_contexts env delayed current with
-    | exception Unify trace ->
-        raise (Error(loc, env, Effect_type_clash(trace, true)))
-    | eff ->
-        let expected_effect_mode =
-          Btype.effect_modality_mode effect_modality mode
-        in
-        match
-          Ctype.submode_effect_mode env effect_mode expected_effect_mode
-        with
-        | exception Escaping ->
-            raise (Error(loc, env, Effect_mode_escape))
-        | exception Unify trace ->
-            raise (Error(loc, env, Effect_mode_clash trace))
-        | () -> current_eff eff
-
-let handle_eff loc env factor handlers { delayed; current } =
-  let eff =
-    List.fold
-      (fun (name, ty) acc ->
-        match ... with
-        | 
-        let ty', eff = Ctype.filter_effect_context name acc in
-        unify ty ty';
-        
-        
-            match handlers with
-            | None -> 
-            | Some eff ->
-                match Ctype.filter_effect_context name eff with
-                | ty, _ -> ty
-                | exception Unify trace ->
-                    raise (Error(loc, !env, Effect_type_clash_handler trace))
-
-
-
-      handlers current
-  in
-  
-  arg_eff, eff
-
-let lower_effect_context loc env eff =
-  match Ctype.lower_effect_context env eff with
-  | () -> ()
-  | exception Unify trace ->
-      raise (Error(loc, env, Effect_type_clash(trace, true)))
-
-let lower_current_eff loc env eff =
-  lower_effect_context loc env eff.current
-
-let lower_delayed_eff loc env eff =
-  match eff.delayed with
-  | Single eff -> lower_effect_context loc env eff
-  | Tuple(effs, eff) ->
-      List.iter (lower_effect_context loc env) effs;
-      lower_effect_context loc env eff
-
-let generalize_delayed_effect_context eff =
-  match eff with
-  | Single eff -> generalize_effect_context eff
-  | Tuple(effs, eff) ->
-      List.iter generalize_effect_context effs;
-      generalize_effect_context eff
-
-let generalize_delayed_eff eff =
-  generalize_delayed_effect_context eff.delayed
-
-let join_expr_effs loc env is_current eff expected_eff =
-  match Ctype.join_effect_contexts env eff expected_eff with
-  | exception Unify trace ->
-      raise (Error(loc, env, Effect_type_clash(trace, is_current)))
-  | current -> current
-
-let join_effs loc env eff expected_eff =
-  let current = join_expr_effs loc env true eff.current expected_eff.current in
-  match eff.delayed, expected_eff.delayed with
-  | Tuple(effs1, eff), Tuple(effs2, expected_eff)
-        when List.length effs1 = List.length effs2 ->
-      let eff = join_expr_effs loc env false eff expected_eff in
-      let effs =
-        List.map2
-          (fun eff expected_eff ->
-            Ctype.join_effect_contexts env eff expected_eff)
-          effs1 effs2
-      in
-      let delayed = Tuple(effs, eff) in
-      { current; delayed }
-  | (Tuple(effs, eff), Single eff') | (Single eff', Tuple(effs, eff)) ->
-      let eff = join_expr_effs loc env false eff eff' in
-      let effs =
-        List.map
-          (fun e -> Ctype.join_effect_contexts env e eff')
-          effs
-      in
-      let delayed = Tuple(effs, eff) in
-      { current; delayed }
-  | (Tuple(_, eff), Tuple(_, expected_eff))
-    | (Single eff, Single expected_eff) ->
-      let delayed = join_expr_effs loc env false eff expected_eff in
-      let delayed = Single delayed in
-      { current; delayed }
-
-let tuple_effs env exps =
-  let current, delayed, delayed_list =
-    List.fold_left
-      (fun (current_acc, delayed_acc, delayed_list_acc) exp ->
-        let eff = exp.exp_eff in
-        match Ctype.join_effect_contexts env current_acc eff.current with
-        | exception Unify trace ->
-            raise (Error(exp.exp_loc, env, Effect_type_clash(trace, true)))
-        | current_acc ->
-            let delayed =
-              effect_context_of_delayed_effect_context eff.delayed
-            in
-            match Ctype.join_effect_contexts env delayed_acc delayed with
-            | exception Unify trace ->
-                raise (Error(exp.exp_loc, env, Effect_type_clash(trace, false)))
-            | delayed_acc ->
-                let delayed_list_acc = delayed :: delayed_list_acc in
-                (current_acc, delayed_acc, delayed_list_acc))
-      (empty_effect_context, empty_effect_context, []) exps
-  in
-  let delayed = Tuple(List.rev delayed_list, delayed) in
-  { current; delayed }
-
-let unify_effect_context_opts loc env eff1 eff2 =
-  match eff1, eff2 with
-  | None, None -> ()
-  | None, Some _ | Some _, None -> assert false
-  | Some eff1, Some eff2 ->
-      match unify_effect_context env eff1 eff2 with
-      | () -> ()
-      | exception Unify trace ->
-          raise (Error(loc, env, Effect_type_clash(trace, false)))
-
-let subeffect_effs loc env is_current exp_eff eff =
-  match Ctype.subeffect env exp_eff eff with
-  | () -> ()
-  | exception Unify trace ->
-      raise (Error(loc, env, Effect_type_clash(trace, is_current)))
-
-let subeffect_expr_effs loc env exp_eff eff =
-  let delayed =
-    effect_context_of_delayed_effect_context exp_eff.delayed
-  in
-  subeffect_effs loc env false delayed eff
-
-let subeffect env exp eff =
-  subeffect_expr_effs exp.exp_loc env exp.exp_eff eff
-
-let rename_effect env exp adj =
-  let eff = exp.exp_eff in
-  match Ctype.rename_effect_context env eff.current adj with
-  | current -> { eff with current }
-  | exception Unify trace ->
-      raise (Error(exp.exp_loc, env, Effect_type_clash(trace, true)))
-
-let apply_adjustment_expr_effs loc env adj exp_eff =
-  let delayed =
-    effect_context_of_delayed_effect_context exp_eff.delayed
-  in 
-  match Ctype.apply_adjustment env adj delayed with
-  | delayed -> { exp_eff with delayed }
-  | exception Unify trace ->
-      raise (Error(loc, env, Effect_type_clash(trace, false)))
-
-let apply_adjustment env adj exp =
-  apply_adjustment_expr_effs exp.exp_loc env adj exp.exp_eff
-
-let global_eff eff =
-  { eff with delayed = Single empty_effect_context }
-
-let poly_eff env exp eff =
-  match eff with
-  | Enone -> exp.exp_eff
-  | Econtext eff ->
-      subeffect env exp eff;
-      global_eff exp.exp_eff
-  | Eadjustment adj ->
-      apply_adjustment env adj exp      
 
 let type_renaming env outer inner =
   let vars = String.Tbl.create 3 in
@@ -4256,7 +4083,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         raise (Typetexp.Error (loc, Env.empty, Local_not_enabled));
       submode ~loc ~env Value_mode.local expected_mode;
       let exp =
-        type_expect ?in_function ~recarg env mode_local sbody
+        type_expect ?in_function ~recarg env (mode_local expected_mode) sbody
           ty_expected_explained
       in
       { exp with exp_loc = loc }
@@ -4265,7 +4092,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
  [Nolabel, sbody]) ->
       submode ~loc ~env Value_mode.local expected_mode;
       let exp =
-        type_expect ?in_function ~recarg env mode_local sbody
+        type_expect ?in_function ~recarg env (mode_local expected_mode) sbody
           ty_expected_explained
       in
       { exp with exp_loc = loc }
@@ -4273,7 +4100,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
 ({ pexp_desc = Pexp_extension({txt = "extension.escape"}, PStr []) },
  [Nolabel, sbody]) ->
       let exp =
-        type_expect ?in_function ~recarg env mode_global sbody
+        type_expect ?in_function ~recarg env mode_escaping sbody
           ty_expected_explained
       in
       submode_effs exp.exp_loc env exp.exp_eff Alloc_mode.global;
@@ -4310,7 +4137,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       let args =
         List.map2
           (fun sarg ty_arg ->
-            type_expect env mode_global sarg (mk_expected ty_arg))
+            type_expect env mode_escaping sarg (mk_expected ty_arg))
           sargs ty_args
       in
       let ty_res =
@@ -4341,7 +4168,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       in
       let renaming = type_renaming env outer inner in
       let newenv = Env.add_lock Value_mode.global env in
-      let arg = type_expect newenv mode_global arg ty_expected_explained in
+      let arg = type_expect newenv mode_escaping arg ty_expected_explained in
       let eff = rename_effect env arg renaming.ea_type in
       rue {
           exp_desc = Texp_rename_effects(renaming, arg);
@@ -4823,7 +4650,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           exp_env = env }
   | Pexp_ifthenelse(scond, sifso, sifnot) ->
       let cond =
-        type_expect env (mode_var ()) scond
+        type_expect env (mode_top ()) scond
           (mk_expected ~explanation:If_conditional Predef.type_bool)
       in
       let eff = global_eff cond.exp_eff in
@@ -4882,7 +4709,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         else Env.add_region_lock env, true
       in
       let wh_cond =
-        type_expect cond_env (mode_var ()) scond
+        type_expect cond_env (mode_top ()) scond
           (mk_expected ~explanation:While_loop_conditional Predef.type_bool)
       in
       let cond_eff = global_eff wh_cond.exp_eff in
@@ -4906,12 +4733,12 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           exp_env = env }
   | Pexp_for(param, slow, shigh, dir, sbody) ->
       let for_from =
-        type_expect env (mode_var ()) slow
+        type_expect env (mode_top ()) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
       in
       let eff = global_eff for_from.exp_eff in
       let for_to =
-        type_expect env (mode_var ()) shigh
+        type_expect env (mode_top ()) shigh
           (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
       in
       let eff =
@@ -5050,7 +4877,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         }
   | Pexp_send (e, {txt=met}) ->
       if !Clflags.principal then begin_def ();
-      let obj = type_exp env mode_global e in
+      let obj = type_exp env mode_escaping e in
       let obj_meths = ref None in
       let ap_pos = apply_position env expected_mode sexp in
       begin try
@@ -5217,7 +5044,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
       match mut with
       | Mutable ->
           let newval =
-            type_expect env mode_global snewval
+            type_expect env mode_escaping snewval
               (mk_expected (instance ty))
           in
           submode_effs newval.exp_loc env newval.exp_eff Alloc_mode.global;
@@ -5258,7 +5085,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
             begin try
                 let (id, _, _, ty) = Vars.find lab.txt !vars in
                 let newval =
-                  type_expect env mode_global snewval (mk_expected (instance ty))
+                  type_expect env mode_escaping snewval (mk_expected (instance ty))
                 in
                 submode_effs newval.exp_loc env newval.exp_eff Alloc_mode.global;
                 (Path.Pident id, lab, newval)
@@ -5346,7 +5173,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
 
   | Pexp_assert (e) ->
       let cond =
-        type_expect env (mode_var ()) e
+        type_expect env (mode_top ()) e
           (mk_expected ~explanation:Assert_condition Predef.type_bool)
       in
       let exp_type =
@@ -5671,7 +5498,7 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
           check_probe_name name name_loc env;
           let env = Env.add_lock Value_mode.global env in
           Env.add_probe name;
-          let exp = type_expect env mode_global arg
+          let exp = type_expect env mode_escaping arg
                       (mk_expected Predef.type_unit) in
           let eff = global_eff exp.exp_eff in
           rue {
@@ -5765,7 +5592,7 @@ and type_binding_op_ident env s =
   let loc = s.loc in
   let lid = Location.mkloc (Longident.Lident s.txt) loc in
   let path, mode, desc, kind = type_ident env lid in
-  submode ~env ~loc:lid.loc mode mode_global;
+  submode ~env ~loc:lid.loc mode mode_escaping;
   submode_effect_context lid.loc env desc.val_eff Alloc_mode.global;
   let path =
     match desc.val_kind with
@@ -6683,7 +6510,7 @@ ty_expected_explained attrs =
 
 and type_statement ?explanation env sexp =
   begin_def();
-  let exp = type_exp env (mode_var ()) sexp in
+  let exp = type_exp env (mode_top ()) sexp in
   end_def();
   let ty = expand_head env exp.exp_type and tv = newvar() in
   if is_Tvar ty && ty.level > tv.level then
@@ -6914,7 +6741,7 @@ and type_cases
           | None -> None
           | Some scond ->
               Some
-                (type_unpacks ext_env (mode_var ()) unpacks scond
+                (type_unpacks ext_env (mode_top ()) unpacks scond
                    (mk_expected ~explanation:When_guard Predef.type_bool))
         in
         let exp =
@@ -7367,7 +7194,7 @@ and type_andops env sarg sands expected_ty =
     match rev_sands with
     | [] ->
         let exp =
-          type_expect env mode_global let_sarg
+          type_expect env mode_escaping let_sarg
             (mk_expected expected_ty)
         in
         submode_effs exp.exp_loc env exp.exp_eff Alloc_mode.global;
@@ -7400,7 +7227,7 @@ and type_andops env sarg sands expected_ty =
         end;
         let let_arg, rest, eff = loop env let_sarg rest ty_rest in
         let exp =
-          type_expect env mode_global sexp (mk_expected ty_arg)
+          type_expect env mode_escaping sexp (mk_expected ty_arg)
         in
         submode_effs exp.exp_loc env exp.exp_eff Alloc_mode.global;
         let eff = join_effs exp.exp_loc env (global_eff exp.exp_eff) eff in
@@ -7449,7 +7276,7 @@ and type_andops env sarg sands expected_ty =
     let comp_type, new_env, comp_eff =
       type_comprehension_list ~loc ~env ~container_type ~comp_typell
     in
-    let body = type_expect new_env mode_global sbody (mk_expected without_arr_ty) in
+    let body = type_expect new_env mode_escaping sbody (mk_expected without_arr_ty) in
     let eff = join_effs body.exp_loc new_env body.exp_eff comp_eff in
     re {
       exp_desc = build body comp_type;
@@ -7466,11 +7293,11 @@ and type_andops env sarg sands expected_ty =
       match comp_type with
       | From_to (param, slow, shigh, dir) ->
           let low =
-            type_expect env mode_global slow
+            type_expect env mode_escaping slow
               (mk_expected ~explanation:For_loop_start_index Predef.type_int)
           in
           let high =
-            type_expect env mode_global shigh
+            type_expect env mode_escaping shigh
               (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
           in
           let eff = join_effs high.exp_loc env high.exp_eff low.exp_eff in
@@ -7482,7 +7309,7 @@ and type_andops env sarg sands expected_ty =
         let item_ty = newvar() in
         let iter_ty = instance (container_type item_ty) in
         let iter =
-          type_expect env mode_global siter
+          type_expect env mode_escaping siter
             (mk_expected ~explanation:In_comprehension_argument iter_ty)
         in
         let arg_eff, eff = match_eff iter.exp_eff in
@@ -7536,7 +7363,7 @@ and type_andops env sarg sands expected_ty =
       | None -> None, new_eff
       | Some guard ->
           let exp =
-            type_expect new_env mode_global guard
+            type_expect new_env mode_escaping guard
               (mk_expected ~explanation:When_guard Predef.type_bool)
           in
           let new_eff = join_effs exp.exp_loc new_env exp.exp_eff new_eff in

@@ -816,6 +816,10 @@ let generalize_effect_upper_bound eff =
   simple_abbrevs := Mnil;
   iter_effect_upper_bound generalize eff
 
+let generalize_effect_mode eff =
+  simple_abbrevs := Mnil;
+  iter_effect_mode generalize eff
+
 (* Generalize the structure and lower the variables *)
 
 let rec generalize_structure var_level ty =

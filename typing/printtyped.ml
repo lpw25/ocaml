@@ -227,30 +227,33 @@ and package_with i ppf (s, t) =
   line i ppf "with type %a\n" fmt_longident s;
   core_type i ppf t
 
-and effect_context_item i ppf (s, cto) =
-  line i ppf "\"%s\":@ " s.txt;
-  option (i+1) core_type ppf cto
+and name_x_effect_binding i ppf (s, bnd) =
+  match bnd.eb_desc with
+  | Eb_unused ->
+      line i ppf "\"%s\": *" s.txt
+  | Eb_handled ct ->
+      line i ppf "\"%s\":@ " s.txt;
+      core_type (i+1) ppf ct
+  | Eb_unknown ->
+      line i ppf "\"%s\": ." s.txt
 
 and effect_context i ppf eff =
   line i ppf "effect_context";
-  list (i+1) effect_context_item ppf eff.ec_effects
+  list (i+1) name_x_effect_binding ppf eff.ec_effects
   
 and effect_adjustment_outer_item i ppf (s, vo) =
   match vo with
-  | None ->
+  | Eo_unknown ->
       line i ppf "\"%s\": ." s.txt
-  | Some v ->
+  | Eo_rename v ->
       line i ppf "\"%s\" as \"%s\"" s.txt v.txt
 
 and effect_adjustment_inner_item i ppf (s, inner) =
   match inner with
-  | Eai_rename v ->
+  | Ep_rename v ->
       line i ppf "\"%s\" as \"%s\"" s.txt v.txt
-  | Eai_bind None ->
-      line i ppf "\"%s\": ." s.txt
-  | Eai_bind (Some ct) ->
-      line i ppf "\"%s\":@ " s.txt;
-      core_type (i+1) ppf ct
+  | Ep_bind bnd ->
+      name_x_effect_binding i ppf (s, bnd)
 
 and effect_adjustment i ppf adj =
   line i ppf "effect_adjustment";

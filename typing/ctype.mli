@@ -215,6 +215,7 @@ val correct_levels: type_expr -> type_expr
 val limited_generalize: type_expr -> type_expr -> unit
         (* Only generalize some part of the type
            Make the remaining of the type non-generalizable *)
+val generalize_effect_mode: effect_mode -> unit
 val generalize_effect_upper_bound: effect_upper_bound -> unit
 val generalize_effect_upper_bound_structure: effect_upper_bound -> unit
 

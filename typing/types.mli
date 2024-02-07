@@ -150,6 +150,12 @@ and alloc_mode =
   | Amode of alloc_mode_const
   | Amodevar of alloc_mode_var
 
+and effect_binding = type_expr Effect.Binding.t
+
+and effect_context = type_expr Effect.Context.t
+
+and effect_adjustment = type_expr Effect.Adjustment.t
+
 and effect_mode = (type_expr, alloc_mode) Effect.Mode.t
 
 and effect_lower_bound = (type_expr, alloc_mode) Effect.Lower_bound.t

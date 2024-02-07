@@ -684,23 +684,37 @@ and object_field_desc =
   | OTtag of string loc * core_type
   | OTinherit of core_type
 
+and effect_binding_desc =
+  | Eb_unused
+  | Eb_handled of core_type
+  | Eb_unknown
+
+and effect_binding =
+  { eb_desc : effect_binding_desc;
+    eb_type : Types.effect_binding; }
+
 and effect_context = {
-    ec_effects : (string loc * core_type option) list;
-    ec_type : Types.effect_mode;
+    ec_effects : (string loc * effect_binding) list;
+    ec_type : Types.effect_context;
   }
 
-and effect_adjustment_inner =
-  | Eai_rename of string Location.loc
-  | Eai_bind of core_type option
+and effect_outer =
+  | Eo_rename of string Location.loc
+  | Eo_unknown
+
+and effect_mapping =
+  | Ep_rename of string Location.loc
+  | Ep_bind of effect_binding
 
 and effect_adjustment = {
-    ea_outer : (string loc * string loc option) list;
-    ea_inner : (string loc * effect_adjustment_inner) list;
+    ea_outer : (string loc * effect_outer) list;
+    ea_inner : (string loc * effect_mapping) list;
+    ea_type : Types.effect_adjustment;
   }
 
 and effect_mode_desc =
-  | Em_relative of effect_adjustment
   | Em_absolute of effect_context
+  | Em_relative of effect_adjustment
   | Em_unused
 
 and effect_mode = {
@@ -712,7 +726,7 @@ and value_description =
   { val_id: Ident.t;
     val_name: string loc;
     val_desc: core_type;
-    val_eff: effect_context option;
+    val_eff: effect_mode option;
     val_val: Types.value_description;
     val_prim: string list;
     val_loc: Location.t;
@@ -916,8 +930,5 @@ val split_pattern:
   computation general_pattern ->
   pattern option * pattern option * pattern Misc.Stdlib.String.Map.t
 
-val effect_context_type :
-  effect_context option -> Types.effect_mode option
-
-val effect_mode_type :
+val effect_mode_option_type :
   effect_mode option -> Types.effect_mode option

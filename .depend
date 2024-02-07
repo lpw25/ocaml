@@ -622,8 +622,7 @@ typing/effect.cmx : \
     typing/effect.cmx \
     typing/effect.cmi
 typing/effect.cmi : \
-    parsing/location.cmi \
-    typing/effect.cmi
+    parsing/location.cmi
 typing/env.cmo : \
     utils/warnings.cmi \
     typing/types.cmi \

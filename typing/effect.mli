@@ -88,7 +88,7 @@ module Adjustment : sig
 
       type t =
         | Rename of string
-        | Unused
+        | Unknown
 
     end
 
@@ -436,6 +436,12 @@ module rec Lower_bound : sig
   val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
 
   val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+
+  val unused : ('ty, 'lcl) t
+  (** [unused] is [mode Mode.unused]. *)
+
+  val global : ('ty, 'lcl) t
+  (** [global] is [mode Mode.global]. *)
 
   val desc : ('ty, 'lcl) t -> 'ty Mode.Desc.t
 

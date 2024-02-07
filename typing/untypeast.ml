@@ -895,8 +895,8 @@ let attr_of_effect_adjustment sub adj =
   let outer_expr (name, outer) =
     let payload =
       match outer with
-      | None -> PStr []
-      | Some v -> PPat(Pat.var v, None)
+      | Eo_unknown -> PStr []
+      | Eo_rename v -> PPat(Pat.var v, None)
     in
     Exp.extension (name, payload)
   in
@@ -908,14 +908,15 @@ let attr_of_effect_adjustment sub adj =
   in
   let outer_str = mknoloc "outer" in
   let outer =
-    Exp.extension ~loc:Location.none (outer_str, outer_payload)
+    Pat.extension ~loc:Location.none (outer_str, outer_payload)
   in
-  let inner_expr (name, inner) =
+  let inner_expr (name, mapping) =
     let payload =
-      match inner with
-      | Eai_rename s -> PPat(Pat.var s, None)
-      | Eai_bind None -> PStr []
-      | Eai_bind (Some ct) -> PTyp (sub.typ sub ct)
+      match mapping with
+      | Ep_rename s -> PPat(Pat.var s, None)
+      | Ep_bind {eb_desc = Eb_unused} -> PPat(Pat.any (), None)
+      | Ep_bind {eb_desc = Eb_handled ct} -> PTyp (sub.typ sub ct)
+      | Ep_bind {eb_desc = Eb_unknown} -> PStr []
     in
     Exp.extension (name, payload)
   in
@@ -927,20 +928,21 @@ let attr_of_effect_adjustment sub adj =
   in
   let inner_str = mknoloc "inner" in
   let inner =
-    Exp.extension ~loc:Location.none (inner_str, inner_payload)
+    Pat.extension ~loc:Location.none (inner_str, inner_payload)
   in
   let payload =
-    PStr [Str.eval (Exp.tuple [outer; inner])]
+    PPat(Pat.tuple [outer; inner], None)
   in
-  let str = mknoloc "extension.adjustment" in
+  let str = mknoloc "extension.effects" in
   Attr.mk str payload
 
 let attr_of_effect_context sub eff =
-  let effect_expr (name, cto) =
+  let effect_expr (name, bnd) =
     let payload =
-      match cto with
-      | None -> PStr []
-      | Some ct -> PTyp (sub.typ sub ct)
+      match bnd.eb_desc with
+      | Eb_unused -> PPat(Pat.any (), None)
+      | Eb_handled ct -> PTyp (sub.typ sub ct)
+      | Eb_unknown -> PStr []
     in
     Exp.extension (name, payload)
   in
@@ -950,6 +952,11 @@ let attr_of_effect_context sub eff =
     | [effect] -> PStr[Str.eval (effect_expr effect)]
     | effects -> PStr[Str.eval (Exp.tuple (List.map effect_expr effects))]
   in
+  let str = mknoloc "extension.effects" in
+  Attr.mk str payload
+
+let attr_of_effect_unused =
+  let payload = PPat(Pat.any (), None) in
   let str = mknoloc "extension.effects" in
   Attr.mk str payload
 
@@ -980,11 +987,13 @@ let core_type sub ct =
         let ct =
           match eff with
           | None -> ct
-          | Some (Em_context eff) ->
-              let attr = attr_of_effect_context sub eff in
-              { ct with ptyp_attributes = attr :: ct.ptyp_attributes }
-          | Some (Em_adjustment adj) ->
-              let attr = attr_of_effect_adjustment sub adj in
+          | Some eff ->
+              let attr =
+                match eff.em_desc with
+                | Em_absolute ctx -> attr_of_effect_context sub ctx
+                | Em_relative adj -> attr_of_effect_adjustment sub adj
+                | Em_unused -> attr_of_effect_unused
+              in
               { ct with ptyp_attributes = attr :: ct.ptyp_attributes }
         in
         Ptyp_poly (list, ct)

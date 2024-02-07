@@ -336,45 +336,49 @@ let mkexp_perform ~loc name exp =
 
 let effects_loc = mknoloc "extension.effects"
 
-let effect_expr (name, typo) =
-  match typo with
-  | None -> Exp.extension (mknoloc name, PStr [])
-  | Some typ -> Exp.extension (mknoloc name, PTyp typ)
+type effect_binding =
+  | Unused
+  | Handled of Parsetree.core_type
+  | Unknown
 
-let effects_attr effs =
-  let payload =
-    match effs with
-    | [] -> PStr []
-    | [eff] -> PStr[Str.eval (effect_expr eff)]
-    | effs -> PStr[Str.eval (Exp.tuple (List.map effect_expr effs))]
-  in
-  Attr.mk ~loc:Location.none effects_loc payload
+let effect_expr (name, bnd) =
+  match bnd with
+  | Unused -> Exp.extension (mknoloc name, PPat(Pat.any (), None))
+  | Handled typ -> Exp.extension (mknoloc name, PTyp typ)
+  | Unknown -> Exp.extension (mknoloc name, PStr [])
 
-let mktyp_effect_context typ effs =
-  {typ with ptyp_attributes = effects_attr effs :: typ.ptyp_attributes}
+let payload_of_absolute_effect ctx =
+  match ctx with
+  | [] -> PStr []
+  | [eff] -> PStr[Str.eval (effect_expr eff)]
+  | effs -> PStr[Str.eval (Exp.tuple (List.map effect_expr effs))]
 
-let adjustment_loc = mknoloc "extension.adjustment"
+let attribute_of_absolute_effect loc ctx =
+  let loc = make_loc loc in
+  Attr.mk ~loc effects_loc (payload_of_absolute_effect ctx)
+
 let inner_loc = mknoloc "inner"
 let outer_loc = mknoloc "outer"
 
-type adjustment_binding =
-  | Adj_type of core_type
-  | Adj_var of string Location.loc
-  | Adj_dot
+type effect_outer =
+  | Rename of string Location.loc
+  | Unknown
 
-type effects =
-  | Adjustment of
-      { outer :(string * Ast_helper.str option) list;
-        inner : (string * adjustment_binding) list;
-        loc : loc }
-  | Context of (string * Parsetree.core_type option) list
+type effect_mapping =
+  | Bind of effect_binding
+  | Rename of string Location.loc
+
+type effect_adjustment =
+  { outer :(string * effect_outer) list;
+    inner : (string * effect_mapping) list; }
 
 let adjustment_outer_of_binding (name, inner, loc) =
-  let outer =
+  let outer : effect_outer =
     match inner with
-    | Adj_dot -> None
-    | Adj_var s -> Some s
-    | Adj_type _ -> not_expecting loc "typed effect binding"
+    | Rename s -> Rename s
+    | Bind Unknown -> Unknown
+    | Bind (Handled _) -> not_expecting loc "typed effect binding"
+    | Bind Unused -> not_expecting loc "unused effect binding"
   in
   (name, outer)
 
@@ -383,36 +387,41 @@ let adjustment_inner_of_binding (name, inner, _) =
 
 let adjustment_inner_expr (name, bind) =
   match bind with
-  | Adj_dot -> Exp.extension (mknoloc name, PStr [])
-  | Adj_var s -> Exp.extension (mknoloc name, PPat (Pat.var s, None))
-  | Adj_type typ -> Exp.extension (mknoloc name, PTyp typ)
+  | Rename s -> Exp.extension (mknoloc name, PPat (Pat.var s, None))
+  | Bind Unused -> Exp.extension (mknoloc name, PPat (Pat.any (), None))
+  | Bind (Handled typ) -> Exp.extension (mknoloc name, PTyp typ)
+  | Bind Unknown -> Exp.extension (mknoloc name, PStr [])
 
 let outer_expr (name, so) =
-  match so with
-  | None -> Exp.extension (mknoloc name, PStr [])
-  | Some s -> Exp.extension (mknoloc name, PPat(Pat.var s, None))
+  match (so : effect_outer) with
+  | Unknown -> Exp.extension (mknoloc name, PStr [])
+  | Rename s -> Exp.extension (mknoloc name, PPat(Pat.var s, None))
 
-let extension_list_expr name expr rens =
+let extension_list_pat name expr rens =
   let payload =
     match rens with
     | [] -> PStr []
     | [ren] -> PStr[Str.eval (expr ren)]
     | rens -> PStr[Str.eval (Exp.tuple (List.map expr rens))]
   in
-  Exp.extension ~loc:Location.none (name, payload)
+  Pat.extension ~loc:Location.none (name, payload)
 
-let adjustment_attr ~outer ~inner loc =
-  let outer = extension_list_expr outer_loc outer_expr outer in
-  let inner = extension_list_expr inner_loc adjustment_inner_expr inner in
-  let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
-  Attr.mk ~loc adjustment_loc payload
+let payload_of_relative_effect adj =
+  let outer = extension_list_pat outer_loc outer_expr adj.outer in
+  let inner = extension_list_pat inner_loc adjustment_inner_expr adj.inner in
+  PPat(Pat.tuple [outer; inner], None)
 
-let mktyp_effects typ effs =
-  let attr =
-    match effs with
-    | Adjustment {outer; inner; loc} -> adjustment_attr ~outer ~inner loc
-    | Context eff -> effects_attr eff
-  in
+let attribute_of_relative_effect loc adj =
+  let loc = make_loc loc in
+  Attr.mk ~loc effects_loc (payload_of_relative_effect adj)
+
+let payload_of_unused_effect = PPat(Pat.any (), None)
+
+let attribute_of_unused_effect loc =
+  let loc = make_loc loc in
+  Attr.mk ~loc effects_loc payload_of_unused_effect
+
+let mktyp_effect_mode typ attr =
   let attrs = attr :: typ.ptyp_attributes in
   {typ with ptyp_attributes = attrs}
 
@@ -432,9 +441,9 @@ let mkcds_effect_type cds =
 let renaming_loc = mknoloc "extension.renaming"
 
 let renaming_extension ~outer ~inner =
-  let outer = extension_list_expr outer_loc outer_expr outer in
-  let inner = extension_list_expr inner_loc outer_expr inner in
-  let payload = PStr[Str.eval (Exp.tuple [outer; inner])] in
+  let outer = extension_list_pat outer_loc outer_expr outer in
+  let inner = extension_list_pat inner_loc outer_expr inner in
+  let payload = PPat(Pat.tuple [outer; inner], None) in
   Exp.extension ~loc:Location.none (renaming_loc, payload)
 
 let mkexp_renaming ~loc ~outer ~inner exp =
@@ -2114,7 +2123,7 @@ method_:
           ghexp ~loc (Pexp_poly($8, Some $6)) in
         ($4, $3, Cfk_concrete ($1, poly_exp)), $2 }
   | override_flag attributes private_flag mkrhs(label) COLON TYPE lident_list
-    DOT core_type_with_effs EQUAL seq_expr
+    DOT core_type_with_effect_mode EQUAL seq_expr
       { let poly_exp_loc = ($startpos($7), $endpos($11)) in
         let poly_exp =
           let exp, poly =
@@ -2363,7 +2372,9 @@ label_let_pattern:
         lab,
         mkpat ~loc:$sloc (Ppat_constraint (pat, cty)) }
   | x = label_var COLON
-          cty = mktyp (vars = typevar_list DOT ty = core_type_with_effs { Ptyp_poly(vars, ty) })
+          cty = mktyp
+            (vars = typevar_list DOT
+             ty = core_type_with_effect_mode { Ptyp_poly(vars, ty) })
       { let lab, pat = x in
         lab,
         mkpat ~loc:$sloc (Ppat_constraint (pat, cty)) }
@@ -2385,15 +2396,15 @@ let_pattern:
     mkpat(
       pat = pattern
       COLON
-      cty = mktyp(vars = typevar_list DOT ty = core_type_with_effs
+      cty = mktyp(vars = typevar_list DOT ty = core_type_with_effect_mode
               { Ptyp_poly(vars, ty) })
         { Ppat_constraint(pat, cty) })
       { $1 }
   | mkpat(
       pat = pattern
       COLON
-      cty = mktyp(ty = core_type eff = effects
-              { let ty = mktyp_effects ty eff in
+      cty = mktyp(ty = core_type eff = effect_mode
+              { let ty = mktyp_effect_mode ty eff in
                 Ptyp_poly([], ty) })
         { Ppat_constraint(pat, cty) })
       { $1 }
@@ -2749,10 +2760,10 @@ let_binding_body:
             (wrap_exp_local_if $1 (mkexp_constraint ~loc:$sloc $5 $3))
         in
         (pat, exp) }
-  | optional_local let_ident COLON core_type effects EQUAL seq_expr
+  | optional_local let_ident COLON core_type effect_mode EQUAL seq_expr
       { let typloc = ($startpos($4), $endpos($5)) in
         let patloc = ($startpos($2), $endpos($5)) in
-        let typ = mktyp_effects $4 $5 in
+        let typ = mktyp_effect_mode $4 $5 in
         let pat =
           mkpat_local_if $1
             (ghpat ~loc:patloc
@@ -2760,7 +2771,8 @@ let_binding_body:
         in
         let exp = mkexp_local_if $1 ~loc:$sloc $7 in
         (pat, exp) }
-  | optional_local let_ident COLON typevar_list DOT core_type_with_effs EQUAL seq_expr
+  | optional_local let_ident
+       COLON typevar_list DOT core_type_with_effect_mode EQUAL seq_expr
       (* TODO: could replace [typevar_list DOT core_type]
                with [mktyp(poly(core_type))]
                and simplify the semantic action? *)
@@ -2773,7 +2785,8 @@ let_binding_body:
         in
         let exp = mkexp_local_if $1 ~loc:$sloc $8 in
         (pat, exp) }
-  | let_ident COLON TYPE lident_list DOT core_type_with_effs EQUAL seq_expr
+  | let_ident COLON TYPE lident_list DOT core_type_with_effect_mode
+      EQUAL seq_expr
       { let exp, poly =
           wrap_type_annotation ~loc:$sloc $4 $6 $8 in
         let loc = ($startpos($1), $endpos($6)) in
@@ -3144,7 +3157,7 @@ value_description:
   attrs1 = attributes
   id = mkrhs(val_ident)
   COLON
-  ty = core_type_with_effect_context
+  ty = core_type_with_effect_mode
   attrs2 = post_item_attributes
     { let attrs = attrs1 @ attrs2 in
       let loc = make_loc $sloc in
@@ -3161,7 +3174,7 @@ primitive_declaration:
   attrs1 = attributes
   id = mkrhs(val_ident)
   COLON
-  ty = core_type_with_effect_context
+  ty = core_type_with_effect_mode
   EQUAL
   prim = raw_string+
   attrs2 = post_item_attributes
@@ -3564,8 +3577,8 @@ with_type_binder:
 possibly_poly(X):
   X
     { $1 }
-| X effects
-    { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effects $1 $2))) }
+| X effect_mode
+    { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effect_mode $1 $2))) }
 | mktyp(poly(X))
     { $1 }
 ;
@@ -3582,25 +3595,18 @@ possibly_poly(X):
 
 (* Core language types. *)
 
-core_type_with_effs:
+core_type_with_effect_mode:
     core_type
       { $1 }
-  | core_type effects
-      { mktyp_effects $1 $2 }
-;
-
-core_type_with_effect_context:
-    core_type
-      { $1 }
-  | core_type effect_context
-      { mktyp_effect_context $1 $2 }
+  | core_type effect_mode
+      { mktyp_effect_mode $1 $2 }
 ;
 
 core_type_with_poly_effs:
     core_type
       { $1 }
-  | core_type effects
-      { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effects $1 $2))) }
+  | core_type effect_mode
+      { mktyp ~loc:$sloc (Ptyp_poly([], (mktyp_effect_mode $1 $2))) }
 ;
 
 (* A core type (core_type) is a core type without attributes (core_type_no_attr)
@@ -3688,14 +3694,14 @@ strict_function_type:
 ;
 %inline param_type:
   | mktyp(
-    LPAREN vars = typevar_list DOT ty = core_type_with_effs RPAREN
+    LPAREN vars = typevar_list DOT ty = core_type_with_effect_mode RPAREN
       { Ptyp_poly(vars, ty) }
     )
     { $1 }
 
   | mktyp(
-    LPAREN ty = core_type eff = effects RPAREN
-      { Ptyp_poly([], mktyp_effects ty eff) }
+    LPAREN ty = core_type eff = effect_mode RPAREN
+      { Ptyp_poly([], mktyp_effect_mode ty eff) }
     )
     { $1 }
 
@@ -3865,47 +3871,48 @@ meth_list:
     LIDENT                                      { $1 }
 ;
 
-effect:
+effect_binding:
+  | label COLON STAR
+      { ($1, Unused) }
   | label COLON core_type
-      { ($1, Some $3) }
+      { ($1, Handled $3) }
   | label COLON DOT
-      { ($1, None) }
+      { ($1, Unknown) }
 ;
 
 effect_context:
-  LBRACKET separated_list(SEMI, effect) RBRACKET
+  LBRACKET separated_list(SEMI, effect_binding) RBRACKET
     { $2 }
 ;
-effect_binding:
-  | label COLON core_type
-      { ($1, Adj_type $3, $sloc) }
+effect_mapping:
   | label AS mkrhs(LIDENT)
-      { ($1, Adj_var $3, $sloc) }
-  | label COLON DOT
-      { ($1, Adj_dot, $sloc) }
+      { ($1, Rename $3, $sloc) }
+  | effect_binding
+      { let s, bnd = $1 in
+        (s, Bind bnd, $sloc) }
 ;
-%inline effect_bindings:
-  separated_list(SEMI, effect_binding)
+%inline effect_mappings:
+  separated_list(SEMI, effect_mapping)
     { $1 }
 ;
 effect_adjustment:
-    LBRACKET PLUS outer = effect_bindings
-      DIV inner = effect_bindings RBRACKET
+    LBRACKET PLUS outer = effect_mappings
+      DIV inner = effect_mappings RBRACKET
       { let outer = List.map adjustment_outer_of_binding outer in
         let inner = List.map adjustment_inner_of_binding inner in
-        let loc = make_loc $sloc in
-        Adjustment {outer; inner; loc} }
-  | LBRACKET PLUS inner = effect_bindings RBRACKET
+        { outer; inner } }
+  | LBRACKET PLUS inner = effect_mappings RBRACKET
       { let outer = [] in
         let inner = List.map adjustment_inner_of_binding inner in
-        let loc = make_loc $sloc in
-        Adjustment {outer; inner; loc} }
+        { outer; inner } }
 ;
-effects:
-  | effect_adjustment
-      { $1 }
+effect_mode:
   | effect_context
-      { Context $1 }
+      { attribute_of_absolute_effect $sloc $1 }
+  | effect_adjustment
+      { attribute_of_relative_effect $sloc $1 }
+  | LBRACKET STAR RBRACKET
+      { attribute_of_unused_effect $sloc }
 ;
 effect_renaming_item:
   | label AS mkrhs(LIDENT)
@@ -4293,7 +4300,7 @@ item_extension:
 payload:
     structure { PStr $1 }
   | COLON signature { PSig $2 }
-  | COLON core_type_with_effs { PTyp $2 }
+  | COLON core_type_with_effect_mode { PTyp $2 }
   | QUESTION pattern { PPat ($2, None) }
   | QUESTION pattern WHEN seq_expr { PPat ($2, Some $4) }
 ;

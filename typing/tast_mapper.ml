@@ -647,12 +647,21 @@ let class_type_field sub x =
   in
   {x with ctf_desc}
 
+let effect_binding sub bnd =
+  let eb_desc =
+    match bnd.eb_desc with
+    | Eb_unused -> Eb_unused
+    | Eb_handled ct -> Eb_handled (sub.typ sub ct)
+    | Eb_unknown -> Eb_unknown
+  in
+  { bnd with eb_desc }
+
 let effect_context sub eff =
   let ec_effects =
     List.map
-      (fun (s, cto) ->
-        let cto = Option.map (sub.typ sub) cto in
-        (s, cto))
+      (fun (s, bnd) ->
+        let bnd = effect_binding sub bnd in
+        (s, bnd))
       eff.ec_effects
   in
   { eff with ec_effects }
@@ -663,20 +672,24 @@ let effect_adjustment sub adj =
       (fun (s, inner) ->
         let inner =
           match inner with
-          | Eai_rename _ -> inner
-          | Eai_bind cto ->
-              let cto = Option.map (sub.typ sub) cto in
-              Eai_bind cto
+          | Ep_rename _ -> inner
+          | Ep_bind bnd ->
+              let bnd = effect_binding sub bnd in
+              Ep_bind bnd
         in
         (s, inner))
       adj.ea_inner
   in
   { adj with ea_inner }
 
-let effect_modality sub eff =
-  match eff with
-  | Em_context eff -> Em_context (effect_context sub eff)
-  | Em_adjustment adj -> Em_adjustment (effect_adjustment sub adj)
+let effect_mode sub eff =
+  let em_desc =
+    match eff.em_desc with
+    | Em_absolute eff -> Em_absolute (effect_context sub eff)
+    | Em_relative adj -> Em_relative (effect_adjustment sub adj)
+    | Em_unused -> Em_unused
+  in
+  { eff with em_desc }
 
 let typ sub x =
   let ctyp_env = sub.env sub x.ctyp_env in
@@ -703,7 +716,7 @@ let typ sub x =
         Ttyp_variant (List.map (sub.row_field sub) list, closed, labels)
     | Ttyp_poly (sl, ct, eff) ->
         let ct = sub.typ sub ct in
-        let eff = Option.map (effect_modality sub) eff in
+        let eff = Option.map (effect_mode sub) eff in
         Ttyp_poly (sl, ct, eff)
     | Ttyp_package pack ->
         Ttyp_package (sub.package_type sub pack)

@@ -33,7 +33,7 @@ val transl_simple_type_delayed
            function that binds the type variable. *)
 val transl_type_scheme:
         Env.t -> Parsetree.core_type ->
-        Typedtree.core_type * Typedtree.effect_context option
+        Typedtree.core_type * Typedtree.effect_mode option
 val reset_type_variables: unit -> unit
 val type_variable: Location.t -> string -> type_expr
 val transl_type_param:
@@ -71,7 +71,7 @@ type error =
   | Effects_not_enabled
   | Bad_effect_payload
   | Polymorphic_optional_param
-  | Bad_effect_adjustment of Effect_mode.Adjustment.Parse_error.t
+  | Bad_effect_adjustment of Effect.Adjustment.Parse.Error.t
 
 exception Error of Location.t * Env.t * error
 

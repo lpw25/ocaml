@@ -102,13 +102,6 @@ val has_local: Parsetree.attributes -> (bool,unit) result
 val tailcall : Parsetree.attributes -> ([`Tail|`Nontail] option, [`Conflict]) result
 val has_include_functor : Parsetree.attributes -> (bool,unit) result
 
-type effect_context =
-  (string Location.loc * Parsetree.core_type option) list
-
-val get_effect_context :
-  Parsetree.attributes
-  -> (effect_context option, [`Disabled | `Payload]) result
-
 val has_effect : Parsetree.attributes -> bool
 val effect_name_of_payload :
   Parsetree.payload -> (string, [`Disabled | `Payload]) result
@@ -124,18 +117,31 @@ val effect_renaming_of_payload :
       [`Disabled | `Payload])
        result
 
-type inner_adjustment_item =
+type effect_binding =
+  | Unused
+  | Handled of Parsetree.core_type
+  | Unknown
+
+type effect_context =
+  (string Location.loc * effect_binding) list
+
+type effect_outer =
   | Rename of string Location.loc
-  | Bind of Parsetree.core_type option
+  | Unknown
+
+type effect_mapping =
+  | Rename of string Location.loc
+  | Bind of effect_binding
 
 type effect_adjustment =
-  { outer : (string Location.loc * string Location.loc option) list;
-    inner : (string Location.loc * inner_adjustment_item) list;
+  { outer : (string Location.loc * effect_outer) list;
+    inner : (string Location.loc * effect_mapping) list;
     loc : Location.t }
 
-type effects =
-  | Adjustment of effect_adjustment
-  | Context of effect_context
+type effect_mode =
+  | Absolute of effect_context
+  | Relative of effect_adjustment
+  | Unused
 
-val get_effects :
-  Parsetree.attributes -> (effects option, [`Disabled | `Payload]) result
+val get_effect_mode :
+  Parsetree.attributes -> (effect_mode option, [`Disabled | `Payload]) result

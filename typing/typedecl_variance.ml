@@ -118,7 +118,7 @@ let compute_variance env visited vari ty =
         compute_same row.row_more
     | Tpoly (ty, _, eff) ->
         compute_same ty;
-        Btype.iter_effect_modality compute_same eff
+        Btype.iter_effect_mode_option compute_same eff
     | Tvar _ | Tnil | Tlink _ | Tunivar _ -> ()
     | Tpackage (_, _, tyl) ->
         let v =
