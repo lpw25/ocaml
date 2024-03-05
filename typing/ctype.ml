@@ -1379,6 +1379,17 @@ let instance_scheme ?partial sch eff_bound eff_mod =
       let eff = Effect.Upper_bound.compose_right eff_bound eff_mod in
       sch, eff)
 
+let instance_scheme_inferred sch eff_bound eff_mod =
+  For_copy.with_scope
+    (fun scope ->
+      let sch = copy scope sch in
+      let eff_bound =
+        copy_inferred_effect_upper_bound (copy scope) eff_bound
+      in
+      let eff_mod = copy_effect_mode (copy scope) eff_mod in
+      let eff = Effect.Inferred_upper_bound.compose_right eff_bound eff_mod in
+      sch, eff)
+
 let instance_value_scheme sch eff =
   For_copy.with_scope
     (fun scope ->
@@ -3143,29 +3154,29 @@ and unify_poly_desc env mode t1 var1 eff1 t2 var2 eff2 =
   match var1, var2 with
   | [], [] ->
       unify env t1 t2;
-      unify_effect_mode_option env mode eff1 eff2
+      unify_effect_mode_option false env mode eff1 eff2
   | _, _ ->
       enter_poly !env univar_pairs t1 var1 eff1 t2 var2 eff2
         (fun t1 eff1 t2 eff2 ->
           unify env t1 t2;
-          unify_effect_mode_option env mode eff1 eff2)
+          unify_effect_mode_option false env mode eff1 eff2)
 
 and unify_list env tl1 tl2 =
   if List.length tl1 <> List.length tl2 then
     raise (Unify []);
   List.iter2 (unify env) tl1 tl2
 
-and unify_effect_mode_option env mode eff1 eff2 =
+and unify_effect_mode_option diff env mode eff1 eff2 =
   match eff1, eff2 with
   | None, None -> ()
   | None, Some eff2 ->
-      unify_effect_mode env (Effect.Mode.unadjusted mode) eff2
+      unify_effect_mode diff env (Effect.Mode.unadjusted mode) eff2
   | Some eff1, None ->
-      unify_effect_mode env eff1 (Effect.Mode.unadjusted mode)
+      unify_effect_mode diff env eff1 (Effect.Mode.unadjusted mode)
   | Some eff1, Some eff2 ->
-      unify_effect_mode env eff1 eff2
+      unify_effect_mode diff env eff1 eff2
 
-and unify_effect_mode env eff1 eff2 =
+and unify_effect_mode diff env eff1 eff2 =
   match
     Effect.Mode.equal
       ~type_equal:(fun () n idx ty1 ty2 ->
@@ -3177,6 +3188,10 @@ and unify_effect_mode env eff1 eff2 =
       () eff1 eff2
   with
   | Ok () -> ()
+  | exception Unify trace when diff ->
+      let eff1 = Effect.Upper_bound.mode eff1 in
+      let eff2 = Effect.Lower_bound.mode eff2 in
+      raise (Unify (Trace.effect_diff eff1 eff2 :: trace))
   | Error err ->
       raise (Unify Trace.[Eff (Not_equal_effects err)])
 
@@ -3516,12 +3531,16 @@ let unify_pairs env ty1 ty2 pairs =
 let unify env ty1 ty2 =
   unify_pairs (ref env) ty1 ty2 []
 
-let meet_effect_modes eff1 eff2 =
-  Effect.Upper_bound.meet
-    ~join_local:(fun lcl1 lcl2 ->
-      Btype.Alloc_mode.join [lcl1; lcl2])
-    ~top_local:Btype.Alloc_mode.local
-    eff1 eff2
+let unify_effect_mode_option env eff1 eff2 =
+  univar_pairs := [];
+  let snap = Btype.snapshot () in
+  let env = ref env in
+  try
+    unify_effect_mode_option true env Alloc_mode.global eff1 eff2
+  with
+    Unify trace ->
+      undo_compress snap;
+      raise (Unify (expand_trace !env trace))
 
 let greater_than_effect_mode env eff1 eff2 =
   univar_pairs := [];
@@ -3534,12 +3553,45 @@ let greater_than_effect_mode env eff1 eff2 =
       undo_compress snap;
       raise (Unify (expand_trace !env trace))
 
+let meet_effect_modes eff1 eff2 =
+  Effect.Upper_bound.meet
+    ~join_local:(fun lcl1 lcl2 ->
+      Btype.Alloc_mode.join [lcl1; lcl2])
+    ~top_local:Btype.Alloc_mode.local
+    eff1 eff2
+
 let usable_absolute_effect_mode _env eff =
   match
     Effect.Upper_bound.usable_absolute eff
   with
   | Ok eff -> eff
   | Error _ -> failwith "Not implemented"
+
+let enforce_current_level_effect env eff =
+  Effect.Upper_bound.filter_types
+    (fun ty ->
+      let snap = snapshot () in
+      match
+        unify_var env (newvar ()) ty
+      with
+      | () -> true
+      | exception Unify _ ->
+          backtrack snap;
+          false)
+    eff
+
+let enforce_current_level_inferred_effect env eff =
+  Effect.Inferred_upper_bound.filter_types
+    (fun ty ->
+      let snap = snapshot () in
+      match
+        unify_var env (newvar ()) ty
+      with
+      | () -> true
+      | exception Unify _ ->
+          backtrack snap;
+          false)
+    eff
 
 (**** Special cases of unification ****)
 

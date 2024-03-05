@@ -73,6 +73,9 @@ and effect_lower_bound = (type_expr, alloc_mode) Effect.Lower_bound.t
 
 and effect_upper_bound = (type_expr, alloc_mode) Effect.Upper_bound.t
 
+and inferred_effect_upper_bound =
+  (type_expr, alloc_mode) Effect.Inferred_upper_bound.t
+
 and effect_factor = (type_expr, alloc_mode) Effect.Factor.t
 
 and effect_env = (type_expr, alloc_mode) Effect.Env.t

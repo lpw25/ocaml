@@ -676,6 +676,11 @@ and Upper_bound : sig
   val usable_absolute :
     ('ty, 'lcl) t -> (('ty, 'lcl) Mode.t, Usable_absolute.Error.t) result
 
+  val filter_types : ('ty -> bool) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** [filter_types f t] is the largest upper bound less than [t] which
+      does not contain any types for which [f] returns [false]. This
+      assumes that the ordering on types is the discrete ordering. *)
+
   val zap_to_mode : ('ty, 'lcl) t -> ('ty, 'lcl) t
   (** Try to make the upper bound equivalent to a single mode to improve
       printing.  This may force types to be equal or localities to be
@@ -716,5 +721,63 @@ and Env : sig
   val empty : ('ty, 'lcl) t
 
   val extend : ('ty, 'lcl) t -> ('ty, 'lcl) Factor.t -> ('ty, 'lcl) t
+
+end
+
+module Inferred_upper_bound : sig
+
+  type ('ty, 'lcl) t
+  (** Due to the weird order we type let definitions, we sometimes need
+      to construct an upper bound based off of a lower bound variable
+      that has not yet been constrained. This type represents such an
+      upper bound and supports the subset of upper bound operations
+      needed for them. *)
+  
+  val var : ('ty, 'lcl) Lower_bound.Var.t -> ('ty, 'lcl) t
+  (** [var t] represents the upper bound that will be produced by [t]
+      when it is eventually consumed. *)
+
+  val known : ('ty, 'lcl) Upper_bound.t -> ('ty, 'lcl) t
+  (** [known t] represents the upper bound [t] directly. *)
+
+  val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+  (** [mode t] is [known (Upper_bound.mode t]. *)
+
+  val global : ('ty, 'lcl) t
+  (** [global] is [mode Mode.global]. *)
+
+  val unused : ('ty, 'lcl) t
+  (** [unused] is [mode Mode.unused]. *)
+
+  val top : ('ty, 'lcl) t
+  (** [top] is the top of the lattice, which is [global]. *)
+
+  val bottom : ('ty, 'lcl) t
+  (** [bottom] is the bottom of the lattice, which is [unused]. *)
+
+  val compose_right : ('ty, 'lcl) t -> ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+  (** [compose_right t m] lifts {!Upper_bound.compose_right} to inferred
+      upper bounds. *)
+
+  val meet : ('ty, 'lcl) t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** [meet t t] lifts {!Upper_bound.mee} to inferred upper bounds. *)
+
+  val filter_types : ('ty -> bool) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** [filter_types f t] lifts {!Upper_bound.filter_types} to inferred
+      upper bounds. *)
+
+  val consume :
+    join_local:('lcl -> 'lcl -> 'lcl)
+    -> top_local:'lcl
+    -> ('ty, 'lcl) t
+    -> ('ty, 'lcl) Upper_bound.t
+  (** [consume ~join_local ~top_local t] calls {!Lower_bound.Var.consume} on
+      any underlying variables and calculates the resulting concrete upper
+      bound, using [join_local] and [top_local] to calculate any meets. *)
+
+
+  val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
+
+  val copy_types : ('ty -> 'ty) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
 
 end

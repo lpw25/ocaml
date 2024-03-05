@@ -129,6 +129,8 @@ val fold_effect_mode_option:
 val iter_effect_upper_bound: (type_expr -> unit) -> effect_upper_bound -> unit
 val fold_effect_upper_bound:
   ('a -> type_expr -> 'a) -> 'a -> effect_upper_bound -> 'a
+val iter_inferred_effect_upper_bound:
+  (type_expr -> unit) -> inferred_effect_upper_bound -> unit
 val iter_effect_lower_bound: (type_expr -> unit) -> effect_lower_bound -> unit
 val fold_effect_lower_bound:
   ('a -> type_expr -> 'a) -> 'a -> effect_lower_bound -> 'a
@@ -170,6 +172,9 @@ val copy_effect_mode_option:
   (type_expr -> type_expr) -> effect_mode option -> effect_mode option
 val copy_effect_upper_bound:
   (type_expr -> type_expr) -> effect_upper_bound -> effect_upper_bound
+val copy_inferred_effect_upper_bound:
+  (type_expr -> type_expr) ->
+  inferred_effect_upper_bound -> inferred_effect_upper_bound
 
 
 module For_copy : sig

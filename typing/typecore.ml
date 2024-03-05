@@ -75,7 +75,7 @@ type error =
   | Constructor_arity_mismatch of Longident.t * int * int
   | Label_mismatch of Longident.t * Ctype.Unification_trace.t
   | Pattern_type_clash :
-      Ctype.Unification_trace.t * _ pattern_desc option -> error
+      Ctype.Unification_trace.t * Asttypes.constant option -> error
   | Or_pattern_type_clash of Ident.t * Ctype.Unification_trace.t
   | Multiply_bound_variable of string
   | Orpat_vars of Ident.t * Ident.t list
@@ -404,13 +404,14 @@ let eqmode ~loc ~env m1 m2 err =
 
 type expected_pat_mode =
   { mode : Value_mode.t;
-    tuple_modes : Value_mode.t list; }
+    effect_mode : inferred_effect_upper_bound;
+    tuple_modes : (Value_mode.t * inferred_effect_upper_bound) list; }
 
-let simple_pat_mode mode =
-  { mode; tuple_modes = [] }
+let simple_pat_mode mode effect_mode =
+  { mode; effect_mode; tuple_modes = [] }
 
-let tuple_pat_mode mode tuple_modes =
-  { mode; tuple_modes }
+let tuple_pat_mode mode effect_mode tuple_modes =
+  { mode; effect_mode; tuple_modes }
 
 let allocations : Alloc_mode.t list ref = Local_store.s_ref []
 
@@ -478,123 +479,26 @@ let constant_or_raise env loc cst =
   | Ok c -> c
   | Error err -> raise (Error (loc, env, err))
 
-let type_renaming env outer inner =
-  let vars = String.Tbl.create 3 in
-  let vars_unused = String.Tbl.create 3 in
-  let _, rev_outer, rev_touter =
-    List.fold_left
-      (fun (idx, outer, touter) (name, var_opt) ->
-         let binding =
-           match var_opt with
-           | None -> None
-           | Some v ->
-               if String.Tbl.mem vars v.txt then
-                 raise (Error (v.loc, env, Multiply_bound_variable name));
-               String.Tbl.add vars v.txt idx;
-               String.Tbl.add vars_unused v.txt v.loc;
-               Some v
-         in
-         let idx = idx + 1 in
-         let outer = name :: outer in
-         let item = { outer_label = name; outer_binding = binding; } in
-         let touter = item :: touter in
-         (idx, outer, touter))
-      (0, [], []) outer
-  in
-  let outer = List.rev rev_outer in
-  let touter = List.rev rev_touter in
-  let rev_inner, rev_tinner =
-    List.fold_left
-      (fun (inner, tinner) (name, var) ->
-        let idx =
-          match String.Tbl.find vars var.txt with
-          | exception Not_found ->
-              raise (Error (var.loc, env, Unmatched_effect_renaming_binding))
-          | idx -> idx
-        in
-        String.Tbl.remove vars_unused var.txt;
-        let inner = (name, idx) :: inner in
-        let item = {inner_label = name; inner_var = var; inner_index = idx} in
-        let tinner = item :: tinner in
-        inner, tinner
-        )
-      ([], []) inner
-  in
-  let inner = List.rev rev_inner in
-  let tinner = List.rev rev_tinner in
-  String.Tbl.iter
-    (fun _ loc -> raise (Error (loc, env, Unused_effect_renaming_binding)))
-    vars_unused;
-  let outer_counts = Int.Tbl.create 3 in
-  let outer_mapping =
-    List.map
-      (fun item ->
-         let name = item.outer_label in
-         let tag = Btype.hash_variant name in
-         let prev =
-           match Int.Tbl.find_opt outer_counts tag with
-           | None -> 0
-           | Some i -> i
-         in
-         Int.Tbl.replace outer_counts tag (prev + 1);
-         tag, prev)
-      outer
-  in
-  let outer_mapping = Array.of_list outer_mapping in
-  let actions =
-    List.fold_left
-      (fun actions item ->
-        let name = item.inner_label in
-        let idx = item.inner_index in
-        let tag = Btype.hash_variant name in
-        let action = outer_mapping.(idx) in
-        Int.Map.update tag
-          (function
-           | None ->
-               let count =
-                 match Int.Tbl.find_opt outer_counts tag with
-                 | Some count ->
-                     Int.Tbl.remove outer_counts tag;
-                     count
-                 | None ->
-                     0
-               in
-               Some ([action], count)
-           | Some (actions, count) -> Some (action :: actions, count))
-          actions)
-      Int.Map.empty inner
-  in
-  let actions =
-    Int.Tbl.fold
-      (fun tag count actions -> Int.Map.add tag ([], count) actions)
-      outer_counts actions
-  in
-  { ea_inner = tinner;
-    ea_outer = touter;
-    ea_actions = actions;
-    ea_type = renaming; }
-
 (* Specific version of type_option, using newty rather than newgenty *)
 
 let type_option ty =
   newty (Tconstr(Predef.path_option,[ty], ref Mnil))
 
-let mkexp exp_desc exp_type exp_mode exp_eff exp_loc exp_env =
-  { exp_desc; exp_type; exp_mode; exp_eff;
+let mkexp exp_desc exp_type exp_mode exp_loc exp_env =
+  { exp_desc; exp_type; exp_mode;
     exp_loc; exp_env; exp_extra = []; exp_attributes = [] }
 
 let option_none env ty mode loc =
   let lid = Longident.Lident "None" in
   let cnone = Env.find_ident_constructor Predef.ident_none env in
-  mkexp (Texp_construct(mknoloc lid, cnone, [])) ty mode no_effect loc env
+  mkexp (Texp_construct(mknoloc lid, cnone, [])) ty mode loc env
 
 let option_some env texp mode =
   register_allocation_value_mode mode;
   let lid = Longident.Lident "Some" in
   let csome = Env.find_ident_constructor Predef.ident_some env in
   mkexp ( Texp_construct(mknoloc lid , csome, [texp]) )
-    (type_option texp.exp_type) mode texp.exp_eff
-    texp.exp_loc texp.exp_env
+    (type_option texp.exp_type) mode texp.exp_loc texp.exp_env
 
 let extract_option_type env ty =
   match expand_head env ty with {desc = Tconstr(path, [ty], _)}
@@ -664,7 +568,8 @@ let get_gadt_equations_level () =
 let nothing_equated = TypePairs.create 0
 
 (* unification inside type_pat*)
-let unify_pat_types_return_equated_pairs ?(refine = None) loc env ty ty' =
+let unify_pat_types_return_equated_pairs
+      ?(refine = None) ?constant loc env ty ty' =
   try
     match refine with
     | Some allow_recursive ->
@@ -675,17 +580,16 @@ let unify_pat_types_return_equated_pairs ?(refine = None) loc env ty ty' =
         nothing_equated
   with
   | Unify trace ->
-      raise(Error(loc, !env, Pattern_type_clash(trace, None)))
+      raise(Error(loc, !env, Pattern_type_clash(trace, constant)))
   | Tags(l1,l2) ->
       raise(Typetexp.Error(loc, !env, Typetexp.Variant_tags (l1, l2)))
 
-let unify_pat_types ?refine loc env ty ty' =
-  ignore (unify_pat_types_return_equated_pairs ?refine loc env ty ty')
+let unify_pat_types ?refine ?constant loc env ty ty' =
+  ignore (unify_pat_types_return_equated_pairs
+            ?refine ?constant loc env ty ty')
 
 let unify_pat ?refine env pat expected_ty =
-  try unify_pat_types ?refine pat.pat_loc env pat.pat_type expected_ty
-  with Error (loc, env, Pattern_type_clash(trace, None)) ->
-    raise(Error(loc, env, Pattern_type_clash(trace, Some pat.pat_desc)))
+  unify_pat_types ?refine pat.pat_loc env pat.pat_type expected_ty
 
 (* Creating new conjunctive types is not allowed when typing patterns *)
 (* make all Reither present in open variants *)
@@ -727,151 +631,13 @@ let finalize_variants p =
         finalize_variant p tag opat r
      | _ -> () } p
 
-type effect_context_unknown_state =
-  | Unfilled of Alloc_mode.t list
-  | Filled of effect_context
-
-type effect_context_var =
-  | Known of effect_context
-  | Unknown of { mutable state : effect_context_unknown_state }
-
-let complete_effect_context_var
-      loc env eff (v : effect_context_var) =
-  match v with
-  | Known veff ->
-      subeffect_effs loc env false eff veff
-  | Unknown { state = Filled _ } -> assert false
-  | Unknown ({ state = Unfilled modes } as r) ->
-      List.iter (fun mode -> submode_effect_context loc env eff mode) modes;
-      r.state <- Filled eff
-
-type effect_context_pat =
-  | Single of effect_context_var
-  | Tuple of effect_context_var list * effect_context_var
-
-let empty_effect_context_pat : effect_context_pat =
-  Single (Known empty_effect_context)
-
-let complete_effect_context_pat loc env eeff peff =
-  match peff with
-  | Single v ->
-      let delayed =
-        effect_context_of_delayed_effect_context eeff.delayed
-      in
-      complete_effect_context_var loc env delayed v
-  | Tuple(vs, v) ->
-      match eeff.delayed with
-      | Tuple(eeffs, eeff) when List.compare_lengths vs eeffs = 0 ->
-          List.iter2 (complete_effect_context_var loc env) eeffs vs;
-          complete_effect_context_var loc env eeff v
-      | Tuple(_, eeff) | Single eeff ->
-          List.iter (complete_effect_context_var loc env eeff) vs;
-          complete_effect_context_var loc env eeff v
-
-let effect_context_pat_of_delayed (eff : delayed_effect_context) =
-  match eff with
-  | Single eff -> Single (Known eff)
-  | Tuple(effs, eff) ->
-      let effs = List.map (fun x -> Known x) effs in
-      let eff = Known eff in
-      Tuple(effs, eff)
-
-type pv_effect_context =
-  | Simple of effect_context_var
-  | Join of
-      Ident.t * Location.t * Env.t
-      * pv_effect_context * pv_effect_context
-
-let empty_pv_effect_context : pv_effect_context =
-  Simple (Known empty_effect_context)
-
-let join_pv_effect_context x loc env eff1 eff2 =
-  match eff1, eff2 with
-  | Simple (Known eff1), Simple (Known eff2) -> begin
-      match Ctype.join_effect_contexts env eff1 eff2 with
-      | exception Unify trace ->
-          raise(Error(loc, env, Or_pattern_type_clash(x, trace)))
-      | eff -> Simple (Known eff)
-    end
-  | (Simple (Unknown _) | Join _) , _ | _, (Simple (Unknown _) | Join _) ->
-      Join(x, loc, env, eff1, eff2)
-
-let lower_pv_effect_context env eff =
-  let rec loop = function
-    | Simple (Known eff) -> Ctype.lower_effect_context env eff
-    | Simple (Unknown _) -> ()
-    | Join(_, _, _, eff1, eff2) ->
-        loop eff1;
-        loop eff2
-  in
-  loop eff
-
-let instance_pattern_scheme_var ty (eff : effect_context_var)
-    : _ * effect_context_var =
-  match eff with
-  | Known eff ->
-      let ty, eff = instance_scheme ty eff in
-      ty, Known eff
-  | Unknown _ ->
-      instance ty, eff
-
-let instance_pattern_scheme
-          ty (eff : effect_context_pat) : _ * effect_context_var =
-  match eff with
-  | Single v -> instance_pattern_scheme_var ty v
-  | Tuple(_, v) -> instance_pattern_scheme_var ty v
-
-let generalize_effect_context_var_structure (v : effect_context_var) =
-  match v with
-  | Known eff | Unknown { state = Filled eff } ->
-      generalize_effect_context_structure eff
-  | Unknown { state = Unfilled _} -> ()
-
-let rec generalize_pv_effect_context_structure
-          (eff : pv_effect_context) =
-  match eff with
-  | Simple v -> generalize_effect_context_var_structure v
-  | Join(_, _, _, eff1, eff2) ->
-      generalize_pv_effect_context_structure eff1;
-      generalize_pv_effect_context_structure eff2
-
-let generalize_pv_scheme_structure ty eff =
-  generalize_structure ty;
-  generalize_pv_effect_context_structure eff
-
-let generalize_effect_context_var (v : effect_context_var) =
-  match v with
-  | Known eff | Unknown { state = Filled eff } ->
-      generalize_effect_context eff
-  | Unknown { state = Unfilled _} -> ()
-
-let rec generalize_pv_effect_context (eff : pv_effect_context) =
-  match eff with
-  | Simple v -> generalize_effect_context_var v
-  | Join(_, _, _, eff1, eff2) ->
-      generalize_pv_effect_context eff1;
-      generalize_pv_effect_context eff2
-
-let generalize_pv_scheme ty (eff : pv_effect_context) =
-  generalize ty;
-  generalize_pv_effect_context eff
-
-let instance_pv_scheme
-          ty (eff : pv_effect_context) : _ * pv_effect_context =
-  match eff with
-  | Simple v ->
-      let ty, v = instance_pattern_scheme_var ty v in
-      ty, Simple v
-  | Join _ ->
-      instance ty, eff
-
 (* pattern environment *)
 type pattern_variable =
   {
     pv_id: Ident.t;
     pv_mode: Value_mode.t;
     pv_type: type_expr;
-    pv_eff: pv_effect_context;
+    pv_eff: inferred_effect_upper_bound;
     pv_loc: Location.t;
     pv_as_var: bool;
     pv_uid: Uid.t;
@@ -953,13 +719,15 @@ let enter_orpat_variables loc env  p1_vs p2_vs =
           else begin
             let () =
               try
-                unify_var env (newvar ()) t1;             
+                unify_var env (newvar ()) t1;
                 unify env t1 t2;
               with
               | Unify trace ->
                   raise(Error(loc, env, Or_pattern_type_clash(x1, trace)))
             in
-            let eff = join_pv_effect_context x1 loc env eff1 eff2 in
+            let eff1 = enforce_current_level_inferred_effect env eff1 in
+            let eff2 = enforce_current_level_inferred_effect env eff2 in
+            let eff = Effect.Inferred_upper_bound.meet eff1 eff2 in            
             let m = Value_mode.join [m1; m2] in
             let var = { pv1 with pv_mode = m; pv_eff = eff } in
             let vars, alist = unify_vars rem1 rem2 in
@@ -976,8 +744,8 @@ let enter_orpat_variables loc env  p1_vs p2_vs =
           raise (Error (loc, env, err)) in
   unify_vars p1_vs p2_vs
 
-let rec build_as_type_and_mode env p =
-  let as_ty, as_mode = build_as_type_aux env p in
+let rec build_as_type env p =
+  let as_ty, as_mode, as_eff = build_as_type_aux env p in
   let as_ty =
     (* Cf. #1655 *)
     List.fold_left (fun as_ty (extra, _loc, _attrs) ->
@@ -993,17 +761,23 @@ let rec build_as_type_and_mode env p =
         ty
     ) as_ty p.pat_extra
   in
-  as_ty, as_mode
+  as_ty, as_mode, as_eff
 
-and build_as_type env p =
-  fst (build_as_type_and_mode env p)
+and build_as_type_list env pl =
+  List.fold_right
+    (fun p (tyl, eff) ->
+      let pty, _, peff = build_as_type env p in
+      let tyl = pty :: tyl in
+      let eff = Effect.Inferred_upper_bound.meet peff eff in
+      tyl, eff)
+    pl ([], Effect.Inferred_upper_bound.top)
 
 and build_as_type_aux env p =
   match p.pat_desc with
-    Tpat_alias(p1,_, _) -> build_as_type_and_mode env p1
+    Tpat_alias(p1,_, _) -> build_as_type env p1
   | Tpat_tuple pl ->
-      let tyl = List.map (build_as_type env) pl in
-      newty (Ttuple tyl), p.pat_mode
+      let tyl, eff = build_as_type_list env pl in
+      newty (Ttuple tyl), p.pat_mode, eff
   | Tpat_construct(_, cstr, pl) ->
       let priv = (cstr.cstr_private = Private) in
       let mode =
@@ -1011,56 +785,69 @@ and build_as_type_aux env p =
         else Value_mode.newvar ()
       in
       let keep = priv || cstr.cstr_existentials <> [] in
-      let ty =
-        if keep then p.pat_type else
-        let tyl = List.map (build_as_type env) pl in
+      let ty, eff =
+        if keep then p.pat_type, p.pat_eff else
+        let tyl, eff = build_as_type_list env pl in
         let ty_args, ty_res = instance_constructor cstr in
         iter3 (fun p ty ty_arg -> unify_pat env {p with pat_type = ty} ty_arg)
           pl tyl ty_args;
-        ty_res
+        ty_res, eff
       in
-      ty, mode
+      ty, mode, eff
   | Tpat_variant(l, p', _) ->
-      let ty = Option.map (build_as_type env) p' in
-      let mode =
-        if p' = None then Value_mode.newvar ()
-        else p.pat_mode
+      let ty, mode, eff = 
+        match p' with
+        | None ->
+            let mode = Value_mode.newvar () in
+            let eff = Effect.Inferred_upper_bound.top in
+            None, mode, eff
+        | Some p ->
+            let ty, _, eff = build_as_type env p in
+            Some ty, p.pat_mode, eff
       in
       let ty =
         newty (Tvariant{row_fields=[l, Rpresent ty]; row_more=newvar();
                         row_bound=(); row_name=None;
                         row_fixed=None; row_closed=false})
       in
-      ty, mode
+      ty, mode, eff
   | Tpat_record (lpl,_) ->
       let lbl = snd3 (List.hd lpl) in
-      if lbl.lbl_private = Private then p.pat_type, p.pat_mode else
+      if lbl.lbl_private = Private then p.pat_type, p.pat_mode, p.pat_eff else
       let ty = newvar () in
       let ppl = List.map (fun (_, l, p) -> l.lbl_pos, p) lpl in
-      let do_label lbl =
-        let _, ty_arg, ty_res, eff = instance_label false lbl in
+      let do_label as_eff lbl =
+        let _, ty_arg, ty_res, eff_lbl = instance_label false lbl in
         unify_pat env {p with pat_type = ty} ty_res;
         let refinable =
           lbl.lbl_mut = Immutable && List.mem_assoc lbl.lbl_pos ppl &&
           match (repr lbl.lbl_arg).desc with Tpoly _ -> false | _ -> true in
         if refinable then begin
           let arg = List.assoc lbl.lbl_pos ppl in
-          unify_pat env {arg with pat_type = build_as_type env arg} ty_arg
+          let as_ty_arg, _, as_eff_arg = build_as_type env arg in
+          unify_pat env {arg with pat_type = as_ty_arg} ty_arg;
+          Effect.Inferred_upper_bound.meet as_eff as_eff_arg
         end else begin
-          let _, ty_arg', ty_res', eff' = instance_label false lbl in
+          let _, ty_arg', ty_res', eff_lbl' = instance_label false lbl in
           unify !env ty_arg ty_arg';
-          unify_effect_context_option !env eff eff';
-          unify_pat env p ty_res'
-        end in
-      Array.iter do_label lbl.lbl_all;
-      ty, p.pat_mode
+          unify_effect_mode_option !env eff_lbl eff_lbl';
+          unify_pat env p ty_res';
+          as_eff
+        end
+      in
+      let eff =
+        Array.fold_left do_label Effect.Inferred_upper_bound.top lbl.lbl_all
+      in
+      ty, p.pat_mode, eff
   | Tpat_or(p1, p2, row) ->
       begin match row with
         None ->
-          let ty1, mode1 = build_as_type_and_mode env p1 in
-          let ty2, mode2 = build_as_type_and_mode env p2 in
+          let ty1, mode1, eff1 = build_as_type env p1 in
+          let ty2, mode2, eff2 = build_as_type env p2 in
           unify_pat env {p2 with pat_type = ty2} ty1;
-          ty1, Value_mode.join [mode1; mode2]
+          let mode = Value_mode.join [mode1; mode2] in
+          let eff = Effect.Inferred_upper_bound.meet eff1 eff2 in
+          ty1, mode, eff
       | Some row ->
           let row = row_repr row in
           let all_constant =
@@ -1077,18 +864,20 @@ and build_as_type_aux env p =
           let ty =
             newty (Tvariant{row with row_closed=false; row_more=newvar()})
           in
-          ty, mode
+          ty, mode, p.pat_eff
       end
   | Tpat_constant _ ->
       let mode =
         if Ctype.maybe_pointer_type !env p.pat_type then p.pat_mode
         else Value_mode.newvar ()
       in
-      p.pat_type, mode
+      let eff = Effect.Inferred_upper_bound.top in
+      p.pat_type, mode, eff
   | Tpat_any | Tpat_var _
-  | Tpat_array _ | Tpat_lazy _ | Tpat_operation _ -> p.pat_type, p.pat_mode
+  | Tpat_array _ | Tpat_lazy _ | Tpat_operation _ ->
+      p.pat_type, p.pat_mode, p.pat_eff
 
-let build_or_pat env loc mode lid =
+let build_or_pat env loc mode eff lid =
   let path, decl = Env.lookup_type ~loc:lid.loc lid.txt env in
   let tyl = List.map (fun _ -> newvar()) decl.type_params in
   let row0 =
@@ -1106,7 +895,7 @@ let build_or_pat env loc mode lid =
             (l, Reither(true,[], true, ref None)) :: fields
         | Rpresent (Some ty) ->
             (l, Some {pat_desc=Tpat_any; pat_loc=Location.none; pat_env=env;
-                      pat_type=ty; pat_mode=mode;
+                      pat_type=ty; pat_mode=mode; pat_eff=eff;
                       pat_extra=[]; pat_attributes=[]})
             :: pats,
             (l, Reither(false, [ty], true, ref None)) :: fields
@@ -1123,7 +912,7 @@ let build_or_pat env loc mode lid =
     List.map
       (fun (l,p) ->
         {pat_desc=Tpat_variant(l,p,row'); pat_loc=gloc;
-         pat_env=env; pat_type=ty; pat_mode=mode;
+         pat_env=env; pat_type=ty; pat_mode=mode; pat_eff=eff;
          pat_extra=[]; pat_attributes=[]})
       pats
   in
@@ -1138,7 +927,7 @@ let build_or_pat env loc mode lid =
           (fun pat pat0 ->
             {pat_desc=Tpat_or(pat0,pat,Some row0); pat_extra=[];
              pat_loc=gloc; pat_env=env; pat_type=ty; pat_mode=mode;
-             pat_attributes=[]})
+             pat_eff=eff; pat_attributes=[]})
           pat pats in
       (path, rp { r with pat_loc = loc },ty)
 
@@ -1179,7 +968,7 @@ let type_for_loop_index ~loc ~env ~param ty =
   | Ppat_var {txt} ->
       Env.enter_value txt
         {val_type = instance ty;
-          val_eff = empty_effect_context;
+          val_eff = Effect.Mode.global;
           val_attributes = [];
           val_kind = Val_reg;
           val_loc = loc;
@@ -1682,24 +1471,6 @@ let check_scope_escape loc env level ty =
   with Unify trace ->
     raise(Error(loc, env, Pattern_type_clash(trace, None)))
 
-let check_scope_escape_pv_effect_context loc env level eff =
-  let rec loop eff =
-    match eff with
-    | Simple (Unknown _) -> ()
-    | Simple (Known eff) ->
-        List.iter
-          (fun (_, tyo) ->
-            Option.iter (Ctype.check_scope_escape env level) tyo)
-          eff.effects
-    | Join(_, _, _, eff1, eff2) ->
-        loop eff1;
-        loop eff2
-  in
-  try
-    loop eff
-  with Unify trace ->
-    raise(Error(loc, env, Pattern_type_clash(trace, None)))
-
 type pattern_checking_mode =
   | Normal
   (** We are checking user code. *)
@@ -1929,6 +1700,10 @@ let as_comp_pattern
   | Value -> as_computation_pattern pat
   | Computation -> pat
 
+let instance_scheme_pat expected_ty alloc_mode =
+  instance_scheme_inferred expected_ty
+    alloc_mode.effect_mode Effect.Mode.identity      
+
 (* type_pat propagates the expected type.
    Unification may update the typing environment.
 
@@ -1936,34 +1711,30 @@ let as_comp_pattern
    does not match any value.  *)
 let rec type_pat
   : type k r . k pattern_category -> no_existentials:_ -> mode:_ ->
-      alloc_mode:_ -> eff:_ -> handlers:_ ->
+      alloc_mode:_ -> handlers:_ ->
       env:_ -> _ -> _ -> (k general_pattern -> r) -> r
-  = fun category ~no_existentials ~mode ~alloc_mode ~eff
+  = fun category ~no_existentials ~mode ~alloc_mode
         ~handlers ~env sp expected_ty k ->
   Builtin_attributes.warning_scope sp.ppat_attributes
     (fun () ->
        type_pat_aux category ~no_existentials ~mode
-         ~alloc_mode ~eff ~handlers ~env sp expected_ty k
+         ~alloc_mode ~handlers ~env sp expected_ty k
     )
 
 and type_pat_aux
   : type k r . k pattern_category -> no_existentials:_ -> mode:_
-         -> alloc_mode:expected_pat_mode -> eff:effect_context_pat
+         -> alloc_mode:expected_pat_mode
          -> handlers:_ -> env:_ -> _ -> _
          -> (k general_pattern -> r) -> r
   = fun category ~no_existentials ~mode
-      ~alloc_mode ~eff ~handlers ~env sp expected_ty k ->
+      ~alloc_mode ~handlers ~env sp expected_ty k ->
   let type_pat category ?(mode=mode) ?(alloc_mode=alloc_mode)
-        ?(eff=eff) ?(handlers=handlers) ?(env=env) =
-    type_pat category ~no_existentials ~mode ~alloc_mode ~env ~eff ~handlers
+        ?(handlers=handlers) ?(env=env) =
+    type_pat category ~no_existentials ~mode ~alloc_mode ~env ~handlers
   in
   let loc = sp.ppat_loc in
   let refine =
     match mode with Normal -> None | Counter_example _ -> Some true in
-  let unif (x : pattern) : pattern =
-    unify_pat ~refine env x (instance expected_ty);
-    x
-  in
   let rp x =
     let crp (x : k general_pattern) : k general_pattern =
       match category with
@@ -1981,11 +1752,14 @@ and type_pat_aux
   in
   match sp.ppat_desc with
     Ppat_any ->
-      let k' d = rvp k {
+      let k' d =
+        let ty, eff = instance_scheme_pat expected_ty alloc_mode in
+        rvp k {
         pat_desc = d;
         pat_loc = loc; pat_extra=[];
-        pat_type = instance expected_ty;
+        pat_type = ty;
         pat_mode = alloc_mode.mode;
+        pat_eff = eff;
         pat_attributes = sp.ppat_attributes;
         pat_env = !env }
       in
@@ -2013,25 +1787,25 @@ and type_pat_aux
          end
       end
   | Ppat_var name ->
-      let ty, eff' = instance_pattern_scheme expected_ty eff in
-      let eff'' = Simple eff' in
+      let ty, eff = instance_scheme_pat expected_ty alloc_mode in
       let alloc_mode = alloc_mode in
       let id = (* PR#7330 *)
         if name.txt = "*extension*" then
           Ident.create_local name.txt
         else
-          enter_variable loc name alloc_mode.mode ty eff'' sp.ppat_attributes
+          enter_variable loc name alloc_mode.mode ty eff sp.ppat_attributes
       in
       rvp k {
         pat_desc = Tpat_var (id, name);
         pat_loc = loc; pat_extra=[];
         pat_type = ty;
         pat_mode = alloc_mode.mode;
+        pat_eff = eff;
         pat_attributes = sp.ppat_attributes;
         pat_env = !env }
   | Ppat_unpack name ->
       assert construction_not_used_in_counterexamples;
-      let t = instance expected_ty in
+      let t, eff = instance_scheme_pat expected_ty alloc_mode in
       begin match name.txt with
       | None ->
           rvp k {
@@ -2040,13 +1814,14 @@ and type_pat_aux
             pat_extra=[Tpat_unpack, name.loc, sp.ppat_attributes];
             pat_type = t;
             pat_mode = alloc_mode.mode;
+            pat_eff = eff;
             pat_attributes = [];
             pat_env = !env }
       | Some s ->
           let v = { name with txt = s } in
           let id =
             enter_variable loc v alloc_mode.mode
-              t ~is_module:true empty_pv_effect_context
+              t ~is_module:true Effect.Inferred_upper_bound.global
               sp.ppat_attributes
           in
           rvp k {
@@ -2054,37 +1829,40 @@ and type_pat_aux
             pat_loc = sp.ppat_loc;
             pat_extra=[Tpat_unpack, loc, sp.ppat_attributes];
             pat_mode = alloc_mode.mode;
+            pat_eff = eff;
             pat_type = t;
             pat_attributes = [];
             pat_env = !env }
       end
   | Ppat_alias(sq, name) ->
       assert construction_not_used_in_counterexamples;
-      let _, eff' = instance_pattern_scheme expected_ty eff in
-      let eff'' = Simple eff' in
       type_pat Value sq expected_ty (fun q ->
         begin_def ();
-        let ty_var, mode = build_as_type_and_mode env q in
+        let ty_var, mode, eff = build_as_type env q in
         end_def ();
         generalize ty_var;
         let id =
           enter_variable ~is_as_variable:true loc name mode
-            ty_var eff'' sp.ppat_attributes
+            ty_var eff sp.ppat_attributes
         in
         rvp k {
           pat_desc = Tpat_alias(q, id, name);
           pat_loc = loc; pat_extra=[];
           pat_type = q.pat_type;
           pat_mode = q.pat_mode;
+          pat_eff = q.pat_eff;
           pat_attributes = sp.ppat_attributes;
           pat_env = !env })
   | Ppat_constant cst ->
-      let cst = constant_or_raise !env loc cst in
-      rvp k @@ unif {
+      let constant = constant_or_raise !env loc cst in
+      let ty, eff = instance_scheme_pat expected_ty alloc_mode in
+      unify_pat_types ~refine ~constant env (type_constant cst) ty;
+      rvp k {
         pat_desc = Tpat_constant cst;
         pat_loc = loc; pat_extra=[];
-        pat_type = type_constant cst;
+        pat_type = ty;
         pat_mode = alloc_mode.mode;
+        pat_eff = eff;
         pat_attributes = sp.ppat_attributes;
         pat_env = !env }
   | Ppat_interval (Pconst_char c1, Pconst_char c2) ->
@@ -2465,15 +2243,11 @@ and type_pat_aux
         let p2_variables = !pattern_variables in
         (* Make sure no variable with an ambiguous type gets added to the
            environment. *)
-        List.iter (fun { pv_type; pv_eff; pv_loc; _ } ->
+        List.iter (fun { pv_type; pv_loc; _ } ->
           check_scope_escape pv_loc !env1 outter_lev pv_type;
-          check_scope_escape_pv_effect_context
-            pv_loc !env1 outter_lev pv_eff
         ) p1_variables;
-        List.iter (fun { pv_type; pv_eff; pv_loc; _ } ->
+        List.iter (fun { pv_type; pv_loc; _ } ->
           check_scope_escape pv_loc !env2 outter_lev pv_type;
-          check_scope_escape_pv_effect_context
-            pv_loc !env1 outter_lev pv_eff
         ) p2_variables;
         begin match p1, p2 with
         | Error Empty, Error Empty ->
@@ -2557,7 +2331,9 @@ and type_pat_aux
           { p with pat_type = ty; pat_extra = extra::p.pat_extra }
         in k p)
   | Ppat_type lid ->
-      let (path, p,ty) = build_or_pat !env loc alloc_mode.mode lid in
+      let (path, p,ty) =
+        build_or_pat !env loc alloc_mode.mode alloc_mode.effect_mode lid
+      in
       unify_pat_types ~refine loc env ty (instance expected_ty);
       k @@ pure category @@ { p with pat_extra =
         (Tpat_type (path, lid), loc, sp.ppat_attributes)
@@ -7508,9 +7284,9 @@ let report_expr_type_clash_hints exp diff =
   | _ -> []
 
 let report_pattern_type_clash_hints
-      (type k) (pat : k pattern_desc option) diff =
-  match pat with
-  | Some (Tpat_constant const) -> report_literal_type_constraint const diff
+      (type k) (const : constant option) diff =
+  match constant with
+  | Some const -> report_literal_type_constraint const diff
   | _ -> []
 
 let report_type_expected_explanation expl ppf =
@@ -7581,9 +7357,9 @@ let report_error ~loc env = function
                    longident lid)
         (function ppf ->
            fprintf ppf "but is mixed here with fields of type")
-  | Pattern_type_clash (trace, pat) ->
+  | Pattern_type_clash (trace, const) ->
       let diff = type_clash_of_trace trace in
-      let sub = report_pattern_type_clash_hints pat diff in
+      let sub = report_pattern_type_clash_hints const diff in
       Location.error_of_printer ~loc ~sub (fun ppf () ->
         Printtyp.report_unification_error ppf env trace
           (function ppf ->

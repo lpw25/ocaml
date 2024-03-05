@@ -326,6 +326,9 @@ let iter_effect_mode_option f = function
 let iter_effect_upper_bound f eff =
   Effect.Upper_bound.iter_types f eff
 
+let iter_inferred_effect_upper_bound f eff =
+  Effect.Inferred_upper_bound.iter_types f eff
+
 let iter_effect_lower_bound f eff =
   Effect.Lower_bound.iter_types f eff
 
@@ -540,6 +543,9 @@ let copy_effect_mode_option f = function
 
 let copy_effect_upper_bound f eff =
   Effect.Upper_bound.copy_types f eff
+
+let copy_inferred_effect_upper_bound f eff =
+  Effect.Inferred_upper_bound.copy_types f eff
 
 let rec copy_type_desc ?(keep_names=false) f = function
     Tvar _ as ty        -> if keep_names then ty else Tvar None

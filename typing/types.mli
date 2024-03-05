@@ -92,13 +92,13 @@ and type_desc =
       There are also special cases for so-called "class-types", cf. [Typeclass]
       and [Ctype.set_object_name]:
 
-        [Tobject (Tfield(_,_,...(Tfield(_,_,rv)...),
-                         Some(`A.#ct`, [rv;t1;...;tn])]
-             ==> [(t1, ..., tn) #A.ct]
-        [Tobject (_, Some(`A.#ct`, [Tnil;t1;...;tn])] ==> [(t1, ..., tn) A.ct]
+      [Tobject (Tfield(_,_,...(Tfield(_,_,rv)...),
+      Some(`A.#ct`, [rv;t1;...;tn])]
+      ==> [(t1, ..., tn) #A.ct]
+      [Tobject (_, Some(`A.#ct`, [Tnil;t1;...;tn])] ==> [(t1, ..., tn) A.ct]
 
       where [rv] is the hidden row variable.
-  *)
+   *)
 
   | Tfield of string * field_kind * type_expr * type_expr
   (** [Tfield ("foo", Fpresent, t, ts)] ==> [<...; foo : t; ts>] *)
@@ -131,7 +131,7 @@ and type_desc =
       and occurrences of those types in ty. *)
 
   | Tpackage of Path.t * Longident.t list * type_expr list
-  (** Type of a first-class module (a.k.a package). *)
+(** Type of a first-class module (a.k.a package). *)
 
 and arrow_desc =
   arg_label * alloc_mode * alloc_mode
@@ -139,12 +139,12 @@ and arrow_desc =
 and alloc_mode_const = Global | Local
 
 and alloc_mode_var = {
-  mutable upper: alloc_mode_const;
-  mutable lower: alloc_mode_const;
-  mutable vlower: alloc_mode_var list;
-  mutable mark: bool;
-  mvid: int;
-}
+    mutable upper: alloc_mode_const;
+    mutable lower: alloc_mode_const;
+    mutable vlower: alloc_mode_var list;
+    mutable mark: bool;
+    mvid: int;
+  }
 
 and alloc_mode =
   | Amode of alloc_mode_const
@@ -162,6 +162,9 @@ and effect_lower_bound = (type_expr, alloc_mode) Effect.Lower_bound.t
 
 and effect_upper_bound = (type_expr, alloc_mode) Effect.Upper_bound.t
 
+and inferred_effect_upper_bound =
+  (type_expr, alloc_mode) Effect.Inferred_upper_bound.t
+
 and effect_factor = (type_expr, alloc_mode) Effect.Factor.t
 
 and effect_env = (type_expr, alloc_mode) Effect.Env.t
@@ -176,41 +179,41 @@ and effect_env = (type_expr, alloc_mode) Effect.Env.t
 
     And for:
 
-        let f = function `X -> `X -> | `Y -> `X
+    let f = function `X -> `X -> | `Y -> `X
 
     the type of "f" will be a [Tarrow] whose lhs will (basically) be:
 
-        Tvariant { row_fields = [("X", _)];
-                   row_more   =
-                     Tvariant { row_fields = [("Y", _)];
-                                row_more   =
-                                  Tvariant { row_fields = [];
-                                             row_more   = _;
-                                             _ };
-                                _ };
-                   _
-                 }
+    Tvariant { row_fields = [("X", _)];
+    row_more   =
+    Tvariant { row_fields = [("Y", _)];
+    row_more   =
+    Tvariant { row_fields = [];
+    row_more   = _;
+    _ };
+    _ };
+    _
+    }
 
-*)
+ *)
 and row_desc =
-    { row_fields: (label * row_field) list;
-      row_more: type_expr;
-      row_bound: unit; (* kept for compatibility *)
-      row_closed: bool;
-      row_fixed: fixed_explanation option;
-      row_name: (Path.t * type_expr list) option }
+  { row_fields: (label * row_field) list;
+    row_more: type_expr;
+    row_bound: unit; (* kept for compatibility *)
+    row_closed: bool;
+    row_fixed: fixed_explanation option;
+    row_name: (Path.t * type_expr list) option }
 and fixed_explanation =
   | Univar of type_expr (** The row type was bound to an univar *)
   | Fixed_private (** The row type is private *)
   | Reified of Path.t (** The row was reified *)
   | Rigid (** The row type was made rigid during constraint verification *)
 and row_field =
-    Rpresent of type_expr option
-  | Reither of bool * type_expr list * bool * row_field option ref
-        (* 1st true denotes a constant constructor *)
-        (* 2nd true denotes a tag in a pattern matching, and
-           is erased later *)
-  | Rabsent
+  Rpresent of type_expr option
+| Reither of bool * type_expr list * bool * row_field option ref
+(* 1st true denotes a constant constructor *)
+(* 2nd true denotes a tag in a pattern matching, and
+   is erased later *)
+| Rabsent
 
 (** [abbrev_memo] allows one to keep track of different expansions of a type
     alias. This is done for performance purposes.
@@ -226,7 +229,7 @@ and row_field =
     Note on marshalling: [abbrev_memo] must not appear in saved types.
     [Btype], with [cleanup_abbrev] and [memo], takes care of tracking and
     removing abbreviations.
-*)
+ *)
 and abbrev_memo =
   | Mnil (** No known abbreviation *)
 
@@ -237,12 +240,12 @@ and abbrev_memo =
       The first expression is the abbreviation and the second the expansion. *)
 
   | Mlink of abbrev_memo ref
-  (** Abbreviations can be found after this indirection *)
+(** Abbreviations can be found after this indirection *)
 
 and field_kind =
-    Fvar of field_kind option ref
-  | Fpresent
-  | Fabsent
+  Fvar of field_kind option ref
+| Fpresent
+| Fabsent
 
 (** [commutable] is a flag appended to every arrow type.
 
@@ -258,17 +261,17 @@ and field_kind =
     trigger an error.
 
     let f g =
-      g ~a:() ~b:();
-      g ~b:() ~a:();
+    g ~a:() ~b:();
+    g ~b:() ~a:();
 
     Error: This function is applied to arguments
     in an order different from other calls.
     This is only allowed when the real type is known.
-*)
+ *)
 and commutable =
-    Cok
-  | Cunknown
-  | Clink of commutable ref
+  Cok
+| Cunknown
+| Clink of commutable ref
 
 module TypeOps : sig
   type t = type_expr

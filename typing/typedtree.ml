@@ -41,6 +41,7 @@ and 'a pattern_data =
     pat_extra : (pat_extra * Location.t * attribute list) list;
     pat_type: type_expr;
     pat_mode: value_mode;
+    pat_eff: inferred_effect_upper_bound;
     pat_env: Env.t;
     pat_attributes: attribute list;
    }
@@ -746,6 +747,7 @@ let as_computation_pattern (p : pattern) : computation general_pattern =
     pat_extra = [];
     pat_type = p.pat_type;
     pat_mode = p.pat_mode;
+    pat_eff = p.pat_eff;
     pat_env = p.pat_env;
     pat_attributes = [];
   }

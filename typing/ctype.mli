@@ -219,6 +219,10 @@ val generalize_effect_mode: effect_mode -> unit
 val generalize_effect_upper_bound: effect_upper_bound -> unit
 val generalize_effect_upper_bound_structure: effect_upper_bound -> unit
 
+val enforce_current_level_effect: Env.t -> effect_upper_bound -> effect_upper_bound
+val enforce_current_level_inferred_effect:
+        Env.t -> inferred_effect_upper_bound -> inferred_effect_upper_bound
+
 val fully_generic: type_expr -> bool
 
 val check_scope_escape : Env.t -> int -> type_expr -> unit
@@ -240,6 +244,9 @@ val instance_scheme:
   type_expr * effect_upper_bound
 val instance_poly_scheme:
   type_expr -> effect_mode option -> type_expr * effect_mode option
+val instance_scheme_inferred:
+  type_expr -> inferred_effect_upper_bound -> effect_mode ->
+  type_expr * inferred_effect_upper_bound
 val existential_name: string -> type_expr -> string
 val instance_constructor:
         ?in_pattern:Env.t ref * int ->
@@ -315,6 +322,8 @@ val unify_var: Env.t -> type_expr -> type_expr -> unit
         (* Same as [unify], but allow free univars when first type
            is a variable. *)
 val unify_alloc_mode: alloc_mode -> alloc_mode -> unit
+val unify_effect_mode_option :
+  Env.t -> effect_mode option -> effect_mode option -> unit
 val greater_than_effect_mode :
   Env.t -> effect_upper_bound -> effect_lower_bound -> unit
 val meet_effect_modes :

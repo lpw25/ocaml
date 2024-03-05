@@ -27,6 +27,7 @@ let omega = {
   pat_extra = [];
   pat_type = Ctype.none;
   pat_mode = Value_mode.min_mode;
+  pat_eff = Effect.Inferred_upper_bound.top;
   pat_env = Env.empty;
   pat_attributes = [];
 }
