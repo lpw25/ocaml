@@ -218,6 +218,7 @@ val limited_generalize: type_expr -> type_expr -> unit
 val generalize_effect_mode: effect_mode -> unit
 val generalize_effect_upper_bound: effect_upper_bound -> unit
 val generalize_effect_upper_bound_structure: effect_upper_bound -> unit
+val generalize_inferred_effect_upper_bound_structure: inferred_effect_upper_bound -> unit
 
 val enforce_current_level_effect: Env.t -> effect_upper_bound -> effect_upper_bound
 val enforce_current_level_inferred_effect:
@@ -244,9 +245,12 @@ val instance_scheme:
   type_expr * effect_upper_bound
 val instance_poly_scheme:
   type_expr -> effect_mode option -> type_expr * effect_mode option
-val instance_scheme_inferred:
-  type_expr -> inferred_effect_upper_bound -> effect_mode ->
-  type_expr * inferred_effect_upper_bound
+val instance_scheme_pattern:
+  type_expr -> inferred_effect_upper_bound -> inferred_effect_upper_bound list
+  -> type_expr * inferred_effect_upper_bound * inferred_effect_upper_bound list
+val generic_instance_scheme_pattern:
+  type_expr -> inferred_effect_upper_bound -> inferred_effect_upper_bound list
+  -> type_expr * inferred_effect_upper_bound * inferred_effect_upper_bound list
 val existential_name: string -> type_expr -> string
 val instance_constructor:
         ?in_pattern:Env.t ref * int ->

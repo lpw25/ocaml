@@ -760,7 +760,7 @@ module Inferred_upper_bound : sig
       upper bounds. *)
 
   val meet : ('ty, 'lcl) t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
-  (** [meet t t] lifts {!Upper_bound.mee} to inferred upper bounds. *)
+  (** [meet t t] lifts {!Upper_bound.meet} to inferred upper bounds. *)
 
   val filter_types : ('ty -> bool) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
   (** [filter_types f t] lifts {!Upper_bound.filter_types} to inferred

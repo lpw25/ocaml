@@ -844,6 +844,11 @@ let generalize_effect_upper_bound_structure eff =
   let level = !current_level in
   iter_effect_upper_bound (generalize_structure level) eff
 
+let generalize_inferred_effect_upper_bound_structure eff =
+  simple_abbrevs := Mnil;
+  let level = !current_level in
+  iter_inferred_effect_upper_bound (generalize_structure level) eff
+
 let generalize_structure ty =
   simple_abbrevs := Mnil;
   generalize_structure !current_level ty
@@ -1379,16 +1384,19 @@ let instance_scheme ?partial sch eff_bound eff_mod =
       let eff = Effect.Upper_bound.compose_right eff_bound eff_mod in
       sch, eff)
 
-let instance_scheme_inferred sch eff_bound eff_mod =
+let instance_scheme_pattern sch eff_bound extra_eff_bounds =
   For_copy.with_scope
     (fun scope ->
       let sch = copy scope sch in
       let eff_bound =
         copy_inferred_effect_upper_bound (copy scope) eff_bound
       in
-      let eff_mod = copy_effect_mode (copy scope) eff_mod in
-      let eff = Effect.Inferred_upper_bound.compose_right eff_bound eff_mod in
-      sch, eff)
+      let extra_eff_bounds =
+        List.map
+          (copy_inferred_effect_upper_bound (copy scope))
+          extra_eff_bounds
+      in
+      sch, eff_bound, extra_eff_bounds)
 
 let instance_value_scheme sch eff =
   For_copy.with_scope
@@ -1410,6 +1418,15 @@ let generic_instance sch =
   let ty = instance sch in
   current_level := old;
   ty
+
+let generic_instance_scheme_pattern sch eff_bound extra_eff_bounds =
+  let old = !current_level in
+  current_level := generic_level;
+  let sch, eff_bound, extra_eff_bounds =
+    instance_scheme_pattern sch eff_bound extra_eff_bounds
+  in
+  current_level := old;
+  sch, eff_bound, extra_eff_bounds
 
 let instance_list schl =
   For_copy.with_scope (fun scope -> List.map (fun t -> copy scope t) schl)
