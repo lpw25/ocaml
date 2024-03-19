@@ -2410,28 +2410,41 @@ and type_pat_aux
       in
       end_def();
       generalize_structure ty;
+      begin_def ();
       let ty, expected_ty' = instance ty, ty in
-      unify_pat_types ~refine loc env ty (instance expected_ty);
-      let expected_ty', eff' =
+      let expected_ty, expected_mode =
+        instance_scheme_pat expected_ty expected_mode
+      in
+      unify_pat_types ~refine loc env ty expected_ty;
+      let expected_ty', expected_mode' =
         match repr expected_ty' with
-        | {desc = Tpoly (ty, tl, eff)} -> 
+        | {desc = Tpoly (ty, tl, eff)} ->
             let _, ty, eff = instance_poly ~keep_names:true false tl ty eff in
-            ty, eff
-        | _ -> expected_ty', None
+            let expected_mode' =
+              match eff with
+              | None -> expected_mode
+              | Some eff -> compose_right_pat_mode expected_mode eff
+            in
+            ty, expected_mode'
+        | _ -> expected_ty', expected_mode
       in
-      let eff : effect_context_pat =
-        match eff' with
-        | Some eff -> Single (Known eff)
-        | None -> eff
-      in
-      type_pat category sp' expected_ty' ~eff (fun p ->
-        (*Format.printf "%a@.%a@."
-          Printtyp.raw_type_expr ty
-          Printtyp.raw_type_expr p.pat_type;*)
+      end_def ();
+      generalize_structure expected_ty;
+      generalize_structure expected_ty';
+      generalize_pat_mode_structure expected_mode;
+      generalize_pat_mode_structure expected_mode';
+      type_pat category sp' expected_ty'
+          ~expected_mode:expected_mode' (fun p ->
         pattern_force := force :: !pattern_force;
         let extra = (Tpat_constraint cty, loc, sp'.ppat_attributes) in
+        let expected_ty, expected_mode =
+          instance_scheme_pat expected_ty expected_mode
+        in
         let p : k general_pattern =
-          { p with pat_type = ty; pat_extra = extra::p.pat_extra }
+          { p with
+            pat_type = expected_ty; pat_mode = expected_mode.mode;
+            pat_eff = expected_mode.effect_mode;
+            pat_extra = extra::p.pat_extra }
         in k p)
   | Ppat_type lid ->
       let (path, p,ty) =
@@ -2445,7 +2458,7 @@ and type_pat_aux
       let path, new_env =
         !type_open Asttypes.Fresh !env sp.ppat_loc lid in
       let new_env = ref new_env in
-      type_pat category ~env:new_env p expected_ty ( fun p ->
+      type_pat category ~env:new_env p expected_ty ~expected_mode ( fun p ->
         env := Env.copy_local !env ~from:!new_env;
         k { p with pat_extra =( Tpat_open (path,lid,!new_env),
                             loc, sp.ppat_attributes) :: p.pat_extra }
@@ -2461,14 +2474,21 @@ and type_pat_aux
       in
       match effect with
       | None ->
-          let expected_mode = simple_pat_mode Value_mode.global in
+          let expected_mode =
+            simple_pat_mode
+              Value_mode.global Effect.Inferred_upper_bound.global
+          in
           type_pat Value ~expected_mode p Predef.type_exn (fun p_exn ->
+              let expected_ty, expected_mode =
+                instance_scheme_pat expected_ty expected_mode
+              in
               rcp k {
                   pat_desc = Tpat_exception p_exn;
                   pat_loc = sp.ppat_loc;
                   pat_extra = [];
                   pat_type = expected_ty;
                   pat_mode = expected_mode.mode;
+                  pat_eff = expected_mode.effect_mode;
                   pat_env = !env;
                   pat_attributes = sp.ppat_attributes;
             })
@@ -2481,14 +2501,21 @@ and type_pat_aux
                 raise (Error(loc, !env, Unexpected_effect_handler))
             | _, ty -> ty
           in
-          let expected_mode = simple_pat_mode Value_mode.global in
+          let expected_mode =
+            simple_pat_mode
+              Value_mode.global Effect.Inferred_upper_bound.global
+          in
           type_pat Value ~expected_mode p ty_eff_expected (fun p ->
+              let expected_ty, expected_mode =
+                instance_scheme_pat expected_ty expected_mode
+              in
               rcp k {
                   pat_desc = Tpat_effect(name, p);
                   pat_loc = sp.ppat_loc;
                   pat_extra = [];
                   pat_type = expected_ty;
                   pat_mode = expected_mode.mode;
+                  pat_eff = expected_mode.effect_mode;
                   pat_env = !env;
                   pat_attributes = sp.ppat_attributes;
             })

@@ -416,42 +416,7 @@ module Mode : sig
 
 end
 
-module rec Lower_bound : sig
-
-  type ('ty, 'lcl) t
-
-  module Var : sig
-
-    type ('ty, 'lcl) t
-
-    val create : unit -> ('ty, 'lcl) t
-
-    val consume : ('ty, 'lcl) t -> ('ty, 'lcl) Upper_bound.t
-    (** [consumes t] returns the value of [t] and marks it as
-        consumed. Any further attempts to constrain it will fail with an
-        exception *)
-
-  end
-
-  val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
-
-  val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
-
-  val unused : ('ty, 'lcl) t
-  (** [unused] is [mode Mode.unused]. *)
-
-  val global : ('ty, 'lcl) t
-  (** [global] is [mode Mode.global]. *)
-
-  val desc : ('ty, 'lcl) t -> 'ty Mode.Desc.t
-
-  val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
-
-  val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
-
-end
-
-and Factor : sig
+module rec Factor : sig
 
   type ('ty, 'lcl) t
   (** Effect modes do not in general have a right residual. Instead we
@@ -610,8 +575,8 @@ and Upper_bound : sig
       ]}
 
       If a value needs effect mode [t1] and is being written into a
-      field with effect mode [t2] then the resulting record needs effect
-      mode [left_residual ~type_less_than ~type_join t1 t2]. *)
+      field with effect mode [m2] then the resulting record needs effect
+      mode [left_residual ~type_less_than ~type_join t1 m2]. *)
 
   val compose_left :
     ('ty, 'lcl) Factor.Renaming.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
@@ -649,7 +614,7 @@ and Upper_bound : sig
       is equivalent to:
       {[
         less_than ~type_greater_than ~local_greater_than ~local_top
-          (Lower_bound.mode (Mode.compose m m2)) t1
+          (Lower_bound.mode (Mode.compose f1 m)) t1
       ]}
 
       If a value in a context with effect mode [em1] is used inside a
@@ -711,6 +676,76 @@ and Upper_bound : sig
 
   val copy_fold_types :
     ('a -> 'ty -> 'a * 'ty) -> 'a -> ('ty, 'lcl) t -> 'a * ('ty, 'lcl) t
+
+end
+
+and Lower_bound : sig
+
+  type ('ty, 'lcl) t
+
+  module Var : sig
+
+    type ('ty, 'lcl) t
+
+    val create : unit -> ('ty, 'lcl) t
+
+    val consume : ('ty, 'lcl) t -> ('ty, 'lcl) Upper_bound.t
+    (** [consumes t] returns the value of [t] and marks it as
+        consumed. Any further attempts to constrain it will fail with an
+        exception *)
+
+  end
+
+  val var : ('ty, 'lcl) Var.t -> ('ty, 'lcl) t
+
+  val mode : ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+
+  val unused : ('ty, 'lcl) t
+  (** [unused] is [mode Mode.unused]. *)
+
+  val global : ('ty, 'lcl) t
+  (** [global] is [mode Mode.global]. *)
+
+  val compose_right : ('ty, 'lcl) t -> ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
+  (** [compose_right t m] lifts {!Mode.compose} to composing a mode to
+      the right of a lower bound. It is the left adjoint of
+      {!Upper_bound.left_residual}. *)
+
+  val weak_uncompose_left :
+    ('ty, 'lcl) Factor.Handler.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** [weak_uncompose_left f] is the left adjoint of
+      {!Upper_bound.weak_compose_left f}, so that:
+      {[
+        Upper_bound.less_than ~type_greater_than ~local_greater_than ~local_top
+          (weak_uncompose_left f t) u
+      ]}
+      is equivalent to:
+      {[
+        Upper_bound.less_than ~type_greater_than ~local_greater_than ~local_top
+          t (Upper_bound.weak_compose_left f u)
+      ]}.
+      It works by composing the right inverse of [f] on the left of
+      [t]. *)
+
+  val uncompose_left :
+    ('ty, 'lcl) Factor.Renaming.t -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+  (** [uncompose_left f] is the left adjoint of
+      {!Upper_bound.compose_left f}, so that:
+      {[
+        Upper_bound.less_than ~type_greater_than ~local_greater_than ~local_top
+          (uncompose_left f t) u
+      ]}
+      is equivalent to:
+      {[
+        Upper_bound.less_than ~type_greater_than ~local_greater_than ~local_top
+          t (Upper_bound.compose_left f u)
+      ]}. *)
+
+  val desc : ('ty, 'lcl) t -> 'ty Mode.Desc.t
+
+  val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
+
+  val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
 
 end
 
