@@ -218,7 +218,9 @@ val limited_generalize: type_expr -> type_expr -> unit
 val generalize_effect_mode: effect_mode -> unit
 val generalize_effect_upper_bound: effect_upper_bound -> unit
 val generalize_effect_upper_bound_structure: effect_upper_bound -> unit
-val generalize_inferred_effect_upper_bound_structure: inferred_effect_upper_bound -> unit
+val generalize_inferred_effect_upper_bound: inferred_effect_upper_bound -> unit
+val generalize_inferred_effect_upper_bound_structure:
+  inferred_effect_upper_bound -> unit
 
 val enforce_current_level_effect: Env.t -> effect_upper_bound -> effect_upper_bound
 val enforce_current_level_inferred_effect:

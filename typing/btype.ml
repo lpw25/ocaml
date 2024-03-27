@@ -1080,6 +1080,21 @@ module Alloc_mode = struct
       | Amodevar v :: ms -> aux (v :: vars) ms
     in aux [] ms
 
+  let binary_join a b =
+    match a, b with
+    | Amode Global, b -> b
+    | a, Amode Global -> a
+    | Amode Local, _ -> a
+    | _, Amode Local -> b
+    | Amodevar va, Amodevar vb ->
+        if va == vb then a
+        else begin
+          let v = fresh () in
+          submode_exn (Amodevar va) (Amodevar v);
+          submode_exn (Amodevar vb) (Amodevar v);
+          Amodevar v
+        end
+
   let constrain_upper = function
     | Amode m -> m
     | Amodevar v ->
@@ -1359,3 +1374,11 @@ module Value_mode = struct
           Alloc_mode.print t.r_as_g
 
 end
+
+let consume_inferred_effect_upper_bound eff =
+  Effect.Inferred_upper_bound.consume
+    ~join_local:Alloc_mode.binary_join ~top_local:Alloc_mode.local eff
+
+let approx_inferred_effect_upper_bound eff =
+  Effect.Inferred_upper_bound.approx
+    ~join_local:Alloc_mode.binary_join ~top_local:Alloc_mode.local eff

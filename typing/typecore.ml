@@ -349,7 +349,7 @@ let mode_tuple mode effect_mode tuple_modes =
     effect_mode;
     tuple_modes }
 
-let mode_argument ~funct ~index ~position ~partial_app alloc_mode =
+let mode_argument ~funct ~index ~position ~partial_app alloc_mode effect_mode =
   let vmode = Value_mode.of_alloc alloc_mode in
   if partial_app then mode_nontail vmode
   else match funct.exp_desc, index, (position : apply_position) with
@@ -358,14 +358,14 @@ let mode_argument ~funct ~index ~position ~partial_app alloc_mode =
                 Id_prim _), 1, Tail ->
      (* The second argument to (&&) and (||) is in
         tail position if the call is *)
-     mode_return (Value_mode.local_to_regional vmode)
+     mode_return (Value_mode.local_to_regional vmode) effect_mode
   | Texp_ident (_, _, _, Id_prim _), _, _ ->
      (* Other primitives cannot be tail-called *)
-     mode_nontail vmode
+     mode_nontail vmode effect_mode
   | _, _, (Nontail | Default) ->
-     mode_nontail vmode
+     mode_nontail vmode effect_mode
   | _, _, Tail ->
-     mode_tailcall_argument (Value_mode.local_to_regional vmode)
+     mode_tailcall_argument (Value_mode.local_to_regional vmode) effect_mode
 
 let mode_lazy =
   let position = Tail in
@@ -374,6 +374,24 @@ let mode_lazy =
   let effect_mode = Effect.Lower_bound.global in
   let tuple_modes = [] in
   { position; escaping_context; mode; effect_mode; tuple_modes }
+
+let argument_effect_mode mode eff =
+  match eff with
+  | None ->
+      let effect_mode = Effect.Lower_bound.unadjusted mode in
+      effect_mode, mode
+  | Some eff ->
+      if Effect.Mode.is_relative eff then begin
+        let eff_mode = Alloc_mode.newvar () in
+        let effect_mode =
+          Effect.Lower_bound.compose_right
+            (Effect.Lower_bound.unadjusted eff_mode) eff
+        in
+        let out_mode = Alloc_mode.join [mode; eff_mode] in
+        effect_mode, out_mode
+      end else begin
+        eff, mode
+      end
 
 let rec submode_meet_tuple_modes m1 = function
   | [] -> Ok ()
@@ -2405,17 +2423,16 @@ and type_pat_aux
         if has_local_attr_pat sp then Alloc_mode.Local
         else Alloc_mode.Global
       in
-      let cty, ty, force =
+      let cty, expected_ty', force =
         Typetexp.transl_simple_type_delayed !env type_mode sty
       in
       end_def();
-      generalize_structure ty;
+      generalize_structure expected_ty';
       begin_def ();
-      let ty, expected_ty' = instance ty, ty in
       let expected_ty, expected_mode =
         instance_scheme_pat expected_ty expected_mode
       in
-      unify_pat_types ~refine loc env ty expected_ty;
+      unify_pat_types ~refine loc env (instance expected_ty') expected_ty;
       let expected_ty', expected_mode' =
         match repr expected_ty' with
         | {desc = Tpoly (ty, tl, eff)} ->
@@ -2524,10 +2541,10 @@ and type_pat_aux
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 
 let type_pat category ?no_existentials ?(mode=Normal)
-    ?(lev=get_current_level()) ~expected_mode ~eff ~handlers env sp expected_ty =
+    ?(lev=get_current_level()) ~expected_mode ~handlers env sp expected_ty =
   Misc.protect_refs [Misc.R (gadt_equations_level, Some lev)] (fun () ->
         type_pat category ~no_existentials ~mode
-          ~expected_mode ~eff ~handlers ~env sp expected_ty (fun x -> x)
+          ~expected_mode ~handlers ~env sp expected_ty (fun x -> x)
     )
 
 (* this function is passed to Partial.parmatch
@@ -2544,12 +2561,12 @@ let partial_pred ~lev ~splitting_mode ?(explode=0)
       } in
   try
     reset_pattern true;
-    let expected_mode = simple_pat_mode Value_mode.global in
-    let eff = empty_effect_context_pat in
-    let handlers = Some [] in
+    let expected_mode =
+      simple_pat_mode Value_mode.global Effect.Inferred_upper_bound.global
+    in
+    let handlers = [] in
     let typed_p =
-      type_pat Value ~lev ~mode ~expected_mode ~eff ~handlers
-        env p expected_ty
+      type_pat Value ~lev ~mode ~expected_mode ~handlers env p expected_ty
     in
     set_state state env;
     (* types are invalidated but we don't need them here *)
@@ -2579,36 +2596,34 @@ let check_unused ?(lev=get_current_level ()) env expected_ty cases =
 let iter_pattern_variables_type f : pattern_variable list -> unit =
   List.iter (fun {pv_type; pv_eff; _} -> f pv_type pv_eff)
 
-let resolve_pv_effect_context eff mode =
-  let rec loop = function
-  | Simple (Known eff | Unknown { state = Filled eff }) ->
-      eff, mode
-  | Simple (Unknown ({ state = Unfilled modes } as r)) ->
-      let mode', may_not_be_local = Value_mode.newvar_above mode in
-      if may_not_be_local then begin
-        let mode'' = Value_mode.regional_to_global_alloc mode' in
-        r.state <- Unfilled (mode'' :: modes);
-      end;
-      empty_effect_context, mode'
-  | Join(x, loc, env, eff1, eff2) ->
-      let eff1, mode1 = loop eff1 in
-      let eff2, mode2 = loop eff2 in
-      let mode = Value_mode.join [mode1; mode2] in
-      match Ctype.join_effect_contexts env eff1 eff2 with
-      | exception Unify trace ->
-          raise(Error(loc, env, Or_pattern_type_clash(x, trace)))
-      | eff -> eff, mode
-  in
-  loop eff
+let generalize_pattern_variables pvs =
+  iter_pattern_variables_type
+    (fun typ eff ->
+      generalize typ;
+      generalize_inferred_effect_upper_bound eff)
+    pvs
 
-let add_pattern_variables ?check ?check_as ?delayed env pv =
+let generalize_pattern_variables_structure pvs =
+  iter_pattern_variables_type
+    (fun typ eff ->
+      generalize_structure typ;
+      generalize_inferred_effect_upper_bound_structure eff)
+    pvs
+
+let add_pattern_variables
+      ?check ?check_as ?delayed ~consume_inferred_effects env pv =
   List.fold_right
     (fun {pv_id; pv_mode; pv_type; pv_eff;
           pv_loc; pv_as_var; pv_uid; pv_attributes} env ->
        let check = if pv_as_var then check_as else check in
-       let eff, mode = resolve_pv_effect_context pv_eff pv_mode in
-       Env.add_value ?check ~mode ?delayed pv_id
-         {val_type = pv_type; val_eff = eff;
+       let eff =
+         if consume_inferred_effects then
+           consume_inferred_effect_upper_bound pv_eff
+         else
+           approx_inferred_effect_upper_bound pv_eff
+       in
+       Env.add_value ?check ~mode:pv_mode ~eff ?delayed pv_id
+         {val_type = pv_type; val_eff = Effect.Mode.identity;
           val_kind = Val_reg; Types.val_loc = pv_loc;
           val_attributes = pv_attributes;
           val_uid = pv_uid;
@@ -2616,12 +2631,12 @@ let add_pattern_variables ?check ?check_as ?delayed env pv =
     )
     pv env
 
-let type_pattern category ~lev ~expected_mode ~eff ~handlers
+let type_pattern category ~lev ~expected_mode ~handlers
       env spat expected_ty =
   reset_pattern true;
   let new_env = ref env in
   let pat =
-    type_pat category ~lev ~expected_mode ~eff ~handlers
+    type_pat category ~lev ~expected_mode ~handlers
       new_env spat expected_ty
   in
   let pvs = get_ref pattern_variables in
@@ -2638,7 +2653,7 @@ let type_pattern_list
       (fun () ->
          exp_mode, eff,
          type_pat category ~no_existentials ~expected_mode:pat_mode
-           ~eff ~handlers:None new_env pat ty
+           ~handlers:[] new_env pat ty
       )
   in
   let patl = List.map2 type_pat spatl expected_tys in
@@ -2654,11 +2669,12 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
   if !Clflags.principal then Ctype.begin_def ();
   reset_pattern false;
   let nv = newvar () in
-  let expected_mode = simple_pat_mode Value_mode.global in
-  let eff = empty_effect_context_pat in
+  let expected_mode =
+    simple_pat_mode Value_mode.global Effect.Inferred_upper_bound.global
+  in
   let pat =
-    type_pat Value ~no_existentials:In_class_args ~expected_mode ~eff
-      ~handlers:None (ref val_env) spat nv in
+    type_pat Value ~no_existentials:In_class_args ~expected_mode
+      ~handlers:[] (ref val_env) spat nv in
   if has_variants pat then begin
     Parmatch.pressure_variants val_env [pat];
     finalize_variants pat;
@@ -2668,7 +2684,7 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
   let pvs = !pattern_variables in
   if !Clflags.principal then begin
     Ctype.end_def ();
-    iter_pattern_variables_type generalize_pv_scheme_structure pvs;
+    generalize_pattern_variables_structure pvs
   end;
   let (pv, val_env, met_env) =
     List.fold_right
@@ -2677,13 +2693,13 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
          let check s =
            if pv_as_var then Warnings.Unused_var s
            else Warnings.Unused_var_strict s in
-         let eff, mode = resolve_pv_effect_context pv_eff pv_mode in
+         let eff = consume_inferred_effect_upper_bound pv_eff in
          let id' = Ident.rename pv_id in
          let val_uid = Uid.mk ~current_unit:(Env.get_unit_name ()) in
          let val_env =
-          Env.add_value pv_id ~mode
+          Env.add_value pv_id ~mode:pv_mode ~eff
             { val_type = pv_type
-            ; val_eff = eff
+            ; val_eff = Effect.Mode.identity
             ; val_kind = Val_reg
             ; val_attributes = pv_attributes
             ; val_loc = pv_loc
@@ -2692,9 +2708,9 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
             val_env
          in
          let met_env =
-          Env.add_value id' ~check
+          Env.add_value id' ~check ~mode:pv_mode ~eff
             { val_type = pv_type
-            ; val_eff = eff
+            ; val_eff = Effect.Mode.identity
             ; val_kind = Val_ivar (Immutable, cl_num)
             ; val_attributes = pv_attributes
             ; val_loc = pv_loc
@@ -2715,11 +2731,12 @@ let type_self_pattern cl_num privty val_env met_env par_env spat =
   in
   reset_pattern false;
   let nv = newvar() in
-  let expected_mode = simple_pat_mode Value_mode.global in
-  let eff = empty_effect_context_pat in
+  let expected_mode =
+    simple_pat_mode Value_mode.global Effect.Inferred_upper_bound.global
+  in
   let pat =
     type_pat Value ~no_existentials:In_self_pattern
-      ~expected_mode ~eff ~handlers:None (ref val_env) spat nv
+      ~expected_mode ~handlers:[] (ref val_env) spat nv
   in
   List.iter (fun f -> f()) (get_ref pattern_force);
   let meths = ref Meths.empty in
@@ -2731,11 +2748,11 @@ let type_self_pattern cl_num privty val_env met_env par_env spat =
       (fun {pv_id; pv_type; pv_eff; pv_loc; pv_as_var; pv_mode; pv_attributes}
            (val_env, met_env, par_env) ->
          let name = Ident.name pv_id in
-         let eff, mode = resolve_pv_effect_context pv_eff pv_mode in
+         let eff = consume_inferred_effect_upper_bound pv_eff in
          (Env.enter_unbound_value name Val_unbound_self val_env,
-          Env.add_value pv_id ~mode
+          Env.add_value pv_id ~mode:pv_mode ~eff
             {val_type = pv_type;
-             val_eff = eff;
+             val_eff = Effect.Mode.identity;
              val_kind = Val_self (meths, vars, cl_num, privty);
              val_attributes = pv_attributes;
              val_loc = pv_loc;
@@ -3032,15 +3049,13 @@ let collect_apply_args env funct ignore_labels
 let type_omitted_parameters expected_mode env ty_ret mode_ret args =
   let ty_ret, mode_ret, _, _, args, eff =
     List.fold_left
-      (fun (ty_ret, mode_ret, open_args, closed_args, args, eff) (lbl, arg) ->
+      (fun (ty_ret, mode_ret, open_args, closed_args, args) (lbl, arg) ->
          match arg with
-         | Arg exp as arg ->
-             let mode = join_mode_effs exp.exp_mode exp.exp_eff in
-             let exp_eff = expedite_eff exp.exp_loc env exp.exp_eff in
+         | Arg (exp, eff) ->
+             let mode = join_mode_effs exp.exp_mode eff in
              let open_args = (mode, exp) :: open_args in
-             let args = (lbl, arg) :: args in
-             let eff = join_effs exp.exp_loc env exp_eff eff in
-             (ty_ret, mode_ret, open_args, closed_args, args, eff)
+             let args = (lbl, Arg exp) :: args in
+             (ty_ret, mode_ret, open_args, closed_args, args)
          | Omitted { mode_fun; ty_arg; mode_arg; level } ->
              let arrow_desc = (lbl, mode_arg, mode_ret) in
              let ty_ret =
@@ -6153,24 +6168,28 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
   match arg with
   | Arg (Unknown_arg { sarg; ty_arg_mono; mode_arg }) ->
       let mode, _ = Alloc_mode.newvar_below mode_arg in
+      let effect_mode = Effect.Lower_bound.unadjusted mode in
       let expected_mode =
-        mode_argument ~funct ~index ~position ~partial_app mode in
+        mode_argument ~funct ~index ~position ~partial_app mode effect_mode
+      in
       let arg =
         type_expect env expected_mode sarg (mk_expected ty_arg_mono)
       in
       if is_optional lbl then
         unify_exp env arg (type_option(newvar()));
-      submode_effs arg.exp_loc env arg.exp_eff mode_arg;
-      (lbl, Arg arg)
+      (lbl, Arg (arg, mode))
   | Arg (Known_arg { sarg; ty_arg; ty_arg0;
                      mode_arg; wrapped_in_some }) ->
       let mode, _ = Alloc_mode.newvar_below mode_arg in
-      let expected_mode =
-        mode_argument ~funct ~index ~position ~partial_app mode in
       let ty_arg', vars, eff = get_poly ty_arg in
-      let arg =
+      let arg, out_mode =
         if vars = [] then begin
-            let ty_arg0' = get_mono ty_arg0 in
+            let ty_arg0', _, eff0 = get_poly ty_arg0 in
+            let effect_mode, out_mode = argument_effect_mode mode eff in
+            let expected_mode =
+              mode_argument ~funct ~index ~position ~partial_app
+                mode effect_mode
+            in
             let arg =
               if wrapped_in_some then begin
                   option_some env
@@ -6182,8 +6201,7 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
                   type_argument env expected_mode sarg ty_arg' ty_arg0'
                 end
             in
-            let eff = poly_eff env arg eff in
-            { arg with exp_eff = eff }
+            arg, out_mode
           end else begin
             if !Clflags.principal
                && (repr ty_arg).level < Btype.generic_level then begin
@@ -6216,10 +6234,8 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
             in
             List.iter2 (fun ty ty' -> unify_var env ty ty') vars vars0;
             let arg =
-              type_argument env expected_mode sarg ty_arg' ty_arg0'
+              type_argument env ?? sarg ty_arg' ty_arg0'
             in
-            let eff = instance_poly_effect_context eff in
-            let eff' = poly_eff env arg eff in
             end_def ();
             if maybe_expansive arg then begin
               lower_contravariant env arg.exp_type;
@@ -6554,8 +6570,7 @@ and type_cases
         let pat =
           if !Clflags.principal then begin
             end_def ();
-            iter_pattern_variables_type
-              generalize_pv_scheme_structure pvs;
+            generalize_pattern_variables_structure pvs;
             { pat with pat_type = instance pat.pat_type }
           end else pat
         in
@@ -6605,9 +6620,9 @@ and type_cases
   ) half_typed_cases;
   end_def ();
   generalize ty_arg';
-  List.iter (fun { pat_vars; _ } ->
-    iter_pattern_variables_type generalize_pv_scheme pat_vars
-  ) half_typed_cases;
+  List.iter
+    (fun { pat_vars; _ } -> generalize_pattern_variables pat_vars)
+    half_typed_cases;
   (* type bodies *)
   let in_function = if List.length caselist = 1 then in_function else None in
   let cases =
@@ -6625,6 +6640,7 @@ and type_cases
           add_pattern_variables ext_env pvs
             ~check:(fun s -> Warnings.Unused_var_strict s)
             ~check_as:(fun s -> Warnings.Unused_var s)
+            ~consume_inferred_effects:true
         in
         let unpacks =
           List.map (fun (name, loc) ->
@@ -6824,7 +6840,7 @@ and type_let
     type_pattern_list Value existential_context env spatl nvs allow in
   if is_recursive then begin
     end_def ();
-    iter_pattern_variables_type generalize_pv_scheme pvs
+    generalize_pattern_variables pvs
   end;
   let attrs_list = List.map (fun (attrs, _, _, _, _) -> attrs) spatl in
   (* If recursive, first unify with an approximation of the expression *)
@@ -6852,7 +6868,7 @@ and type_let
   let pat_list =
     if !Clflags.principal then begin
       end_def ();
-      iter_pattern_variables_type generalize_pv_scheme_structure pvs;
+      generalize_pattern_variables_structure pvs;
       List.map (fun (m, e, pat) ->
         let ty = pat.pat_type in
         generalize_structure ty;
@@ -6867,6 +6883,7 @@ and type_let
   let exp_env =
     if is_recursive then
       add_pattern_variables ~delayed:entirely_functions new_env pvs
+        ~consume_inferred_effects:false
     else if entirely_functions
     then begin
       (* Add ghost bindings to help detecting missing "rec" keywords.
@@ -7029,7 +7046,7 @@ and type_let
        end;
        lower_current_eff exp.exp_loc env exp.exp_eff)
     pat_list exp_list;
-  iter_pattern_variables_type generalize_pv_scheme pvs';
+  generalize_pattern_variables pvs';
   List.iter2
     (fun (_,_,_,expected_ty) (exp, vars) ->
        match vars with
@@ -7086,7 +7103,10 @@ and type_let
                                       | _ -> false) pat_extra) then
             check_partial_application false vb_expr
       | _ -> ()) l;
-  let new_env = add_pattern_variables new_env pvs in
+  let new_env =
+    add_pattern_variables new_env pvs
+      ~consume_inferred_effects:true
+  in
   if not is_recursive then begin
     List.iter2
       (fun attrs (_, _, pat, _) ->

@@ -265,6 +265,10 @@ module Mode : sig
   (** [is_adjusted t] is [false] if [t] is equal to [unadjusted l] for
       some [l] and is [true] otherwise. *)
 
+  val is_relative : ('ty, 'lcl) t -> bool
+  (** [is_relative t] is [true] if [t] is equal to [relative adj] for
+      some [adj] and is [false] otherwise. *)
+
   module Equal : sig
 
     module Error : sig
@@ -687,7 +691,12 @@ and Lower_bound : sig
 
     type ('ty, 'lcl) t
 
-    val create : unit -> ('ty, 'lcl) t
+    val create : 'lcl -> ('ty, 'lcl) t
+    (** [create l] creates a fresh variable with [Mode.unadjusted l] as
+        a lower bound. *)
+
+    val bound : ('ty, 'lcl) t -> 'lcl
+    (** [bound (create l)] is [l]. *)
 
     val consume : ('ty, 'lcl) t -> ('ty, 'lcl) Upper_bound.t
     (** [consumes t] returns the value of [t] and marks it as
@@ -705,6 +714,9 @@ and Lower_bound : sig
 
   val global : ('ty, 'lcl) t
   (** [global] is [mode Mode.global]. *)
+
+  val unadjusted : 'lcl -> ('ty, 'lcl) t
+  (** [unadjusted l] is [mode (Mode.unadjusted l)]. *)
 
   val compose_right : ('ty, 'lcl) t -> ('ty, 'lcl) Mode.t -> ('ty, 'lcl) t
   (** [compose_right t m] lifts {!Mode.compose} to composing a mode to
@@ -801,6 +813,16 @@ module Inferred_upper_bound : sig
   (** [filter_types f t] lifts {!Upper_bound.filter_types} to inferred
       upper bounds. *)
 
+  val approx :
+    join_local:('lcl -> 'lcl -> 'lcl)
+    -> top_local:'lcl
+    -> ('ty, 'lcl) t
+    -> ('ty, 'lcl) Upper_bound.t
+  (** [bound ~join_local ~top_local t] produces a conservative estimate
+      of the bound by using {!Lower_bound.Var.bound} as the value of any
+      underlying variables, using [join_local] and [top_local] to
+      calculate any meets. *)
+
   val consume :
     join_local:('lcl -> 'lcl -> 'lcl)
     -> top_local:'lcl
@@ -809,7 +831,6 @@ module Inferred_upper_bound : sig
   (** [consume ~join_local ~top_local t] calls {!Lower_bound.Var.consume} on
       any underlying variables and calculates the resulting concrete upper
       bound, using [join_local] and [top_local] to calculate any meets. *)
-
 
   val iter_types : ('ty -> unit) -> ('ty, 'lcl) t -> unit
 

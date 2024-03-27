@@ -433,3 +433,7 @@ module Value_mode : sig
   val print : Format.formatter -> t -> unit
 
 end
+
+val consume_inferred_effect_upper_bound : inferred_effect_upper_bound -> effect_upper_bound
+
+val approx_inferred_effect_upper_bound : inferred_effect_upper_bound -> effect_upper_bound
