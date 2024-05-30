@@ -269,6 +269,11 @@ module Mode : sig
   (** [is_relative t] is [true] if [t] is equal to [relative adj] for
       some [adj] and is [false] otherwise. *)
 
+  val is_unadjusted :
+    local_equal:('lcl -> 'lcl -> bool) -> ('ty, 'lcl) t -> 'lcl -> bool
+  (** [is_unadjusted ~local_equal t l] is [true] if [t] is equal to [unadjusted l]
+      using [local_equal] for equality on localities and is [false] otherwise. *)
+
   module Equal : sig
 
     module Error : sig

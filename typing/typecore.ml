@@ -240,6 +240,23 @@ type expected_mode =
     (* for t in tuple_modes, t <= regional_to_global mode *)
   }
 
+let instance_expected_scheme expected_ty expected_mode =
+  let position = expected_mode.position in
+  let escaping_context = expected_mode.escaping_context in
+  let mode = expected_mode.mode in
+  let tuple_modes, tuple_effect_modes =
+    List.split expected_mode.tuple_modes
+  in
+  let expected_ty, effect_mode, tuple_effect_modes =
+    Ctype.instance_expected_scheme expected_ty
+      expected_mode.effect_mode tuple_effect_modes
+  in
+  let tuple_modes = List.combine tuple_modes tuple_effect_modes in
+  let expected_mode =
+    { position; escaping_context; mode; effect_mode; tuple_modes }
+  in
+  expected_ty, expected_mode  
+
 let apply_position env (expected_mode : expected_mode) sexp : apply_position =
   let fail err =
     raise (Error (sexp.pexp_loc, env, Bad_tail_annotation err))
@@ -3481,13 +3498,13 @@ let check_univars env kind exp ty_expected vars eff =
           instance_parameterized_poly vars exp.exp_type eff
         in
         unify_exp_types exp.exp_loc env exp_ty ty';
-        unify_effect_context_opts exp.exp_loc env exp_eff eff';
+        unify_effect_mode_option exp.exp_loc env exp_eff eff';
         exp_ty, vars, exp_eff
     | _ -> assert false
   in
   end_def ();
   generalize exp_ty;
-  Option.iter generalize_effect_context eff;
+  Option.iter generalize_effect_mode eff;
   List.iter generalize vars;
   let ty, complete = polyfy env exp_ty vars eff in
   if not complete then
@@ -3498,7 +3515,7 @@ let check_univars env kind exp ty_expected vars eff =
 let generalize_and_check_univars env kind exp ty_expected vars eff =
   generalize exp.exp_type;
   generalize ty_expected;
-  Option.iter generalize_effect_context eff;
+  Option.iter generalize_effect_mode eff;
   List.iter generalize vars;
   check_univars env kind exp ty_expected vars eff
 
@@ -6075,6 +6092,7 @@ ty_expected' ty_expected =
       (* apply optional arguments when expected type is "" *)
       (* we must be very careful about not breaking the semantics *)
       if !Clflags.principal then begin_def ();
+      let _, mode = instance_expected_scheme ty_expected' mode in
       let texp = type_exp env mode sarg in
       if !Clflags.principal then begin
           end_def ();
@@ -6182,9 +6200,15 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
                      mode_arg; wrapped_in_some }) ->
       let mode, _ = Alloc_mode.newvar_below mode_arg in
       let ty_arg', vars, eff = get_poly ty_arg in
+      if !Clflags.principal
+         && (repr ty_arg).level < Btype.generic_level
+         && is_effect_mode_interesting eff mode_arg then begin
+          Location.prerr_warning app_loc
+            (Warnings.Not_principal "Apply a function with an effect mode here");
+      end;
       let arg, out_mode =
         if vars = [] then begin
-            let ty_arg0', _, eff0 = get_poly ty_arg0 in
+            let ty_arg0', _, _ = get_poly ty_arg0 in
             let effect_mode, out_mode = argument_effect_mode mode eff in
             let expected_mode =
               mode_argument ~funct ~index ~position ~partial_app
@@ -6202,49 +6226,52 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
                 end
             in
             arg, out_mode
-          end else begin
-            if !Clflags.principal
-               && (repr ty_arg).level < Btype.generic_level then begin
-                let snap = Btype.snapshot () in
-                let really_poly =
-                  try
-                    unify env (newmono (newvar ())) ty_arg;
-                    false
-                  with Unify _ -> true
-                in
-                Btype.backtrack snap;
-                if really_poly then
-                  Location.prerr_warning app_loc
-                    (Warnings.Not_principal "applying a higher-rank function here");
-              end;
-            begin_def ();
-            let separate =
-              !Clflags.principal || Env.has_local_constraints env
-            in
-            if separate then begin_def ();
-            let vars, ty_arg', eff = instance_poly false vars ty_arg' eff in
-            if separate then begin
-                end_def ();
-                generalize_structure ty_arg';
-                Option.iter generalize_effect_context_structure eff;
-              end;
-            let ty_arg0', vars0, eff0 = get_poly ty_arg0 in
-            let vars0, ty_arg0', _ =
-              instance_poly false vars0 ty_arg0' eff0
-            in
-            List.iter2 (fun ty ty' -> unify_var env ty ty') vars vars0;
-            let arg =
-              type_argument env ?? sarg ty_arg' ty_arg0'
-            in
+        end else begin
+          if !Clflags.principal
+             && (repr ty_arg).level < Btype.generic_level then begin
+              let snap = Btype.snapshot () in
+              let really_poly =
+                try
+                  unify env (newmono (newvar ())) ty_arg;
+                  false
+                with Unify _ -> true
+              in
+              Btype.backtrack snap;
+              if really_poly then
+                Location.prerr_warning app_loc
+                  (Warnings.Not_principal "applying a higher-rank function here");
+          end;
+          begin_def ();
+          let separate =
+            !Clflags.principal || Env.has_local_constraints env
+          in
+          if separate then begin_def ();
+          let vars, ty_arg', eff = instance_poly false vars ty_arg' eff in
+          if separate then begin
             end_def ();
-            if maybe_expansive arg then begin
-              lower_contravariant env arg.exp_type;
-              lower_delayed_eff arg.exp_loc env arg.exp_eff;
-            end;
-            lower_current_eff arg.exp_loc env eff';
-            generalize_and_check_univars env "argument" arg ty_arg vars eff;
-            {arg with exp_type = instance arg.exp_type; exp_eff = eff' }
-          end
+            generalize_structure ty_arg';
+            Option.iter generalize_effect_mode_structure eff;
+          end;
+          let ty_arg0', vars0, eff0 = get_poly ty_arg0 in
+          let vars0, ty_arg0', _ =
+            instance_poly false vars0 ty_arg0' eff0
+          in
+          List.iter2 (fun ty ty' -> unify_var env ty ty') vars vars0;
+          let effect_mode, out_mode = argument_effect_mode mode eff in
+          let expected_mode =
+            mode_argument ~funct ~index ~position ~partial_app
+              mode effect_mode
+          in
+          let arg =
+            type_argument env expected_mode sarg ty_arg' ty_arg0'
+          in
+          end_def ();
+          if maybe_expansive arg then begin
+            lower_contravariant_poly_scheme env ty_arg' eff
+          end;
+          generalize_and_check_univars env "argument" arg ty_arg vars eff;
+          {arg with exp_type = instance arg.exp_type; exp_eff = eff' }
+        end
       in
       submode_effs arg.exp_loc env arg.exp_eff mode_arg;
       (lbl, Arg arg)

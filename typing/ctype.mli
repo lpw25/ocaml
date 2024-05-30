@@ -205,6 +205,7 @@ val generalize: type_expr -> unit
 val lower_contravariant: Env.t -> type_expr -> unit
         (* Lower level of type variables inside contravariant branches;
            to be used before generalize for expansive expressions *)
+val lower_contravariant_poly_scheme: Env.t -> type_expr -> effect_mode option -> unit
 val lower_effect_upper_bound: Env.t -> effect_upper_bound -> unit
 val generalize_structure: type_expr -> unit
         (* Same, but variables are only lowered to !current_level *)
@@ -216,6 +217,7 @@ val limited_generalize: type_expr -> type_expr -> unit
         (* Only generalize some part of the type
            Make the remaining of the type non-generalizable *)
 val generalize_effect_mode: effect_mode -> unit
+val generalize_effect_mode_structure: effect_mode -> unit
 val generalize_effect_upper_bound: effect_upper_bound -> unit
 val generalize_effect_upper_bound_structure: effect_upper_bound -> unit
 val generalize_inferred_effect_upper_bound: inferred_effect_upper_bound -> unit
@@ -253,6 +255,9 @@ val instance_scheme_pattern:
 val generic_instance_scheme_pattern:
   type_expr -> inferred_effect_upper_bound -> inferred_effect_upper_bound list
   -> type_expr * inferred_effect_upper_bound * inferred_effect_upper_bound list
+val instance_expected_scheme:
+  type_expr -> effect_lower_bound -> effect_lower_bound list
+  -> type_expr * effect_lower_bound * effect_lower_bound list
 val existential_name: string -> type_expr -> string
 val instance_constructor:
         ?in_pattern:Env.t ref * int ->

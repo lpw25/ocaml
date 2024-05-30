@@ -437,3 +437,5 @@ end
 val consume_inferred_effect_upper_bound : inferred_effect_upper_bound -> effect_upper_bound
 
 val approx_inferred_effect_upper_bound : inferred_effect_upper_bound -> effect_upper_bound
+
+val is_effect_mode_interesting : effect_mode option -> Alloc_mode.t -> bool

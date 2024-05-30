@@ -1382,3 +1382,19 @@ let consume_inferred_effect_upper_bound eff =
 let approx_inferred_effect_upper_bound eff =
   Effect.Inferred_upper_bound.approx
     ~join_local:Alloc_mode.binary_join ~top_local:Alloc_mode.local eff
+
+let is_effect_mode_interesting eff mode =
+  match eff with
+  | None -> false
+  | Some eff ->
+      let local_equal mode1 mode2 =
+        let snap = snapshot () in
+        let res =
+          match Alloc_mode.equate mode1 mode2 with
+          | Ok () -> true
+          | Error () -> false
+        in
+        backtrack snap;
+        res
+      in
+      Effect.Mode.is_unadjusted ~local_equal mode

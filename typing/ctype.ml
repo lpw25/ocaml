@@ -853,6 +853,11 @@ let generalize_inferred_effect_upper_bound_structure eff =
   let level = !current_level in
   iter_inferred_effect_upper_bound (generalize_structure level) eff
 
+let generalize_effect_mode_structure eff =
+  simple_abbrevs := Mnil;
+  let level = !current_level in
+  iter_effect_mode (generalize_structure level) eff
+
 let generalize_structure ty =
   simple_abbrevs := Mnil;
   generalize_structure !current_level ty
@@ -1084,6 +1089,13 @@ let rec lower_contravariant env var_level visited contra ty =
 let lower_contravariant env ty =
   simple_abbrevs := Mnil;
   lower_contravariant env !nongen_level (Hashtbl.create 7) false ty
+
+let lower_contravariant_poly_scheme env ty eff =
+  simple_abbrevs := Mnil;
+  let tbl = Hashtbl.create 7 in
+  lower_contravariant env !nongen_level tbl false ty;
+  iter_effect_mode_option
+    (lower_contravariant env !nongen_level tbl false) eff 
 
 let lower_effect_upper_bound env eff =
   iter_effect_upper_bound (update_level env !nongen_level) eff
@@ -1415,6 +1427,16 @@ let instance_poly_scheme sch eff =
       let sch = copy scope sch in
       let eff = copy_effect_mode_option (copy scope) eff in
       sch, eff)
+
+let instance_expected_scheme sch eff extra_effs =
+  For_copy.with_scope
+    (fun scope ->
+      let sch = copy scope sch in
+      let eff = copy_effect_lower_bound (copy scope) eff in
+      let extra_effs =
+        List.map (copy_effect_lower_bound (copy scope)) extra_effs
+      in
+      sch, eff, extra_effs)
 
 let generic_instance sch =
   let old = !current_level in
