@@ -547,6 +547,9 @@ let copy_effect_upper_bound f eff =
 let copy_inferred_effect_upper_bound f eff =
   Effect.Inferred_upper_bound.copy_types f eff
 
+let copy_effect_lower_bound f eff =
+  Effect.Lower_bound.copy_types f eff
+
 let rec copy_type_desc ?(keep_names=false) f = function
     Tvar _ as ty        -> if keep_names then ty else Tvar None
   | Tarrow (p, ty1, ty2, c)-> Tarrow (p, f ty1, f ty2, copy_commu c)
@@ -1397,4 +1400,4 @@ let is_effect_mode_interesting eff mode =
         backtrack snap;
         res
       in
-      Effect.Mode.is_unadjusted ~local_equal mode
+      Effect.Mode.is_unadjusted ~local_equal eff mode

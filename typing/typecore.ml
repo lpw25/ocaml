@@ -342,11 +342,11 @@ let mode_tailcall_argument mode effect_mode =
     effect_mode;
     tuple_modes = [] }
 
-let mode_partial_application expected_mode =
+let mode_partial_application alloc_mode =
   { position = Nontail;
     escaping_context = Some Partial_application;
-    mode = Value_mode.regional_to_global expected_mode.mode;
-    effect_mode = expected_mode.effect_mode;
+    mode = Value_mode.of_alloc alloc_mode;
+    effect_mode = Effect.Lower_bound.unadjusted alloc_mode;
     tuple_modes = [] }
 
 let mode_trywith expected_mode =
@@ -368,7 +368,7 @@ let mode_tuple mode effect_mode tuple_modes =
 
 let mode_argument ~funct ~index ~position ~partial_app alloc_mode effect_mode =
   let vmode = Value_mode.of_alloc alloc_mode in
-  if partial_app then mode_nontail vmode
+  if partial_app then mode_nontail vmode effect_mode
   else match funct.exp_desc, index, (position : apply_position) with
   | Texp_ident (_, _, {val_kind =
       Val_prim {Primitive.prim_name = ("%sequor"|"%sequand")}},
@@ -407,7 +407,8 @@ let argument_effect_mode mode eff =
         let out_mode = Alloc_mode.join [mode; eff_mode] in
         effect_mode, out_mode
       end else begin
-        eff, mode
+        let effect_mode = Effect.Lower_bound.mode eff in
+        effect_mode, mode
       end
 
 let rec submode_meet_tuple_modes m1 = function
@@ -428,6 +429,13 @@ let submode ~loc ~env mode expected_mode =
   | Error reason ->
       let context = expected_mode.escaping_context in
       raise (Error(loc, env, Local_value_escapes(reason, context)))
+
+let submode_alloc ~loc ~env alloc_mode expected_alloc_mode =
+  match Btype.Alloc_mode.submode alloc_mode expected_alloc_mode with
+  | Ok () -> ()
+  | Error reason ->
+      let context = expected_mode.escaping_context in
+      raise (Error(loc, env, Local_value_escapes(reason, context)))  
 
 let escape ~loc ~env m =
   submode ~loc ~env m mode_escaping
@@ -2883,12 +2891,14 @@ type untyped_apply_arg =
         mode_arg : Alloc_mode.t; }
   | Eliminated_optional_arg of
       { mode_fun: Alloc_mode.t;
+        eff_fun: effect_upper_bound;
         ty_arg : type_expr;
         mode_arg : Alloc_mode.t;
         level: int;}
 
 type untyped_omitted_param =
   { mode_fun: Alloc_mode.t;
+    eff_fun: effect_upper_bound;
     ty_arg : type_expr;
     mode_arg : Alloc_mode.t;
     level: int; }
@@ -2910,22 +2920,23 @@ let remaining_function_type ty_ret mode_ret rev_args =
              let closed_args = mode_arg :: closed_args in
              (ty_ret, mode_ret, closed_args)
          | Arg (Eliminated_optional_arg
-                  { mode_fun; ty_arg; mode_arg; level })
-         | Omitted { mode_fun; ty_arg; mode_arg; level } ->
+                  { mode_fun; eff_fun; ty_arg; mode_arg; level })
+         | Omitted { mode_fun; eff_fun; ty_arg; mode_arg; level } ->
              let arrow_desc = lbl, mode_arg, mode_ret in
              let ty_ret =
                newty2 level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, Cok))
              in
+             let mode_eff_fun = Alloc_mode.newvar_below_eff eff_fun in
              let mode_ret =
-               Alloc_mode.join (mode_fun :: closed_args)
+               Alloc_mode.join (mode_fun :: mode_eff_fun :: closed_args)
              in
              (ty_ret, mode_ret, closed_args))
       (ty_ret, mode_ret, []) rev_args
   in
   ty_ret
 
-let collect_unknown_apply_args env funct ty_fun mode_fun rev_args sargs =
+let collect_unknown_apply_args env funct ty_fun mode_fun eff_fun rev_args sargs =
   let labels_match ~param ~arg =
     param = arg
     || !Clflags.classic && arg = Nolabel && not (is_optional param)
@@ -2934,9 +2945,9 @@ let collect_unknown_apply_args env funct ty_fun mode_fun rev_args sargs =
     let ls, tvar = list_labels env ty_fun in
     tvar || List.mem l ls
   in
-  let rec loop ty_fun mode_fun rev_args sargs =
+  let rec loop ty_fun mode_fun eff_fun rev_args sargs =
     match sargs with
-    | [] -> ty_fun, mode_fun, List.rev rev_args
+    | [] -> ty_fun, mode_fun, eff_fun, List.rev rev_args
     | (lbl, sarg) :: rest ->
         let (mode_arg, ty_arg_mono, mode_res, ty_res) =
           let ty_fun = expand_head env ty_fun in
@@ -3064,13 +3075,12 @@ let collect_apply_args env funct ignore_labels
   loop ty_fun ty_fun0 mode_fun [] sargs
 
 let type_omitted_parameters expected_mode env ty_ret mode_ret args =
-  let ty_ret, mode_ret, _, _, args, eff =
+  let ty_ret, mode_ret, _, _, args =
     List.fold_left
       (fun (ty_ret, mode_ret, open_args, closed_args, args) (lbl, arg) ->
          match arg with
-         | Arg (exp, eff) ->
-             let mode = join_mode_effs exp.exp_mode eff in
-             let open_args = (mode, exp) :: open_args in
+         | Arg (exp, out_mode) ->
+             let open_args = (out_mode, exp.exp_loc) :: open_args in
              let args = (lbl, Arg exp) :: args in
              (ty_ret, mode_ret, open_args, closed_args, args)
          | Omitted { mode_fun; ty_arg; mode_arg; level } ->
@@ -3081,10 +3091,11 @@ let type_omitted_parameters expected_mode env ty_ret mode_ret args =
              in
              let new_closed_args =
                List.map
-                 (fun (marg, exp) ->
-                    submode ~loc:exp.exp_loc ~env
-                      marg (mode_partial_application expected_mode);
-                    Value_mode.regional_to_local_alloc marg)
+                 (fun (marg, loc) ->
+                    submode ~loc ~env
+                      (Value_mode.of_alloc marg)
+                      (mode_partial_application expected_mode);
+                    marg)
                  open_args
              in
              let closed_args = new_closed_args @ closed_args in
@@ -3093,10 +3104,10 @@ let type_omitted_parameters expected_mode env ty_ret mode_ret args =
              register_allocation_mode mode_closure;
              let arg = Omitted { mode_closure; mode_arg; mode_ret } in
              let args = (lbl, arg) :: args in
-             (ty_ret, mode_closure, open_args, closed_args, args, eff))
-      (ty_ret, mode_ret, [], [], [], no_effect) (List.rev args)
+             (ty_ret, mode_closure, open_args, closed_args, args))
+      (ty_ret, mode_ret, [], [], []) (List.rev args)
   in
-  ty_ret, mode_ret, args, eff
+  ty_ret, mode_ret, args
 
 
 (* Generalization criterion for expressions *)
@@ -3498,7 +3509,7 @@ let check_univars env kind exp ty_expected vars eff =
           instance_parameterized_poly vars exp.exp_type eff
         in
         unify_exp_types exp.exp_loc env exp_ty ty';
-        unify_effect_mode_option exp.exp_loc env exp_eff eff';
+        unify_effect_mode_option env exp_eff eff';
         exp_ty, vars, exp_eff
     | _ -> assert false
   in
@@ -3698,9 +3709,11 @@ let cases_effect_handlers cases =
             let hash = Btype.hash_variant name in
             match Hashtbl.find_opt ht hash with
             | Some name' ->
-                if String.equal name name' then acc
-                else
-                  raise (Error(loc, env, Handler_name_clash(name, name')))
+                if not (String.equal name name') then
+                  raise
+                    (Error(p.ppat_loc, Env.empty,
+                           Handler_name_clash(name, name')));
+                acc
             | None ->
                 Hashtbl.add ht hash name;
                 name :: acc
@@ -3708,7 +3721,7 @@ let cases_effect_handlers cases =
   in
   let rev_handlers =
     List.fold_left
-      (fun (seen, acc) {pc_lhs; _} -> add_pattern seen acc pc_lhs)
+      (fun acc {pc_lhs; _} -> add_pattern acc pc_lhs)
       [] cases
   in
   List.rev_map (fun name -> name, newvar ()) rev_handlers
@@ -3844,14 +3857,9 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         unify_exp env (re exp) (instance ty_expected));
     exp
   in
-  let ruem ~mode ~expected_mode exp =
-    let exp = rue exp in
-    submode ~env ~loc:exp.exp_loc mode expected_mode;
-    exp
-  in
   match sexp.pexp_desc with
   | Pexp_ident lid ->
-      let path, mode, desc, kind = type_ident env ~recarg lid in
+      let path, mode, desc, kind, eff = type_ident env ~recarg lid in
       let exp_desc =
         match desc.val_kind with
         | Val_ivar (_, cl_num) ->
@@ -3871,11 +3879,11 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         | _ ->
             Texp_ident(path, lid, desc, kind)
       in
-      ruem ~mode ~expected_mode {
+      submode ~env ~loc mode expected_mode;
+      rue {
           exp_desc; exp_loc = loc; exp_extra = [];
           exp_type = desc.val_type;
-          exp_eff = delayed_eff desc.val_eff;
-          exp_mode = expected_mode.mode;
+          exp_mode = mode;
           exp_attributes = sexp.pexp_attributes;
           exp_env = env }
   | Pexp_constant(Pconst_string (str, _, _) as cst) ->
@@ -4173,9 +4181,11 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
         | _ ->
             funct, sargs
       in
+      let alloc_mode = 
       begin_def ();
       let (args, ty_res, position, eff) =
-        type_application env loc expected_mode position funct funct_mode sargs
+        type_application env loc expected_mode.mode position
+          funct funct_mode sargs
       in
       end_def ();
       unify_var env (newvar()) funct.exp_type;
@@ -5494,8 +5504,8 @@ env (expected_mode : expected_mode) sexp ty_expected_explained =
            exp_attributes = sexp.pexp_attributes;
            exp_env = env }
 
-and type_ident env ?(recarg=Rejected) lid =
-  let (path, desc, mode) = Env.lookup_value ~loc:lid.loc lid.txt env in
+and type_ident env ~expected_mode ?(recarg=Rejected) lid =
+  let (path, desc, mode, eff) = Env.lookup_value ~loc:lid.loc lid.txt env in
   let is_recarg =
     match (repr desc.val_type).desc with
     | Tconstr(p, _, _) -> Path.is_constructor_typath p
@@ -6273,18 +6283,17 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
           {arg with exp_type = instance arg.exp_type; exp_eff = eff' }
         end
       in
-      submode_effs arg.exp_loc env arg.exp_eff mode_arg;
-      (lbl, Arg arg)
+      (lbl, Arg(arg, out_mode))
   | Arg (Eliminated_optional_arg { ty_arg; _ }) ->
       let arg =
         option_none env (instance ty_arg)
           Value_mode.global Location.none
       in
-      (lbl, Arg arg)
+      (lbl, Arg(arg, Value_mode.global))
   | Omitted _ as arg -> (lbl, arg)
 
-and type_application env app_loc expected_mode position
-    funct funct_mode sargs =
+and type_application env app_loc alloc_mode position
+    funct funct_mode funct_eff sargs =
   let is_ignore funct =
     is_prim ~name:"%ignore" funct &&
       (try
@@ -6299,14 +6308,13 @@ and type_application env app_loc expected_mode position
       filter_arrow_mono env (instance funct.exp_type) Nolabel
     in
     submode ~loc:app_loc ~env
-      (Value_mode.of_alloc mres) expected_mode;
+      (Value_mode.of_alloc mres) alloc_mode;
+    let arg_eff = Effect.Lower_bound.unadjusted marg in
     let marg =
-      mode_argument ~funct ~index:0 ~position ~partial_app:false marg
+      mode_argument ~funct ~index:0 ~position ~partial_app:false marg arg_eff
     in
     let exp = type_expect env marg sarg (mk_expected ty_arg) in
-    let funct_eff = expedite_eff funct.exp_loc env funct.exp_eff in
-    let arg_eff = expedite_eff exp.exp_loc env exp.exp_eff in
-    let eff = join_effs funct.exp_loc env funct_eff arg_eff in
+    let eff = Effect.Upper_bound.unadjusted mres in
     check_partial_application false exp;
     ([Nolabel, Arg exp], ty_res, position, eff)
   | _ ->
@@ -6328,12 +6336,10 @@ and type_application env app_loc expected_mode position
                      true)
           end
       in
-      let funct_mode = join_mode_effs funct_mode funct.exp_eff in
       let funct_mode = Value_mode.regional_to_local_alloc funct_mode in
-      let funct_eff = expedite_eff funct.exp_loc env funct.exp_eff in
       let ty_ret, mode_ret, args =
         collect_apply_args env funct ignore_labels ty (instance ty)
-          funct_mode sargs
+          funct_mode funct_eff sargs
       in
       let partial_app = is_partial_apply args in
       let position = if partial_app then Default else position in
@@ -6342,13 +6348,12 @@ and type_application env app_loc expected_mode position
             type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app arg)
           args
       in
-      let ty_ret, mode_ret, args, eff =
+      let ty_ret, mode_ret, args =
         type_omitted_parameters expected_mode env
           ty_ret mode_ret args
       in
-      let eff = join_effs funct.exp_loc env funct_eff eff in
       submode ~loc:app_loc ~env
-        (Value_mode.of_alloc mode_ret) expected_mode;
+        (Value_mode.of_alloc mode_ret) alloc_mode;      
       args, ty_ret, position, eff
 
 and type_construct env (expected_mode : expected_mode) loc lid sarg
@@ -6540,7 +6545,7 @@ and type_cases
     : type k . k pattern_category
       -> ?in_function:_ -> _ -> _ -> _ -> _ -> _ -> _ -> _ -> _ -> _
       -> Parsetree.case list
-      -> k case list * partial * expr_effect_context
+      -> k case list * partial
   = fun category ?in_function env pmode emode
         ty_arg eff_arg handlers ty_res_explained partial_flag loc caselist ->
   (* ty_arg is _fully_ generalized *)

@@ -1086,16 +1086,16 @@ let rec lower_contravariant env var_level visited contra ty =
         iter_type_expr (lower_rec contra) ty
   end
 
-let lower_contravariant env ty =
-  simple_abbrevs := Mnil;
-  lower_contravariant env !nongen_level (Hashtbl.create 7) false ty
-
 let lower_contravariant_poly_scheme env ty eff =
   simple_abbrevs := Mnil;
   let tbl = Hashtbl.create 7 in
   lower_contravariant env !nongen_level tbl false ty;
   iter_effect_mode_option
     (lower_contravariant env !nongen_level tbl false) eff 
+
+let lower_contravariant env ty =
+  simple_abbrevs := Mnil;
+  lower_contravariant env !nongen_level (Hashtbl.create 7) false ty
 
 let lower_effect_upper_bound env eff =
   iter_effect_upper_bound (update_level env !nongen_level) eff

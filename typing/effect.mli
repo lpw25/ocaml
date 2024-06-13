@@ -764,6 +764,8 @@ and Lower_bound : sig
 
   val fold_types : ('a -> 'ty -> 'a) -> 'a -> ('ty, 'lcl) t -> 'a
 
+  val copy_types : ('ty -> 'ty) -> ('ty, 'lcl) t -> ('ty, 'lcl) t
+
 end
 
 and Env : sig

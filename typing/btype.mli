@@ -175,6 +175,8 @@ val copy_effect_upper_bound:
 val copy_inferred_effect_upper_bound:
   (type_expr -> type_expr) ->
   inferred_effect_upper_bound -> inferred_effect_upper_bound
+val copy_effect_lower_bound:
+  (type_expr -> type_expr) -> effect_lower_bound -> effect_lower_bound
 
 
 module For_copy : sig
