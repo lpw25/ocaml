@@ -2927,9 +2927,9 @@ let remaining_function_type ty_ret mode_ret rev_args =
                newty2 level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, Cok))
              in
-             let mode_eff_fun = Alloc_mode.newvar_below_eff eff_fun in
              let mode_ret =
-               Alloc_mode.join (mode_fun :: mode_eff_fun :: closed_args)
+               Alloc_mode.join_with_eff eff_fun
+                 (Alloc_mode.join (mode_fun :: closed_args))
              in
              (ty_ret, mode_ret, closed_args))
       (ty_ret, mode_ret, []) rev_args
@@ -2972,7 +2972,7 @@ let collect_unknown_apply_args env funct ty_fun mode_fun eff_fun rev_args sargs 
             (mode_arg, get_mono ty_arg, mode_res, ty_res)
         | td ->
             let ty_fun = match td with Tarrow _ -> newty td | _ -> ty_fun in
-            let ty_res = remaining_function_type ty_fun mode_fun rev_args in
+            let ty_res = remaining_function_type ty_fun mode_fun eff_fun rev_args in
             match ty_res.desc with
             | Tarrow _ ->
                 if !Clflags.classic || not (has_label lbl ty_fun) then
@@ -2987,12 +2987,12 @@ let collect_unknown_apply_args env funct ty_fun mode_fun eff_fun rev_args sargs 
     let arg = Unknown_arg { sarg; ty_arg_mono; mode_arg; } in
     loop ty_res mode_res ((lbl, Arg arg) :: rev_args) rest
   in
-  loop ty_fun mode_fun rev_args sargs
+  loop ty_fun mode_fun eff_fun rev_args sargs
 
 let collect_apply_args env funct ignore_labels
-      ty_fun ty_fun0 mode_fun sargs =
+      ty_fun ty_fun0 mode_fun eff_fun sargs =
   let warned = ref false in
-  let rec loop ty_fun ty_fun0 mode_fun rev_args sargs =
+  let rec loop ty_fun ty_fun0 mode_fun eff_fun rev_args sargs =
     match expand_head env ty_fun, expand_head env ty_fun0 with
     | {desc=Tarrow (ad, ty_arg, ty_ret, com); level=lv} as ty_fun',
       {desc=Tarrow (_, ty_arg0, ty_ret0, _)}
@@ -3020,7 +3020,7 @@ let collect_apply_args env funct ignore_labels
             (Warnings.Non_principal_labels "eliminated optional argument");
           Arg
             (Eliminated_optional_arg
-               { mode_fun; ty_arg; mode_arg; level = lv })
+               { mode_fun; eff_fun; ty_arg; mode_arg; level = lv })
         in
         let remaining_sargs, arg =
           if ignore_labels then begin
@@ -3063,44 +3063,54 @@ let collect_apply_args env funct ignore_labels
                      it. *)
                   may_warn funct.exp_loc
                     (Warnings.Non_principal_labels "commuted an argument");
-                  Omitted { mode_fun; ty_arg; mode_arg; level = lv }
+                  Omitted { mode_fun; eff_fun; ty_arg; mode_arg; level = lv }
                 end
         in
-        loop ty_ret ty_ret0 mode_ret ((l, arg) :: rev_args) remaining_sargs
+        let eff_ret = Effect.Lower_bound.unadjusted mode_ret in
+        loop ty_ret ty_ret0 mode_ret eff_ret ((l, arg) :: rev_args) remaining_sargs
     | _ ->
         (* We're not looking at a *known* function type anymore, or there are no
            arguments left. *)
-        collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
+        collect_unknown_apply_args env funct ty_fun0 mode_fun
+          eff_fun rev_args sargs
   in
-  loop ty_fun ty_fun0 mode_fun [] sargs
+  loop ty_fun ty_fun0 mode_fun eff_fun [] sargs
 
 let type_omitted_parameters expected_mode env ty_ret mode_ret args =
   let ty_ret, mode_ret, _, _, args =
     List.fold_left
-      (fun (ty_ret, mode_ret, open_args, closed_args, args) (lbl, arg) ->
+      (fun (ty_ret, mode_ret, eff_ret, open_arg_modes, open_arg_effs,
+            closed_arg_modes, closed_arg_effs, args) (lbl, arg) ->
          match arg with
-         | Arg (exp, out_mode) ->
-             let open_args = (out_mode, exp.exp_loc) :: open_args in
+         | Arg (exp, mode_arg, eff_arg) ->
+             let open_arg_modes = (mode_arg, exp.exp_loc) :: open_arg_modes in
+             let open_arg_effs = eff_arg :: open_arg_effs in
              let args = (lbl, Arg exp) :: args in
-             (ty_ret, mode_ret, open_args, closed_args, args)
-         | Omitted { mode_fun; ty_arg; mode_arg; level } ->
-             let arrow_desc = (lbl, mode_arg, mode_ret) in
+             (ty_ret, mode_ret, open_arg_modes, open_arg_effs,
+              closed_arg_modes, closed_arg_effs, args)
+         | Omitted { mode_fun; eff_fun; ty_arg; mode_arg; level } ->
+             let ret_mode = Alloc_mode.join_with_eff mode_ret eff_ret in
+             let arrow_desc = (lbl, mode_arg, ret_mode) in
              let ty_ret =
                newty2 level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, Cok))
              in
-             let new_closed_args =
+             let new_closed_arg_modes =
                List.map
-                 (fun (marg, loc) ->
+                 (fun (arg_mode, loc) ->
                     submode ~loc ~env
-                      (Value_mode.of_alloc marg)
+                      (Value_mode.of_alloc arg_mode)
                       (mode_partial_application expected_mode);
                     marg)
-                 open_args
+                 open_arg_modes
              in
-             let closed_args = new_closed_args @ closed_args in
-             let open_args = [] in
-             let mode_closure = Alloc_mode.join (mode_fun :: closed_args) in
+             let closed_arg_modes = new_closed_arg_mode @ closed_arg_modes in
+             let closed_arg_effs = open_arg_effs @ closed_arg_effs in
+             let open_arg_modes = [] in
+             let open_arg_effs = [] in
+             let mode_closure =
+                 Alloc_mode.join (mode_fun :: closed_arg_modes)
+             in
              register_allocation_mode mode_closure;
              let arg = Omitted { mode_closure; mode_arg; mode_ret } in
              let args = (lbl, arg) :: args in
@@ -6196,9 +6206,10 @@ and type_apply_arg env ~app_loc ~funct ~index ~position ~partial_app (lbl, arg) 
   match arg with
   | Arg (Unknown_arg { sarg; ty_arg_mono; mode_arg }) ->
       let mode, _ = Alloc_mode.newvar_below mode_arg in
-      let effect_mode = Effect.Lower_bound.unadjusted mode in
+      let effect_var = Effect.Lower_bound.Var.create Alloc_mode.global in
+      let effect_mode = 
       let expected_mode =
-        mode_argument ~funct ~index ~position ~partial_app mode effect_mode
+        mode_argument ~funct ~index ~position ~partial_app mode
       in
       let arg =
         type_expect env expected_mode sarg (mk_expected ty_arg_mono)

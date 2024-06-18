@@ -696,12 +696,21 @@ and Lower_bound : sig
 
     type ('ty, 'lcl) t
 
-    val create : 'lcl -> ('ty, 'lcl) t
-    (** [create l] creates a fresh variable with [Mode.unadjusted l] as
-        a lower bound. *)
+    val create : unit -> ('ty, 'lcl) t
+    (** [create unit] creates a fresh variable. *)
 
-    val bound : ('ty, 'lcl) t -> 'lcl
-    (** [bound (create l)] is [l]. *)
+    val create_usable : unit -> ('ty, 'lcl) t
+    (** [create_usable unit] creates a fresh variable that can only stand for
+        modes for which [Mode.is_usable] is true. This allows us to get some
+        errors earlier. *)
+
+    val create_with_bound : 'lcl -> ('ty, 'lcl) t
+    (** [create_with_bound l] creates a fresh variable with [Mode.unadjusted l]
+        as a lower bound. *)
+
+    val bound : ('ty, 'lcl) t -> ('ty, 'lcl) Mode.t
+    (** [bound t] is [Mode.unadjusted l] if [t] is [create_with_bound l], otherwise
+        it is [Mode.unused]. *)
 
     val consume : ('ty, 'lcl) t -> ('ty, 'lcl) Upper_bound.t
     (** [consumes t] returns the value of [t] and marks it as
